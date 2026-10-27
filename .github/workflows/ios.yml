@@ -17,11 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Select newest Xcode
-        run: |
-          XCODE=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
-          sudo xcode-select -s "$XCODE"
-          xcodebuild -version
+      # The runner's default Xcode is the one that has simulators installed alongside it.
+      - name: Show Xcode version
+        run: xcodebuild -version
 
       - name: Generate Xcode project
         run: |
@@ -32,9 +30,15 @@ jobs:
         run: |
           set -o pipefail
           # Newest iPhone simulator this Xcode can run.
-          DEVICE=$(xcodebuild -showdestinations -project Ehru.xcodeproj -scheme Ehru \
+          DESTINATIONS=$(xcodebuild -showdestinations -project Ehru.xcodeproj -scheme Ehru)
+          DEVICE=$(echo "$DESTINATIONS" \
             | grep 'platform:iOS Simulator' | grep 'name:iPhone' \
-            | sed -E 's/.*id:([^,]+), OS:([^,]+),.*/\2 \1/' | sort -V | tail -1 | awk '{print $2}')
+            | sed -E 's/.*id:([^,]+), OS:([^,]+),.*/\2 \1/' | sort -V | tail -1 | awk '{print $2}' || true)
+          if [ -z "$DEVICE" ]; then
+            echo "No iPhone simulator available. Destinations were:"
+            echo "$DESTINATIONS"
+            exit 1
+          fi
           echo "Testing on simulator $DEVICE"
           xcodebuild test -project Ehru.xcodeproj -scheme Ehru \
             -destination "id=$DEVICE" CODE_SIGNING_ALLOWED=NO
