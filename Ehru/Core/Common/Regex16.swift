@@ -34,6 +34,18 @@ struct Regex16: @unchecked Sendable {
         )
     }
 
+    /// Kotlin's `split(regex)`: the pieces between matches, empty ones included.
+    func split(_ text: String) -> [String] {
+        var pieces: [String] = []
+        var start = 0
+        for match in matches(in: text) {
+            pieces.append(text.substring16(start, match.range.location))
+            start = match.range.location + match.range.length
+        }
+        pieces.append(text.substring16(from: start))
+        return pieces
+    }
+
     /// The whole text matches (Kotlin's `matches`).
     func matchesEntirely(_ text: String) -> Bool {
         guard let match = firstMatch(in: text) else { return false }

@@ -44,3 +44,8 @@ extension Comparable {
         min(max(self, lower), upper)
     }
 }
+
+/// A weak reference that can cross into concurrent code (for callbacks set up during init).
+final class WeakBox<Value: AnyObject>: @unchecked Sendable {
+    weak var value: Value?
+}

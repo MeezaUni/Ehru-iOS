@@ -107,7 +107,12 @@ final class SmartMixEngineTests: XCTestCase {
     }
 
     func testEveryMixHasNoDuplicatesAndIsDeterministic() {
-        let history = (Int64(1)...45).map { played($0, Int($0 % 6 + 1), daysAgo: Int($0 * 7 % 150)) }
+        var history: [MonthlyPlays] = []
+        for id in Int64(1)...45 {
+            let count = Int(id % 6) + 1
+            let daysAgo = Int(id * 7 % 150)
+            history.append(played(id, count, daysAgo: daysAgo))
+        }
         let first = SmartMixEngine.build(SmartMixEngine.profile(tracks: library, plays: history, now: now), taste: nil)
         var generator = SeededGenerator(state: 4)
         let again = SmartMixEngine.build(

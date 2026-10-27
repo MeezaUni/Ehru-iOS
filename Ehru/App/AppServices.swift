@@ -9,6 +9,8 @@ final class AppServices {
     let library: LibraryStore
     let transitions: TransitionSettingsStore
     let player: PlayerController
+    let vybe: VybeStore
+    let mixes: MixStore
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
@@ -16,5 +18,7 @@ final class AppServices {
         library = LibraryStore(database: database)
         transitions = TransitionSettingsStore()
         player = PlayerController(database: database, transitions: transitions)
+        vybe = VybeStore(database: database, player: player)
+        mixes = MixStore(database: database, vybe: vybe.engine)
     }
 }
