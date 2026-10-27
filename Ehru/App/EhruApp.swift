@@ -2,14 +2,12 @@ import SwiftUI
 
 @main
 struct EhruApp: App {
-    @State private var library = LibraryStore()
-    @State private var player = PlayerController()
+    @State private var services = AppServices.shared
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
-                .environment(library)
-                .environment(player)
+            RootView()
+                .environment(services.library)
         }
     }
 }

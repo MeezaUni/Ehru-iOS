@@ -32,7 +32,7 @@ final class KernelAudioUnit: AUAudioUnit {
     /// An AVAudioUnit node running [kernel], ready to attach to an engine.
     static func make(kernel: RenderKernel) async throws -> AVAudioUnit {
         _ = registration
-        let unit = try await AVAudioUnit.instantiate(with: componentDescription, options: [.loadInProcess])
+        let unit = try await AVAudioUnit.instantiate(with: componentDescription, options: [])
         (unit.auAudioUnit as? KernelAudioUnit)?.holder.kernel = kernel
         return unit
     }
