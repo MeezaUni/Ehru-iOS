@@ -15,6 +15,7 @@ final class AppServices {
     let search: SearchStore
     let router: AppRouter
     let settings: AppSettings
+    let sound: SoundStore
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
@@ -27,6 +28,7 @@ final class AppServices {
         actions = LibraryActions(database: database, player: player, mixes: mixes)
         search = SearchStore(library: library)
         settings = AppSettings()
+        sound = SoundStore(kernel: player.engine.eqKernel)
         router = AppRouter()
         router.section = settings.startSection
     }

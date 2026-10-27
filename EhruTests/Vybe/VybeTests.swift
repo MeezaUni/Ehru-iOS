@@ -318,19 +318,18 @@ final class VybeBasicsTests: XCTestCase {
     }
 }
 
-/// Apple's on-device sentence model with real descriptions: checks it ranks sensibly and prints
-/// the scores, which is how VYBE's "weak result" threshold gets calibrated for it.
+/// Apple's on-device models with real descriptions: checks they rank sensibly and prints the
+/// scores, which is how VYBE's "weak result" threshold gets calibrated for them.
 final class SentenceEmbedderTests: XCTestCase {
-    func testTheBuiltInModelRanksByMeaning() throws {
-        let embedder: SentenceEmbedder
-        do { embedder = try SentenceEmbedder() } catch { throw XCTSkip("No sentence model here: \(error)") }
-        let songs = [
-            SongText(songId: 1, title: "A", artist: "Night Drive", album: "", genre: "Synthwave; Darkwave", bpm: 92),
-            SongText(songId: 2, title: "B", artist: "Gym Crew", album: "", genre: "EDM; Hardstyle", bpm: 150),
-            SongText(songId: 3, title: "C", artist: "Quiet Hands", album: "", genre: "Ambient; Piano", bpm: 70),
-            SongText(songId: 4, title: "D", artist: "MC Flow", album: "", genre: "Hip-Hop; Trap", bpm: 140),
-            SongText(songId: 5, title: "E", artist: "Someone", album: ""),
-        ]
+    private let songs = [
+        SongText(songId: 1, title: "A", artist: "Night Drive", album: "", genre: "Synthwave; Darkwave", bpm: 92),
+        SongText(songId: 2, title: "B", artist: "Gym Crew", album: "", genre: "EDM; Hardstyle", bpm: 150),
+        SongText(songId: 3, title: "C", artist: "Quiet Hands", album: "", genre: "Ambient; Piano", bpm: 70),
+        SongText(songId: 4, title: "D", artist: "MC Flow", album: "", genre: "Hip-Hop; Trap", bpm: 140),
+        SongText(songId: 5, title: "E", artist: "Someone", album: ""),
+    ]
+
+    private func calibrate(_ embedder: SentenceEmbedder) throws {
         let vectors = try songs.map { try embedder.embed(VybeText.describe($0), role: .document) }
         for query in ["calm music to sleep", "high energy workout", "hip hop", "sad but beautiful"] {
             let q = try embedder.embed(query, role: .query)
@@ -341,5 +340,18 @@ final class SentenceEmbedderTests: XCTestCase {
         let sleep = try embedder.embed("calm music to sleep", role: .query)
         let ranked = VybeRanker.rank(sleep, songs: zip(songs, vectors).map { EmbeddedSong(songId: $0.songId, vector: $1) }, limit: 5)
         XCTAssertEqual(5, ranked.count)
+    }
+
+    func testTheSentenceModelRanksByMeaning() throws {
+        let embedder = try SentenceEmbedder()
+        guard embedder.usesSentenceModel else { throw XCTSkip("No sentence model here; the word model stands in") }
+        try calibrate(embedder)
+    }
+
+    func testTheWordModelFallbackWorks() throws {
+        let embedder: SentenceEmbedder
+        do { embedder = try SentenceEmbedder(allowSentence: false) } catch { throw XCTSkip("No word model here: \(error)") }
+        XCTAssertFalse(embedder.usesSentenceModel)
+        try calibrate(embedder)
     }
 }

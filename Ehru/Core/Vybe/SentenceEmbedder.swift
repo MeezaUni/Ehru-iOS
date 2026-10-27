@@ -1,10 +1,13 @@
 import Foundation
 import NaturalLanguage
 
-/// VYBE's embedder on iOS: Apple's built-in sentence embedding (NaturalLanguage), which ships with
-/// the OS and runs entirely on the device. Android runs EmbeddingGemma through MediaPipe, which has
-/// no matching iOS runtime; the rest of VYBE (descriptions, routing, boosts, index) is the same, so
+/// VYBE's embedder on iOS: Apple's on-device NaturalLanguage embeddings, which ship with the OS
+/// and run entirely on the device. Android runs EmbeddingGemma through MediaPipe, which has no
+/// matching iOS runtime; the rest of VYBE (descriptions, routing, boosts, index) is the same, so
 /// only the vectors (and hence the index file) differ. Query and document need no prompt prefixes.
+///
+/// Prefers the sentence embedding; where the OS doesn't have it, falls back to the mean of the
+/// word vectors of the text's words (built into every iOS version this app supports).
 final class SentenceEmbedder: TextEmbedder {
     enum Failure: LocalizedError {
         case unavailable
@@ -12,27 +15,66 @@ final class SentenceEmbedder: TextEmbedder {
 
         var errorDescription: String? {
             switch self {
-            case .unavailable: "This device has no on-device sentence model for English"
+            case .unavailable: "This device has no on-device English language model"
             case .noVector: "The model returned no embedding"
             }
         }
     }
 
-    private let embedding: NLEmbedding
+    private enum Mode {
+        case sentence(NLEmbedding)
+        case words(NLEmbedding)
+    }
+
+    private let mode: Mode
     let modelId: String
     let dimension: Int
-    /// Calibrated for EmbeddingGemma on Android; Apple's model may spread scores differently.
+    /// Calibrated for EmbeddingGemma on Android; Apple's models may spread scores differently.
     let weakBest: Float = 0.30
 
-    init(language: NLLanguage = .english) throws {
-        guard let embedding = NLEmbedding.sentenceEmbedding(for: language) else { throw Failure.unavailable }
-        self.embedding = embedding
-        dimension = embedding.dimension
-        modelId = "apple-nl-sentence-\(language.rawValue)-r\(embedding.revision)|doc\(VybeText.documentVersion)"
+    init(language: NLLanguage = .english, allowSentence: Bool = true) throws {
+        if allowSentence, let sentence = NLEmbedding.sentenceEmbedding(for: language) {
+            mode = .sentence(sentence)
+            dimension = sentence.dimension
+            modelId = "apple-nl-sentence-\(language.rawValue)-r\(sentence.revision)|doc\(VybeText.documentVersion)"
+        } else if let words = NLEmbedding.wordEmbedding(for: language) {
+            mode = .words(words)
+            dimension = words.dimension
+            modelId = "apple-nl-words-\(language.rawValue)-r\(words.revision)|doc\(VybeText.documentVersion)"
+        } else {
+            throw Failure.unavailable
+        }
+    }
+
+    var usesSentenceModel: Bool {
+        if case .sentence = mode { return true }
+        return false
     }
 
     func embed(_ text: String, role: EmbeddingRole) throws -> [Float] {
-        guard let vector = embedding.vector(for: text), !vector.isEmpty else { throw Failure.noVector }
-        return vector.map { Float($0) }
+        switch mode {
+        case .sentence(let embedding):
+            guard let vector = embedding.vector(for: text), !vector.isEmpty else { throw Failure.noVector }
+            return vector.map { Float($0) }
+        case .words(let embedding):
+            return try Self.meanOfWords(text, embedding: embedding, dimension: dimension)
+        }
+    }
+
+    /// The average vector of the words the model knows; a text with none of them has no vector.
+    private static func meanOfWords(_ text: String, embedding: NLEmbedding, dimension: Int) throws -> [Float] {
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = text
+        var sum = [Double](repeating: 0, count: dimension)
+        var count = 0
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            if let vector = embedding.vector(for: text[range].lowercased()), vector.count == dimension {
+                for i in 0..<dimension { sum[i] += vector[i] }
+                count += 1
+            }
+            return true
+        }
+        guard count > 0 else { throw Failure.noVector }
+        return sum.map { Float($0 / Double(count)) }
     }
 }

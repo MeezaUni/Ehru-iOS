@@ -2,7 +2,7 @@ import SwiftUI
 
 extension Tool {
     /// The tools ported so far; the rest join the menu as they arrive.
-    static let available: [Tool] = [.settings]
+    static let available: [Tool] = [.soundCapsule, .equalizer, .settings]
 }
 
 /// A tool page from the side menu.
@@ -12,6 +12,8 @@ struct ToolView: View {
     var body: some View {
         switch tool {
         case .settings: SettingsView()
+        case .equalizer: EqualizerView()
+        case .soundCapsule: SoundCapsuleView()
         default: EmptyState(message: "\(tool.label) isn't available on iOS yet.", systemImage: tool.icon).navigationTitle(tool.label)
         }
     }
