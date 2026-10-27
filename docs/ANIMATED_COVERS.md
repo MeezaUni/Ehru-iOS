@@ -9,7 +9,9 @@ Downloads are local videos in Application Support, with a persisted index. They 
 music files or tags. Use **Remove** to delete a clip, or turn off **Play downloaded motion covers**
 to retain the files while using still covers. Downloads require a network connection; playback
 of a saved clip does not. Only unencrypted fragmented MP4 clips are supported. The downloader
-chooses an SDR rendition up to a 720-pixel short edge where available, limits saved clips to
+chooses the largest SDR rendition up to a 1080-pixel short edge where available (1080×1080 square,
+1080×1440 portrait), preferring higher bitrate at equal resolution. If every rendition exceeds
+that target, it uses the smallest available resolution. The downloader limits saved clips to
 64 MB, checks playability, and removes partial files on failure or cancellation. Single-track
 fragment decode times are rebased to zero, preserving video bytes and relative timing.
 
@@ -23,7 +25,10 @@ if video playback fails.
 
 On iOS 26 and later, a downloaded cover is also published through Apple's
 `MPMediaItemAnimatedArtwork` API, under a supported square (1:1) or portrait (3:4) key.
-The preview is generated from the video's first frame, and the video URL is always local.
+The preview is generated from the video's first frame at up to 1200×1600 pixels without upscaling,
+and the video URL is always local. Preview-quality changes use a new artwork ID version so the
+system does not reuse the previous low-resolution preview. Use **Download again** to upgrade
+older saved videos; their resolution does not change merely by installing a new app build.
 New downloads also retain Apple's portrait rendition when available; the publisher supplies both
 shapes under their respective supported keys. A failed portrait preparation does not discard a
 usable square cover. Existing downloaded clips remain compatible. Use **Download

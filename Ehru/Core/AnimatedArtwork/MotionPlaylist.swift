@@ -57,10 +57,18 @@ enum MotionPlaylist {
         return result
     }
 
-    /// Covers do not need the catalog's highest video resolution; cap decoding work at 720 pixels.
+    /// Target a 1080-pixel short edge for expanded artwork. Sparse Apple ladders can jump from
+    /// 486 straight to 768, so a 720 target can otherwise select a visibly soft sub-500 cover.
     static func displayVariant(_ variants: [Variant]) -> Variant? {
-        let sorted = variants.sorted { min($0.width, $0.height) < min($1.width, $1.height) }
-        return sorted.last { min($0.width, $0.height) <= 720 } ?? sorted.first
+        let sorted = variants.sorted {
+            let left = min($0.width, $0.height), right = min($1.width, $1.height)
+            return left == right ? $0.bandwidth < $1.bandwidth : left < right
+        }
+        if let preferred = sorted.last(where: { min($0.width, $0.height) <= 1080 }) { return preferred }
+        guard let smallest = sorted.first else { return nil }
+        // If all renditions exceed the target, use the smallest resolution, preferring the
+        // higher bitrate at that resolution regardless of the master's ordering.
+        return sorted.last { min($0.width, $0.height) == min(smallest.width, smallest.height) }
     }
 
     static func parts(_ text: String, base: URL) throws -> [Part] {

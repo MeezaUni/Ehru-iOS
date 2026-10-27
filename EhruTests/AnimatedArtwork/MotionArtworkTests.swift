@@ -4,11 +4,13 @@ import XCTest
 final class MotionArtworkTests: XCTestCase {
     private let base = URL(string: "https://video-ssl.itunes.apple.com/album/master.m3u8")!
 
-    func testSelectsPhoneSizedSDRVariantAndResolvesRelativePaths() throws {
+    func testSelectsHighDefinitionSDRVariantAndResolvesRelativePaths() throws {
         let master = """
         #EXTM3U
         #EXT-X-STREAM-INF:BANDWIDTH=9000000,RESOLUTION=2160x2160,CODECS="hvc1",VIDEO-RANGE=SDR
         big.m3u8
+        #EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1080x1080,CODECS="avc1",VIDEO-RANGE=SDR
+        high.m3u8
         #EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=720x720,CODECS="avc1",VIDEO-RANGE=SDR
         medium.m3u8
         #EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=360x360,CODECS="avc1",VIDEO-RANGE=SDR
@@ -17,9 +19,38 @@ final class MotionArtworkTests: XCTestCase {
         hdr.m3u8
         """
         let variants = try MotionPlaylist.variants(master, base: base)
-        XCTAssertEqual(variants.count, 3)
-        XCTAssertEqual(MotionPlaylist.displayVariant(variants)?.url.absoluteString, "https://video-ssl.itunes.apple.com/album/medium.m3u8")
+        XCTAssertEqual(variants.count, 4)
+        XCTAssertEqual(MotionPlaylist.displayVariant(variants)?.url.absoluteString, "https://video-ssl.itunes.apple.com/album/high.m3u8")
         XCTAssertEqual(MotionPlaylist.attributes(#"CODECS="avc1,mp4a",BANDWIDTH=123"#)["CODECS"], "avc1,mp4a")
+    }
+
+    func testSparseSquareAndPortraitLaddersUseFullHDInsteadOfLowResolution() {
+        // Representative resolutions from empee3's saved Apple SZA playlists.
+        let square = [486, 768, 960, 1080, 1920, 2160].map {
+            MotionPlaylist.Variant(url: base.appendingPathComponent(String($0)), width: $0, height: $0, bandwidth: 3_000_000)
+        }
+        let portrait = [(486, 648), (664, 886), (830, 1108), (1080, 1440), (2048, 2732)].map {
+            MotionPlaylist.Variant(url: base.appendingPathComponent(String($0.0)), width: $0.0, height: $0.1, bandwidth: 3_000_000)
+        }
+        XCTAssertEqual(MotionPlaylist.displayVariant(square)?.width, 1080)
+        XCTAssertEqual(MotionPlaylist.displayVariant(portrait)?.width, 1080)
+        XCTAssertEqual(MotionPlaylist.displayVariant(portrait)?.height, 1440)
+    }
+
+    func testEqualResolutionPrefersHigherBitrateRegardlessOfPlaylistOrder() {
+        let low = MotionPlaylist.Variant(url: base.appendingPathComponent("low"), width: 1080, height: 1440, bandwidth: 1_000_000)
+        let high = MotionPlaylist.Variant(url: base.appendingPathComponent("high"), width: 1080, height: 1440, bandwidth: 6_000_000)
+        XCTAssertEqual(MotionPlaylist.displayVariant([low, high]), high)
+        XCTAssertEqual(MotionPlaylist.displayVariant([high, low]), high)
+    }
+
+    func testMissingFullHDFallsBackToAvailableResolutionAndHandlesEmptyPlaylist() {
+        let small = MotionPlaylist.Variant(url: base.appendingPathComponent("small"), width: 486, height: 648, bandwidth: 1_000_000)
+        let large = MotionPlaylist.Variant(url: base.appendingPathComponent("large"), width: 1440, height: 1920, bandwidth: 6_000_000)
+        let larger = MotionPlaylist.Variant(url: base.appendingPathComponent("larger"), width: 2160, height: 2880, bandwidth: 9_000_000)
+        XCTAssertEqual(MotionPlaylist.displayVariant([small, large]), small)
+        XCTAssertEqual(MotionPlaylist.displayVariant([larger, large]), large)
+        XCTAssertNil(MotionPlaylist.displayVariant([]))
     }
 
     func testParsesInitAndByteRangesForOfflineMP4Assembly() throws {

@@ -78,6 +78,16 @@ final class LockScreenMotionArtworkTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: leased.path))
     }
 
+    func testHighResolutionPreviewIsNotReducedTo600Pixels() async throws {
+        let source = try await movie(width: 1280, height: 1280)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let asset = try await LockScreenMotionAsset.prepare(source: source)
+        XCTAssertEqual(asset.aspect, .square)
+        XCTAssertGreaterThanOrEqual(asset.preview.width, 1080)
+        XCTAssertLessThanOrEqual(asset.preview.width, 1200)
+        XCTAssertEqual(asset.preview.width, asset.preview.height)
+    }
+
     func testAnimatedDescriptorRetainsItsVideoAndUnsupportedKeysHaveNoEntry() async throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("Animated Now Playing artwork requires iOS 26") }
         let source = try await movie()

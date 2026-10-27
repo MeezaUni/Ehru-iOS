@@ -56,14 +56,14 @@ final class LockScreenMotionAsset: @unchecked Sendable {
         do {
             let generator = AVAssetImageGenerator(asset: AVURLAsset(url: leased))
             generator.appliesPreferredTrackTransform = true
-            generator.maximumSize = CGSize(width: 600, height: 600)
+            generator.maximumSize = CGSize(width: 1200, height: 1600)
             let (image, _) = try await generator.image(at: .zero)
             try Task.checkCancellation()
             guard let aspect = LockScreenMotionAspect(size: CGSize(width: image.width, height: image.height)) else {
                 throw MotionArtworkError("This motion cover has no supported lock-screen aspect ratio.")
             }
             return LockScreenMotionAsset(url: leased, preview: image, aspect: aspect,
-                                         artworkID: "ehru-motion-\(source.lastPathComponent)")
+                                         artworkID: "ehru-motion-v2-\(source.lastPathComponent)")
         } catch {
             try? FileManager.default.removeItem(at: leased)
             throw error
