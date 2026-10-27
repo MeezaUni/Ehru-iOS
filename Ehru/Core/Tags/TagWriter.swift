@@ -625,7 +625,8 @@ enum FLACWriter {
             offset += 4 + UInt64(length)
         }
         guard blocks.first?.type == 0 else { throw TagWriteError.unreadable("no STREAMINFO block") }
-        let comments = blocks.first { $0.type == 4 }.map { parseComments($0.body) } ?? (vendor: "empee3", comments: [])
+        let existingComments = blocks.first { $0.type == 4 }.map { parseComments($0.body) }
+        let comments: (vendor: String, comments: [String]) = existingComments ?? (vendor: "empee3", comments: [])
         let newComments = apply(request, to: comments.comments)
         var kept = blocks.filter { $0.type != 4 && $0.type != 1 && !(($0.type == 6) && (request.artwork != nil || request.clearArtwork)) }
         kept.insert((type: 4, body: commentsBlock(vendor: comments.vendor, newComments)), at: 1)
