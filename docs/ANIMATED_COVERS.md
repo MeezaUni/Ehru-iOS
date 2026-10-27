@@ -24,14 +24,22 @@ if video playback fails.
 On iOS 26 and later, a downloaded cover is also published through Apple's
 `MPMediaItemAnimatedArtwork` API, under a supported square (1:1) or portrait (3:4) key.
 The preview is generated from the video's first frame, and the video URL is always local.
-New downloads also retain Apple's portrait rendition when available; the publisher prefers it
-when iOS supports portrait artwork. Existing downloaded clips remain compatible. Use **Download
+New downloads also retain Apple's portrait rendition when available; the publisher supplies both
+shapes under their respective supported keys. A failed portrait preparation does not discard a
+usable square cover. Existing downloaded clips remain compatible. Use **Download
 again** to fetch a portrait rendition for a previously saved square cover. Each rendition has the
 same 64 MB limit; the app does not relabel square video as portrait artwork.
 iOS owns rendering and decides when animation is displayed; no background AVPlayer is kept
 running by the app. Older systems, unsupported shapes/platform keys, missing files and preview
 failures retain the existing still artwork. The Animated covers toggle applies to both in-app
 and system artwork; removing or replacing a download refreshes Now Playing immediately.
+
+**Menu → Animated covers → Lock Screen** shows preparation errors and whether iOS has requested
+the video for the current album. “Ready” means the app published a supported descriptor, not
+that iOS displayed it. “Video supplied to iOS” means the video handler was called, not that frames
+were rendered. Use **Retry Lock Screen artwork** after a failure; returning to the app retries
+failed preparation and rechecks supported shapes. Identical metadata updates reuse prepared
+artwork rather than decoding previews repeatedly.
 
 The system may retain its artwork handlers after a metadata refresh. A hard-linked file lease
 (or a copy when linking is unavailable) keeps their URLs valid until those handlers are released.

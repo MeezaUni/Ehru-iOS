@@ -26,25 +26,25 @@ final class LockScreenMotionArtworkTests: XCTestCase {
         XCTAssertNil(cover.portraitFileName)
     }
 
-    private func movie() async throws -> URL {
+    private func movie(width: Int = 64, height: Int = 64) async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: 64, AVVideoHeightKey: 64,
+            AVVideoWidthKey: width, AVVideoHeightKey: height,
         ])
         let adapter = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
-            kCVPixelBufferWidthKey as String: 64, kCVPixelBufferHeightKey as String: 64,
+            kCVPixelBufferWidthKey as String: width, kCVPixelBufferHeightKey as String: height,
         ])
         writer.add(input)
         XCTAssertTrue(writer.startWriting())
         writer.startSession(atSourceTime: .zero)
         var optionalBuffer: CVPixelBuffer?
-        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA, nil, &optionalBuffer), kCVReturnSuccess)
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32BGRA, nil, &optionalBuffer), kCVReturnSuccess)
         let buffer = try XCTUnwrap(optionalBuffer)
         CVPixelBufferLockBaseAddress(buffer, [])
-        memset(CVPixelBufferGetBaseAddress(buffer)!, 255, CVPixelBufferGetBytesPerRow(buffer) * 64)
+        memset(CVPixelBufferGetBaseAddress(buffer)!, 255, CVPixelBufferGetBytesPerRow(buffer) * height)
         CVPixelBufferUnlockBaseAddress(buffer, [])
         let deadline = Date().addingTimeInterval(5)
         for frame in 0..<2 {
@@ -102,5 +102,87 @@ final class LockScreenMotionArtworkTests: XCTestCase {
                 XCTFail("Expected a local, readable video")
             } catch { /* Existing static Now Playing artwork remains the fallback. */ }
         }
+    }
+
+    @MainActor
+    func testBadPortraitDoesNotDiscardSquareAndUnchangedInputDoesNotReprepare() async throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Animated Now Playing artwork requires iOS 26") }
+        let source = try await movie()
+        defer { try? FileManager.default.removeItem(at: source) }
+        let missing = source.deletingLastPathComponent().appendingPathComponent(UUID().uuidString + ".mp4")
+        let manager = LockScreenMotionArtwork(supportedKeys: {
+            [MPNowPlayingInfoProperty1x1AnimatedArtwork, MPNowPlayingInfoProperty3x4AnimatedArtwork]
+        })
+        let ready = expectation(description: "Square survives portrait failure")
+        manager.update(sources: [source, missing]) { ready.fulfill() }
+        await fulfillment(of: [ready], timeout: 10)
+        XCTAssertEqual(manager.status, .ready)
+        let artwork = try XCTUnwrap(manager.info[MPNowPlayingInfoProperty1x1AnimatedArtwork] as? MPMediaItemAnimatedArtwork)
+        XCTAssertNil(manager.info[MPNowPlayingInfoProperty3x4AnimatedArtwork])
+        manager.update(sources: [source, missing]) { XCTFail("Unchanged artwork must not be decoded again") }
+        XCTAssertTrue(manager.info[MPNowPlayingInfoProperty1x1AnimatedArtwork] as? MPMediaItemAnimatedArtwork === artwork)
+    }
+
+    @MainActor
+    func testBothShapesArePublishedAndClearedWhenCoverIsRemoved() async throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Animated Now Playing artwork requires iOS 26") }
+        let square = try await movie()
+        let portrait = try await movie(width: 48, height: 64)
+        defer {
+            try? FileManager.default.removeItem(at: square)
+            try? FileManager.default.removeItem(at: portrait)
+        }
+        let manager = LockScreenMotionArtwork(supportedKeys: {
+            [MPNowPlayingInfoProperty1x1AnimatedArtwork, MPNowPlayingInfoProperty3x4AnimatedArtwork]
+        })
+        let ready = expectation(description: "Both shapes prepared")
+        manager.update(sources: [square, portrait]) { ready.fulfill() }
+        await fulfillment(of: [ready], timeout: 10)
+        XCTAssertEqual(manager.status, .ready)
+        XCTAssertEqual(Set(manager.info.keys), Set([MPNowPlayingInfoProperty1x1AnimatedArtwork, MPNowPlayingInfoProperty3x4AnimatedArtwork]))
+        manager.update(sources: [], onReady: {})
+        XCTAssertTrue(manager.info.isEmpty)
+        XCTAssertEqual(manager.status, .idle)
+        XCTAssertFalse(manager.videoRequested)
+    }
+
+    @MainActor
+    func testSameFileIsRetriedWhenSystemCapabilitiesChange() async throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Animated Now Playing artwork requires iOS 26") }
+        let source = try await movie()
+        defer { try? FileManager.default.removeItem(at: source) }
+        var supported: [String] = []
+        let manager = LockScreenMotionArtwork(supportedKeys: { supported })
+        manager.update(sources: [source], onReady: {})
+        guard case .unavailable = manager.status else { return XCTFail("Expected unsupported status") }
+        supported = [MPNowPlayingInfoProperty1x1AnimatedArtwork]
+        let ready = expectation(description: "Capability change retries same file")
+        manager.update(sources: [source]) { ready.fulfill() }
+        await fulfillment(of: [ready], timeout: 10)
+        XCTAssertEqual(manager.status, .ready)
+        XCTAssertFalse(manager.info.isEmpty)
+    }
+
+    @MainActor
+    func testPreparationFailureIsVisibleAndCanBeRetriedWithoutChangingURL() async throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Animated Now Playing artwork requires iOS 26") }
+        let source = try await movie()
+        let original = try Data(contentsOf: source)
+        try FileManager.default.removeItem(at: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+        let manager = LockScreenMotionArtwork(supportedKeys: { [MPNowPlayingInfoProperty1x1AnimatedArtwork] })
+        let failed = expectation(description: "Preparation failure reported")
+        manager.update(sources: [source]) { failed.fulfill() }
+        await fulfillment(of: [failed], timeout: 10)
+        guard case .unavailable(let message) = manager.status else { return XCTFail("Expected an explanation") }
+        XCTAssertTrue(message.contains("Could not prepare"))
+        XCTAssertTrue(manager.info.isEmpty)
+
+        try original.write(to: source)
+        manager.retry()
+        let ready = expectation(description: "Same URL works after retry")
+        manager.update(sources: [source]) { ready.fulfill() }
+        await fulfillment(of: [ready], timeout: 10)
+        XCTAssertEqual(manager.status, .ready)
     }
 }

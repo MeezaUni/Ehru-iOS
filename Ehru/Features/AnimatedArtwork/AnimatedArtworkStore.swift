@@ -58,6 +58,12 @@ final class AnimatedArtworkStore {
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
 
+    func lockScreenURLs(for song: Song) -> [URL] {
+        guard enabled, let cover = saved.covers[String(song.albumId)] else { return [] }
+        return [cover.fileName, cover.portraitFileName].compactMap { $0 }
+            .map { Self.folder.appendingPathComponent($0) }
+    }
+
     func download(_ album: Album) {
         guard downloading == nil else { return }
         downloading = album.id

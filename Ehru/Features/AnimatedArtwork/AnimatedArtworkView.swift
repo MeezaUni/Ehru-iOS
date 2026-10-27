@@ -3,6 +3,7 @@ import SwiftUI
 struct AnimatedArtworkView: View {
     @Environment(AnimatedArtworkStore.self) private var store
     @Environment(LibraryStore.self) private var library
+    @Environment(PlayerController.self) private var player
     @State private var query = ""
 
     private var albums: [Album] {
@@ -20,6 +21,21 @@ struct AnimatedArtworkView: View {
                     Text("Downloaded covers can also animate on the Lock Screen when supported by iOS. Use Download again to add portrait artwork to previously saved covers.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+            }
+            Section("Lock Screen") {
+                if let song = player.state.currentSong {
+                    Text(song.title).font(.headline)
+                }
+                Text(store.enabled ? player.lockScreenMotion.status.message : "Turn on downloaded motion covers to enable Lock Screen artwork.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if player.lockScreenMotion.videoRequested {
+                    Text("Video supplied to iOS. The system controls whether it animates.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Text("Keep music playing, expand the Lock Screen cover, and check that Low Power Mode and Reduce Motion are off.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button("Retry Lock Screen artwork") { player.refreshLockScreenArtwork() }
+                    .disabled(!store.enabled || player.state.currentSong == nil || player.lockScreenMotion.status == .preparing)
             }
             if store.downloading != nil {
                 Section { Button("Cancel download", role: .cancel) { store.cancel() } }

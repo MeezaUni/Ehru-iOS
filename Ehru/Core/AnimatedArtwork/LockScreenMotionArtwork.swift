@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import MediaPlayer
+import Observation
 import UIKit
 
 /// The system only accepts correctly shaped artwork for a supported presentation key.
@@ -70,12 +71,15 @@ final class LockScreenMotionAsset: @unchecked Sendable {
     }
 
     @available(iOS 26.0, *)
-    func info(supported: [String]) -> [String: Any] {
+    func info(supported: [String], onVideoRequest: (@Sendable () -> Void)? = nil) -> [String: Any] {
         guard let key = aspect.key(supported: supported) else { return [:] }
         let artwork = MPMediaItemAnimatedArtwork(
             artworkID: artworkID,
             previewImageRequestHandler: { [self] _ in UIImage(cgImage: preview) },
-            videoAssetFileURLRequestHandler: { [self] _ in url }
+            videoAssetFileURLRequestHandler: { [self] _ in
+                onVideoRequest?()
+                return url
+            }
         )
         return [key: artwork]
     }
@@ -86,24 +90,93 @@ final class LockScreenMotionAsset: @unchecked Sendable {
 /// Preparation happens once per downloaded clip, outside the playback/UI executor. Stale work
 /// cannot replace the current song's artwork. No video player runs in the app for the lock screen.
 @MainActor
+@Observable
 final class LockScreenMotionArtwork {
-    private var source: URL?
-    private var pending: Task<Void, Never>?
-    private(set) var info: [String: Any] = [:]
+    enum Status: Equatable {
+        case idle, preparing, ready, unavailable(String)
 
-    func update(source: URL?, onReady: @escaping @MainActor () -> Void) {
-        guard source != self.source else { return }
+        var message: String {
+            switch self {
+            case .idle: "Play an album with a downloaded motion cover."
+            case .preparing: "Preparing Lock Screen artwork…"
+            case .ready: "Ready for the Lock Screen. Tap the cover there to expand it."
+            case .unavailable(let reason): reason
+            }
+        }
+    }
+
+    private struct Selection: Equatable, Sendable {
+        let sources: [URL]
+        let supported: [String]
+    }
+
+    private(set) var status = Status.idle
+    private(set) var videoRequested = false
+    @ObservationIgnored private var selection: Selection?
+    @ObservationIgnored private var requestID = UUID()
+    @ObservationIgnored private var pending: Task<Void, Never>?
+    @ObservationIgnored private(set) var info: [String: Any] = [:]
+    @ObservationIgnored private let supportedKeys: () -> [String]
+
+    init(supportedKeys: @escaping () -> [String] = {
+        if #available(iOS 26.0, *) { return MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys }
+        return []
+    }) {
+        self.supportedKeys = supportedKeys
+    }
+
+    func retry() { selection = nil }
+
+    func update(sources: [URL], onReady: @escaping @MainActor () -> Void) {
+        let next = Selection(sources: sources.distinct(by: { $0 }), supported: supportedKeys().sorted())
+        // Capabilities can change independently of the song; do not cache just the file URL.
+        guard next != selection else { return }
         pending?.cancel()
-        self.source = source
+        pending = nil
+        selection = next
+        let requestID = UUID()
+        self.requestID = requestID
         info = [:]
-        guard let source, #available(iOS 26.0, *) else { return }
-        let supported = MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys
-        guard !supported.isEmpty else { return }
+        videoRequested = false
+        guard #available(iOS 26.0, *) else {
+            status = .unavailable("Animated Lock Screen artwork requires iOS 26 or later.")
+            return
+        }
+        guard !next.sources.isEmpty else { status = .idle; return }
+        guard !next.supported.isEmpty else {
+            status = .unavailable("iOS is not accepting animated artwork on this device.")
+            return
+        }
+        status = .preparing
         pending = Task { [weak self] in
-            let preparation = Task.detached(priority: .utility) { try await LockScreenMotionAsset.prepare(source: source) }
-            let asset = try? await withTaskCancellationHandler(operation: { try await preparation.value }, onCancel: { preparation.cancel() })
-            guard !Task.isCancelled, let self, self.source == source, let asset else { return }
-            self.info = asset.info(supported: supported)
+            var prepared: [String: Any] = [:]
+            var lastError: String?
+            // Publish both shapes when available. A bad/missing portrait must not discard a
+            // usable square, and each key must describe the video's actual aspect ratio.
+            for source in next.sources {
+                guard !Task.isCancelled else { return }
+                let preparation = Task.detached(priority: .utility) { try await LockScreenMotionAsset.prepare(source: source) }
+                do {
+                    let asset = try await withTaskCancellationHandler(operation: { try await preparation.value }, onCancel: { preparation.cancel() })
+                    guard !Task.isCancelled else { return }
+                    let entry = asset.info(supported: next.supported) { [weak self] in
+                        Task { @MainActor [weak self] in
+                            guard let self, self.requestID == requestID else { return }
+                            self.videoRequested = true
+                        }
+                    }
+                    prepared.merge(entry) { existing, _ in existing }
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    lastError = error.localizedDescription
+                }
+            }
+            guard !Task.isCancelled, let self, self.requestID == requestID else { return }
+            self.info = prepared
+            self.status = prepared.isEmpty
+                ? .unavailable(lastError.map { "Could not prepare Lock Screen artwork: \($0)" }
+                    ?? "The downloaded cover has no shape supported by this device. Try Download again.")
+                : .ready
             self.pending = nil
             onReady()
         }
