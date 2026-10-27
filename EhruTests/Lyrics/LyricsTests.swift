@@ -85,7 +85,7 @@ plain: |-
   Second line
 """
 
-private func record(id: Int64 = 1, title: String = "Test Song", artist: String = "Someone", album: String? = "Album",
+private func lrclibRecord(id: Int64 = 1, title: String = "Test Song", artist: String = "Someone", album: String? = "Album",
                     duration: Double = 200, synced: String? = "[00:12.00]Hello world\n[00:15.00]Second line", wordSync: Bool = false,
                     lyricsfile: String? = nil, instrumental: Bool = false) -> LrclibRecord {
     LrclibRecord(id: id, trackName: title, artistName: artist, albumName: album, duration: duration, instrumental: instrumental,
@@ -115,11 +115,11 @@ final class LyricsfileTests: XCTestCase {
     }
 
     func testSyncedLyricsAloneAreLineTimingNeverWordTiming() {
-        let line = record().toCandidate()!
+        let line = lrclibRecord().toCandidate()!
         XCTAssertEqual(.line, line.timing)
         XCTAssertNil(line.wordSyncedLrc)
-        XCTAssertNil(record(wordSync: false, lyricsfile: wordSyncedLyricsfile).toCandidate()!.wordSyncedLrc)
-        XCTAssertEqual(.plain, record(synced: nil).toCandidate()!.timing)
+        XCTAssertNil(lrclibRecord(wordSync: false, lyricsfile: wordSyncedLyricsfile).toCandidate()!.wordSyncedLrc)
+        XCTAssertEqual(.plain, lrclibRecord(synced: nil).toCandidate()!.timing)
     }
 
     func testLinesWithIncompleteWordTimingKeepLineTimingOnly() {
@@ -229,7 +229,7 @@ final class LrclibProviderTests: XCTestCase {
     func test404IsNotFoundAndSuccessIsACandidate() async {
         http.respond = { _ in (404, [:], Data()) }
         if case .notFound = await provider.exact(query) {} else { XCTFail("expected not found") }
-        let body = json(record())
+        let body = json(lrclibRecord())
         http.respond = { _ in (200, [:], body) }
         guard case .success(let found) = await provider.exact(query) else { return XCTFail("expected success") }
         XCTAssertEqual(1, found.providerId)
@@ -243,7 +243,7 @@ final class LrclibProviderTests: XCTestCase {
         if case .rateLimited = await provider.search(query, freeText: nil) {} else { XCTFail("expected rate limit") }
         XCTAssertEqual(before, http.calls)
         clock.now += 31_000
-        let body = json(record())
+        let body = json(lrclibRecord())
         http.respond = { _ in (200, [:], body) }
         if case .success = await provider.exact(query) {} else { XCTFail("expected success") }
         XCTAssertEqual(60_000, provider.retryAfterMs(nil))

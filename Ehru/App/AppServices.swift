@@ -17,6 +17,7 @@ final class AppServices {
     let settings: AppSettings
     let sound: SoundStore
     let lyrics: LyricsStore
+    let transfer: WifiTransferStore
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
@@ -33,6 +34,7 @@ final class AppServices {
         lyrics = LyricsStore(database: database,
                              repository: OnlineLyricsRepository(providers: [LrclibProvider()], cache: FileOnlineLyricsCache()))
         router = AppRouter()
+        transfer = WifiTransferStore(library: library)
         router.section = settings.startSection
     }
 }
