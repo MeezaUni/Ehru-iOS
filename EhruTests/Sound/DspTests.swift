@@ -3,7 +3,7 @@ import XCTest
 @testable import Ehru
 
 /// Runs a kernel over mono float audio the way the engine would, in one or more buffers.
-private func run(_ kernel: RenderKernel, _ input: [Float], sampleRate: Double, startSampleTime: Double = 0,
+private func process(_ kernel: RenderKernel, _ input: [Float], sampleRate: Double, startSampleTime: Double = 0,
                  hostTime: UInt64? = nil, chunk: Int = 512) -> [Float] {
     let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1)!
     kernel.prepare(sampleRate: sampleRate, channels: 1)
@@ -56,10 +56,10 @@ final class TransitionStageKernelTests: XCTestCase {
 
     func testIdleIsUnityAndArmedIncomingFadesFromItsStart() {
         let kernel = TransitionStageKernel()
-        XCTAssertEqual(0.5, run(kernel, constant(4), sampleRate: rate)[3])
+        XCTAssertEqual(0.5, process(kernel, constant(4), sampleRate: rate)[3])
         kernel.arm(TransitionAutomation(role: .incoming, spec: linear, durationMs: 100), startHostTime: 0)
         XCTAssertTrue(kernel.isEngaged)
-        let faded = run(kernel, constant(200), sampleRate: rate, hostTime: 0)
+        let faded = process(kernel, constant(200), sampleRate: rate, hostTime: 0)
         XCTAssertEqual(0, faded[0])
         XCTAssertEqual(0.25, faded[50], accuracy: 1e-5)
         XCTAssertEqual(0.5, faded[150], accuracy: 1e-6)
@@ -73,12 +73,12 @@ final class TransitionStageKernelTests: XCTestCase {
         )
         let incoming = TransitionStageKernel()
         incoming.arm(TransitionAutomation(role: .incoming, spec: custom, durationMs: 100), startHostTime: 0)
-        let out = run(incoming, Array(repeating: 1, count: 100), sampleRate: rate, hostTime: 0)
+        let out = process(incoming, Array(repeating: 1, count: 100), sampleRate: rate, hostTime: 0)
         XCTAssertEqual(0.5, out[10], accuracy: 1e-5)
         XCTAssertEqual(0.7467, out[62], accuracy: 2e-4)
         let outgoing = TransitionStageKernel()
         outgoing.arm(TransitionAutomation(role: .outgoing, spec: custom, durationMs: 100), startHostTime: 0)
-        XCTAssertEqual(0.2, run(outgoing, Array(repeating: 1, count: 100), sampleRate: rate, hostTime: 0)[50], accuracy: 1e-5)
+        XCTAssertEqual(0.2, process(outgoing, Array(repeating: 1, count: 100), sampleRate: rate, hostTime: 0)[50], accuracy: 1e-5)
     }
 
     func testOutgoingHoldsBeforeItsStartThenEndsSilent() {
@@ -88,7 +88,7 @@ final class TransitionStageKernelTests: XCTestCase {
             TransitionAutomation(role: .outgoing, spec: linear.with(curve: .equalPower), durationMs: 100),
             startHostTime: TransitionStageKernel.hostTicks(forSeconds: 0.1)
         )
-        let out = run(kernel, Array(repeating: 1, count: 300), sampleRate: rate, hostTime: 0)
+        let out = process(kernel, Array(repeating: 1, count: 300), sampleRate: rate, hostTime: 0)
         XCTAssertEqual(1, out[50], accuracy: 1e-6) // before the start: full level
         XCTAssertEqual(0.7071, out[150], accuracy: 1e-3)
         XCTAssertEqual(0, out[299])
@@ -98,9 +98,9 @@ final class TransitionStageKernelTests: XCTestCase {
     func testCancelReturnsToUnity() {
         let kernel = TransitionStageKernel()
         kernel.arm(TransitionAutomation(role: .incoming, spec: linear, durationMs: 1_000), startHostTime: 0)
-        _ = run(kernel, constant(30), sampleRate: rate, hostTime: 0)
+        _ = process(kernel, constant(30), sampleRate: rate, hostTime: 0)
         kernel.cancel()
-        XCTAssertEqual(0.5, run(kernel, constant(1), sampleRate: rate)[0])
+        XCTAssertEqual(0.5, process(kernel, constant(1), sampleRate: rate)[0])
         XCTAssertFalse(kernel.isEngaged)
     }
 
@@ -108,7 +108,7 @@ final class TransitionStageKernelTests: XCTestCase {
         let sr = 48_000.0
         let frames = Int(sr) * totalMs / 1_000
         let input = (0..<frames).map { Float(0.5 * sin(2 * Double.pi * hz * Double($0) / sr)) }
-        let out = run(kernel, input, sampleRate: sr, hostTime: 0)
+        let out = process(kernel, input, sampleRate: sr, hostTime: 0)
         let from = Int(sr) * fromMs / 1_000
         let to = Int(sr) * toMs / 1_000
         let sum = out[from..<to].reduce(0.0) { $0 + Double($1 * $1) }
@@ -156,16 +156,18 @@ final class EqTests: XCTestCase {
     func testKernelLeavesFlatAudioUntouchedAndFiltersBoostedAudio() {
         let kernel = EqKernel()
         let input = (0..<4_800).map { Float(0.25 * sin(2 * Double.pi * 1_000 * Double($0) / 48_000)) }
-        XCTAssertEqual(input, run(kernel, input, sampleRate: 48_000))
+        XCTAssertEqual(input, process(kernel, input, sampleRate: 48_000))
         var settings = SoundSettings()
         settings.bands[3].gainDb = 6
         kernel.apply(settings)
-        let boosted = run(kernel, input, sampleRate: 48_000)
-        let rms = sqrt(boosted[2_400...].reduce(0.0) { $0 + Double($1 * $1) } / 2_400)
+        let boosted = process(kernel, input, sampleRate: 48_000)
+        var energy = 0.0
+        for sample in boosted[2_400...] { energy += Double(sample) * Double(sample) }
+        let rms = (energy / 2_400).squareRoot()
         XCTAssertEqual(0.25 / sqrt(2) * 2, rms, accuracy: 0.02) // +6 dB ≈ ×2
         settings.isEqEnabled = false
         kernel.apply(settings)
-        XCTAssertEqual(input, run(kernel, input, sampleRate: 48_000))
+        XCTAssertEqual(input, process(kernel, input, sampleRate: 48_000))
     }
 
     func testRepairedSettings() {
@@ -242,7 +244,11 @@ final class VisualizerAnalysisTests: XCTestCase {
         var re = (0..<n).map { Float(sin(2 * Double.pi * 37 * Double($0) / Double(n))) }
         var im = [Float](repeating: 0, count: n)
         fft.transform(&re, &im)
-        let magnitudes = (0..<n / 2).map { sqrt(re[$0] * re[$0] + im[$0] * im[$0]) }
+        var magnitudes = [Float]()
+        for i in 0..<n / 2 {
+            let power: Float = re[i] * re[i] + im[i] * im[i]
+            magnitudes.append(power.squareRoot())
+        }
         XCTAssertEqual(37, magnitudes.indices.max { magnitudes[$0] < magnitudes[$1] })
         XCTAssertEqual(Float(n) / 2, magnitudes[37], accuracy: 0.5)
         XCTAssertTrue(magnitudes.enumerated().allSatisfy { $0.offset == 37 || $0.element < 1e-2 })
@@ -281,8 +287,11 @@ final class VisualizerAnalysisTests: XCTestCase {
 
     func testQuietAndLoudLookAlikeAfterAMoment() {
         func music(_ scale: Double) -> [Float] {
-            (0..<SpectrumAnalyzer.defaultFftSize).map {
-                Float(scale * (0.5 * sin(2 * Double.pi * 80 * Double($0) / 48_000) + 0.2 * sin(2 * Double.pi * 2_000 * Double($0) / 48_000)))
+            (0..<SpectrumAnalyzer.defaultFftSize).map { (i: Int) -> Float in
+                let t = Double(i) / 48_000
+                let low: Double = 0.5 * sin(2 * Double.pi * 80 * t)
+                let high: Double = 0.2 * sin(2 * Double.pi * 2_000 * t)
+                return Float(scale * (low + high))
             }
         }
         let quiet = SpectrumAnalyzer(sampleRate: rate, bandCount: 32)
