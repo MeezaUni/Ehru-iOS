@@ -9,6 +9,8 @@ struct FileTags: Equatable {
     var trackNumber: Int?
     var discNumber: Int?
     var year: Int?
+    /// The date tag exactly as stored ("2010-11-19", "2010"), for checking a write.
+    var dateText: String?
     var genres: [String] = []
     var bpmText: String?
     var lyrics: String?
@@ -25,6 +27,7 @@ struct FileTags: Equatable {
         trackNumber = trackNumber ?? other.trackNumber
         discNumber = discNumber ?? other.discNumber
         year = year ?? other.year
+        dateText = dateText ?? other.dateText
         if genres.isEmpty { genres = other.genres }
         bpmText = bpmText ?? other.bpmText
         lyrics = lyrics ?? other.lyrics

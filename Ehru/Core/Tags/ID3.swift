@@ -99,6 +99,7 @@ enum ID3 {
             position = dataStart + size
         }
         result.tags.year = TagReader.year(year) ?? TagReader.year(originalYear)
+        result.tags.dateText = year
         return result
     }
 

@@ -54,6 +54,7 @@ enum MP4Tags {
             offset += size
         }
         result.tags.year = TagReader.year(year)
+        result.tags.dateText = year
         return result
     }
 
@@ -192,6 +193,7 @@ enum FLACTags {
         }
         if !genres.isEmpty { tags.genres = Genres.normalize(genres.flatMap { Genres.parse($0) }.map { Optional($0) }) }
         tags.year = tags.year ?? TagReader.year(date)
+        tags.dateText = tags.dateText ?? date
         tags.lyrics = tags.lyrics ?? lyrics
         return tags
     }
