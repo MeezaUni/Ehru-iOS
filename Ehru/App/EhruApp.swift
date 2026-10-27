@@ -6,9 +6,17 @@ struct EhruApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            ThemedRoot { RootView() }
                 .environment(services.library)
                 .environment(services.player)
+                .environment(services.actions)
+                .environment(services.mixes)
+                .environment(services.vybe)
+                .environment(services.search)
+                .environment(services.router)
+                .environment(services.settings)
+                .environment(services.transitions)
+                .preferredColorScheme(services.settings.theme.colorScheme)
         }
     }
 }

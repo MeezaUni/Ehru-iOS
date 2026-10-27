@@ -11,6 +11,10 @@ final class AppServices {
     let player: PlayerController
     let vybe: VybeStore
     let mixes: MixStore
+    let actions: LibraryActions
+    let search: SearchStore
+    let router: AppRouter
+    let settings: AppSettings
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
@@ -20,5 +24,10 @@ final class AppServices {
         player = PlayerController(database: database, transitions: transitions)
         vybe = VybeStore(database: database, player: player)
         mixes = MixStore(database: database, vybe: vybe.engine)
+        actions = LibraryActions(database: database, player: player, mixes: mixes)
+        search = SearchStore(library: library)
+        settings = AppSettings()
+        router = AppRouter()
+        router.section = settings.startSection
     }
 }

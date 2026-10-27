@@ -97,7 +97,7 @@ struct MixArtCanvas: View {
             let steps = 32
             for i in 0...steps {
                 let angle = Double(startDeg + sweepDeg * Float(i) / Float(steps)) * .pi / 180
-                path.addLine(to: CGPoint(x: center.x + r * cos(angle), y: center.y + r * sin(angle)))
+                path.addLine(to: CGPoint(x: center.x + r * CGFloat(cos(angle)), y: center.y + r * CGFloat(sin(angle))))
             }
             path.closeSubpath()
             context.fill(path, with: .color(Color(argb: color, alpha: Double(alpha))))
@@ -125,7 +125,7 @@ struct MixArtCanvas: View {
         let points = (0..<n).map { i -> CGPoint in
             let angle = rotation + 2 * .pi * Double(i) / Double(n)
             let r = radius * CGFloat(wobble[i % wobble.count])
-            return CGPoint(x: center.x + r * cos(angle), y: center.y + r * sin(angle))
+            return CGPoint(x: center.x + r * CGFloat(cos(angle)), y: center.y + r * CGFloat(sin(angle)))
         }
         return smoothPath(points, closed: true)
     }
