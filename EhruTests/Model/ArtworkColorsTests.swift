@@ -34,6 +34,19 @@ final class ArtworkColorsTests: XCTestCase {
         }
     }
 
+    func testArtworkThemeUsesTheSamePaletteAsThePlayerCard() {
+        for hue: Float in [0, 30, 120, 210, 290] {
+            let sampled = LyricsPalette.from(hue: hue, saturation: 0.6, artworkLightness: 0.3)
+            let card = LyricsColors(sampled)
+            let page = AppPalette.artwork(sampled)
+            XCTAssertEqual(page.surface, card.surface)
+            XCTAssertEqual(page.primary, card.accent)
+            XCTAssertEqual(page.onSurface, card.content)
+            XCTAssertEqual(page.onSurfaceVariant, card.secondary)
+            XCTAssertEqual(page.background, card.cardGradient.last ?? card.surface)
+        }
+    }
+
     func testIncompleteTracksAreFoundForFixTags() {
         func song(_ id: Int64, _ title: String, _ artist: String, _ album: String) -> Song {
             Song(id: id, title: title, artist: artist, album: album, durationMs: 1, path: "\(id).mp3")

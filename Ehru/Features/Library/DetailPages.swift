@@ -8,6 +8,7 @@ struct CollectionHeader<Cover: View>: View {
     let facts: String
     var note: String?
     var coverShape: AnyShape = AnyShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+    var coverInset: CGFloat = 64
     let canPlay: Bool
     let onPlay: () -> Void
     let onShuffle: () -> Void
@@ -21,7 +22,7 @@ struct CollectionHeader<Cover: View>: View {
                 .overlay { cover() }
                 .clipShape(coverShape)
                 .frame(maxWidth: ArtworkSize.heroMax)
-                .padding(.horizontal, 64)
+                .padding(.horizontal, coverInset)
                 .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
                 .padding(.bottom, Spacing.lg)
             Text(title).font(.title.weight(.bold)).multilineTextAlignment(.center).lineLimit(2)
@@ -72,7 +73,7 @@ struct AlbumDetailView: View {
                 let facts = collectionFacts(year: album.year, songs: songs)
                 VStack(spacing: 0) {
                     CollectionHeader(title: album.title, subtitle: album.artist, facts: songs.contains(where: \.isLossless) ? "\(facts) · Lossless" : facts,
-                                     canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
+                                     coverInset: Spacing.md, canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
                                      onShuffle: { actions.playShuffled(songs, origin: origin) }) { MotionCoverView(song: library.albumCoverSong[albumId], playing: !router.showsNowPlaying, maxPixels: 900) }
                     TransitionStudioRow(collection: origin).padding(.bottom, Spacing.sm)
                     SongList(songs: songs, origin: origin, showTrackNumbers: true)
@@ -333,19 +334,24 @@ struct SmartPlaylistDetailView: View {
 /// Now Playing), so each album feels like its own.
 struct CoverGlow: View {
     let url: URL?
-    @Environment(\.palette) private var palette
-    @State private var tint: Color?
+    @State private var colors: LyricsColors?
+    @State private var artworkRevision = 0
 
     var body: some View {
-        LinearGradient(colors: [tint ?? .clear, (tint ?? .clear).opacity(0.35), palette.background.opacity(0)],
-                       startPoint: .top, endPoint: .bottom)
-            .frame(height: 560)
+        LinearGradient(colors: colors?.cardGradient ?? [.clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .mask(LinearGradient(stops: [.init(color: .white, location: 0), .init(color: .white, location: 0.55),
+                                        .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
+            .frame(height: 700)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
-            .task(id: url) {
-                guard let url else { return }
-                let colors = LyricsColors(await LyricsPaletteCache.shared.palette(for: url))
-                withAnimation(.easeInOut(duration: 0.5)) { tint = colors.gradient.first ?? colors.surface }
+            .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
+                if note.object as? String == url?.path { artworkRevision += 1 }
+            }
+            .task(id: "\(url?.path ?? "")|\(artworkRevision)") {
+                guard let url else { colors = nil; return }
+                let sampled = LyricsColors(await LyricsPaletteCache.shared.palette(for: url))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.5)) { colors = sampled }
             }
     }
 }

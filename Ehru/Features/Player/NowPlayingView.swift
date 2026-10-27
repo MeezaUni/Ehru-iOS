@@ -12,8 +12,7 @@ struct NowPlayingView: View {
     @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
     @State private var artworkTarget: ArtworkTarget?
-    /// How far the player has been pulled down (it follows the finger, then closes or springs back).
-    @State private var pull: CGFloat = 0
+    let drag: PlayerDragState
     @State private var showsQueue = false
     @State private var showsLyrics = false
     @State private var showsMarks = false
@@ -65,8 +64,9 @@ struct NowPlayingView: View {
             }
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backdrop(state.currentSong).ignoresSafeArea())
-        .offset(y: pull)
+        .contentShape(Rectangle())
         .overlay(alignment: .bottom) { toast }
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .routerSheets(active: true)
@@ -85,25 +85,24 @@ struct NowPlayingView: View {
 
     /// The header and the cover carousel pull the player down (Android's collapse drag).
     private var pullGesture: some Gesture {
-        DragGesture(minimumDistance: 8)
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
             .onChanged { pulled($0.translation.height) }
             .onEnded { pullEnded($0.translation.height, $0.predictedEndTranslation.height) }
     }
 
-    private func pulled(_ distance: CGFloat) {
-        pull = max(distance, 0)
-    }
+    private func pulled(_ distance: CGFloat) { drag.update(distance) }
 
     private func pullEnded(_ distance: CGFloat, _ predicted: CGFloat) {
         if distance > 140 || predicted > 420 {
             close()
         } else {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { pull = 0 }
+            drag.restore()
         }
     }
 
     private func close() {
-        withAnimation(.spring(response: 0.42, dampingFraction: 0.9)) { router.showsNowPlaying = false }
+        drag.beginDismissal()
+        withAnimation(.smooth(duration: 0.32)) { router.showsNowPlaying = false }
     }
 
     private func previousEntry(_ state: PlaybackState) -> QueueEntry? {
@@ -354,10 +353,11 @@ private struct ExpandedLyrics: View {
     let next: () -> Void
     @Environment(PlayerController.self) private var player
     @Environment(\.dismiss) private var dismiss
-    @State private var colors = LyricsColors(.fallback)
+    @State private var artworkPalette = ArtworkPaletteState()
 
     var body: some View {
         let state = player.state
+        let colors = LyricsColors(artworkPalette.palette(for: state.currentSong?.url))
         VStack(spacing: 0) {
             HStack(spacing: Spacing.xs) {
                 Button { dismiss() } label: {
@@ -400,8 +400,10 @@ private struct ExpandedLyrics: View {
         .background(LinearGradient(colors: colors.gradient, startPoint: .top, endPoint: .bottom).ignoresSafeArea())
         .task(id: state.currentSong?.url) {
             guard let url = state.currentSong?.url else { return }
-            let next = LyricsColors(await LyricsPaletteCache.shared.palette(for: url))
-            withAnimation(.easeInOut(duration: 0.6)) { colors = next }
+            let revision = ArtworkLoader.shared.revision(for: url.path)
+            let next = await LyricsPaletteCache.shared.palette(for: url)
+            guard !Task.isCancelled else { return }
+            artworkPalette.set(next, for: url, revision: revision)
         }
     }
 }
@@ -520,12 +522,13 @@ struct MovingArtwork: ViewModifier {
     let isPlaying: Bool
     @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.playerInMotion) private var playerInMotion
     /// One full drift cycle.
     private static let period: Double = 24
 
     func body(content: Content) -> some View {
         if settings.movingArtwork && !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || playerInMotion)) { context in
                 let phase = context.date.timeIntervalSinceReferenceDate / Self.period * 2 * .pi
                 GeometryReader { geometry in
                     let travel = geometry.size.width * 0.03

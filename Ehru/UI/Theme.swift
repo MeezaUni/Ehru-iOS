@@ -52,6 +52,17 @@ struct AppPalette: Equatable {
     )
 }
 
+extension AppPalette {
+    /// Use the same sampled surface, gradient and contrast-checked colours as the player card.
+    static func artwork(_ sampled: LyricsPalette) -> AppPalette {
+        let colors = LyricsColors(sampled)
+        return AppPalette(primary: colors.accent, onPrimary: colors.surface,
+                          background: colors.cardGradient.last ?? colors.surface,
+                          surface: colors.surface, surfaceVariant: colors.surface,
+                          onSurface: colors.content, onSurfaceVariant: colors.secondary, outline: colors.rim)
+    }
+}
+
 /// The theme the listener picked (Settings › Appearance).
 enum ThemeChoice: String, CaseIterable, Codable, Identifiable {
     case system, light, dark
@@ -103,11 +114,10 @@ struct ThemedRoot<Content: View>: View {
         let followsArtwork = settings.customTheme == nil && settings.theme == .artwork
         let palette = settings.customTheme?.palette
             ?? (followsArtwork ? artworkPalette ?? .dark : (scheme == .dark ? .dark : .light))
-        let artworkURL = followsArtwork ? router.focusedArtwork ?? player.state.currentSong?.url : nil
+        let artworkURL = followsArtwork ? (router.showsNowPlaying ? player.state.currentSong?.url : router.focusedArtwork ?? player.state.currentSong?.url) : nil
         content
             .environment(\.palette, palette)
             .tint(palette.primary)
-            .animation(.easeInOut(duration: 0.6), value: palette)
             .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
                 if note.object as? String == artworkURL?.path { artworkRevision += 1 }
             }
@@ -116,9 +126,9 @@ struct ThemedRoot<Content: View>: View {
                     artworkPalette = nil
                     return
                 }
-                let image = await ArtworkLoader.shared.image(for: artworkURL, maxPixels: DominantColorExtractor.sampleSize * 2)
+                let sampled = await LyricsPaletteCache.shared.palette(for: artworkURL)
                 guard !Task.isCancelled else { return }
-                artworkPalette = DominantColorExtractor.palette(DominantColorExtractor.colors(of: image))
+                artworkPalette = AppPalette.artwork(sampled)
             }
     }
 }
@@ -166,18 +176,33 @@ func formatDuration(_ ms: Int64) -> String {
     return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, seconds) : String(format: "%d:%02d", minutes, seconds)
 }
 
+private struct ArtworkSectionKey: EnvironmentKey { static let defaultValue: LibrarySection? = nil }
+extension EnvironmentValues {
+    var artworkSection: LibrarySection? {
+        get { self[ArtworkSectionKey.self] }
+        set { self[ArtworkSectionKey.self] = newValue }
+    }
+}
+
 private struct ArtworkFocus: ViewModifier {
     let url: URL?
     @Environment(AppRouter.self) private var router
+    @Environment(\.artworkSection) private var section
+    @State private var visible = false
 
     func body(content: Content) -> some View {
         content
-            .onAppear { focus(url) }
+            .onAppear { visible = true; focus(url) }
             .onChange(of: url) { _, new in focus(new) }
-            .onDisappear { if router.artworkFocus?.url == url { router.artworkFocus = nil } }
+            .onChange(of: router.section) { _, _ in focus(url) }
+            .onDisappear {
+                visible = false
+                if router.artworkFocus?.section == section, router.artworkFocus?.url == url { router.artworkFocus = nil }
+            }
     }
 
     private func focus(_ url: URL?) {
-        router.artworkFocus = url.map { (router.section, $0) }
+        guard visible, let section, section == router.section else { return }
+        router.artworkFocus = url.map { (section, $0) }
     }
 }

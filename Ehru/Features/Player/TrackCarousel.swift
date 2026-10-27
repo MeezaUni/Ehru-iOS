@@ -90,7 +90,7 @@ struct TrackCarousel: View {
     }
 
     private func swipe(page: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .onChanged { value in
                 if horizontal == nil { horizontal = abs(value.translation.width) > abs(value.translation.height) }
                 guard horizontal == true else {
@@ -211,10 +211,11 @@ private struct CarouselCard: View {
     let metrics: CardMetrics
     @Environment(LibraryActions.self) private var actions
     @Environment(\.palette) private var palette
-    @State private var colors = LyricsColors(.fallback)
+    @State private var artworkPalette = ArtworkPaletteState()
     @State private var artworkRevision = 0
 
     var body: some View {
+        let colors = LyricsColors(artworkPalette.palette(for: song.url))
         let shape = RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
         VStack(spacing: 0) {
             MotionCoverView(song: song, playing: isCurrent && isPlaying, animateStill: true)
@@ -256,9 +257,10 @@ private struct CarouselCard: View {
             if note.object as? String == song.url.path { artworkRevision += 1 }
         }
         .task(id: "\(song.url.path)|\(artworkRevision)") {
-            let next = LyricsColors(await LyricsPaletteCache.shared.palette(for: song.url))
+            let revision = ArtworkLoader.shared.revision(for: song.url.path)
+            let next = await LyricsPaletteCache.shared.palette(for: song.url)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.5)) { colors = next }
+            artworkPalette.set(next, for: song.url, revision: revision)
         }
     }
 }

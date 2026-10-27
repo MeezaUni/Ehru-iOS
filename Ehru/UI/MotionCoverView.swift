@@ -20,6 +20,7 @@ struct MotionCoverView: View {
     @Environment(AnimatedArtworkStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motionCoverVisible) private var sectionVisible
+    @Environment(\.playerInMotion) private var playerInMotion
     @State private var visible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
@@ -30,7 +31,7 @@ struct MotionCoverView: View {
             SongArtworkView(song: song, maxPixels: maxPixels)
                 .modifier(MovingArtwork(isPlaying: animateStill && playing && url == nil))
             if playing, visible, sectionVisible, scenePhase == .active, !reduceMotion, !lowPower, let url {
-                LoopingMotionVideo(url: url)
+                LoopingMotionVideo(url: url, isPlaying: !playerInMotion)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -46,6 +47,7 @@ struct MotionCoverView: View {
 
 private struct LoopingMotionVideo: UIViewRepresentable {
     let url: URL
+    let isPlaying: Bool
     final class Surface: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
         var videoLayer: AVPlayerLayer { layer as! AVPlayerLayer }
@@ -61,8 +63,8 @@ private struct LoopingMotionVideo: UIViewRepresentable {
             player.preventsDisplaySleepDuringVideoPlayback = false
             player.audiovisualBackgroundPlaybackPolicy = .pauses
         }
-        func load(_ url: URL, surface: Surface) {
-            guard self.url != url else { return }
+        func load(_ url: URL, surface: Surface, playing: Bool) {
+            guard self.url != url else { setPlaying(playing); return }
             stop()
             self.url = url
             let item = AVPlayerItem(url: url)
@@ -73,7 +75,11 @@ private struct LoopingMotionVideo: UIViewRepresentable {
             observation = surface.videoLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
                 DispatchQueue.main.async { surface.videoLayer.opacity = layer.isReadyForDisplay ? 1 : 0.02 }
             }
-            player.play()
+            setPlaying(playing)
+        }
+        private func setPlaying(_ playing: Bool) {
+            if playing { if player.rate == 0 { player.play() } }
+            else { player.pause() }
         }
         func stop() {
             player.pause()
@@ -90,10 +96,10 @@ private struct LoopingMotionVideo: UIViewRepresentable {
         surface.backgroundColor = .clear
         surface.videoLayer.videoGravity = .resizeAspectFill
         surface.videoLayer.player = context.coordinator.player
-        context.coordinator.load(url, surface: surface)
+        context.coordinator.load(url, surface: surface, playing: isPlaying)
         return surface
     }
-    func updateUIView(_ surface: Surface, context: Context) { context.coordinator.load(url, surface: surface) }
+    func updateUIView(_ surface: Surface, context: Context) { context.coordinator.load(url, surface: surface, playing: isPlaying) }
     static func dismantleUIView(_ surface: Surface, coordinator: Coordinator) {
         coordinator.stop()
         surface.videoLayer.player = nil
