@@ -16,6 +16,7 @@ final class AppServices {
     let router: AppRouter
     let settings: AppSettings
     let sound: SoundStore
+    let lyrics: LyricsStore
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
@@ -29,6 +30,8 @@ final class AppServices {
         search = SearchStore(library: library)
         settings = AppSettings()
         sound = SoundStore(kernel: player.engine.eqKernel)
+        lyrics = LyricsStore(database: database,
+                             repository: OnlineLyricsRepository(providers: [LrclibProvider()], cache: FileOnlineLyricsCache()))
         router = AppRouter()
         router.section = settings.startSection
     }

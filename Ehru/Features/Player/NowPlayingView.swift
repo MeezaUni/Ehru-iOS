@@ -11,22 +11,30 @@ struct NowPlayingView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var scrubbing: Double?
     @State private var showsQueue = false
+    @State private var showsLyrics = false
 
     var body: some View {
         let state = player.state
         VStack(spacing: 0) {
             header
             if let song = state.currentSong {
-                Spacer(minLength: Spacing.md)
-                SongArtworkView(song: song, maxPixels: 1200)
-                    .aspectRatio(1, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
-                    .shadow(color: .black.opacity(0.3), radius: 24, y: 12)
-                    .scaleEffect(state.isPlaying ? 1 : 0.92)
-                    .animation(.spring(response: 0.45, dampingFraction: 0.8), value: state.isPlaying)
-                    .padding(.horizontal, Spacing.heroGutter)
-                    .frame(maxWidth: ArtworkSize.heroMax)
-                Spacer(minLength: Spacing.lg)
+                if showsLyrics {
+                    LyricsPanel(song: song)
+                        .frame(maxHeight: .infinity)
+                        .transition(.opacity)
+                } else {
+                    Spacer(minLength: Spacing.md)
+                    SongArtworkView(song: song, maxPixels: 1200)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+                        .shadow(color: .black.opacity(0.3), radius: 24, y: 12)
+                        .scaleEffect(state.isPlaying ? 1 : 0.92)
+                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: state.isPlaying)
+                        .padding(.horizontal, Spacing.heroGutter)
+                        .frame(maxWidth: ArtworkSize.heroMax)
+                        .transition(.opacity)
+                    Spacer(minLength: Spacing.lg)
+                }
                 titleRow(song)
                 seekBar(state)
                 transport(state)
@@ -176,9 +184,10 @@ struct NowPlayingView: View {
             }
             .accessibilityLabel("Add to playlist")
             Spacer()
-            if let next = player.state.nextSong {
-                Text("Next: \(next.title)").font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
+            Button { withAnimation(.easeInOut(duration: 0.25)) { showsLyrics.toggle() } } label: {
+                Image(systemName: showsLyrics ? "quote.bubble.fill" : "quote.bubble").font(.title3).frame(width: 44, height: 44)
             }
+            .accessibilityLabel(showsLyrics ? "Hide lyrics" : "Show lyrics")
             Spacer()
             Button { showsQueue = true } label: { Image(systemName: "list.bullet").font(.title3).frame(width: 44, height: 44) }
                 .accessibilityLabel("Queue")
