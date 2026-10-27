@@ -124,36 +124,49 @@ final class ByteSource {
 }
 
 extension Data {
+    /// The byte at [at] (0 past the end), counting from the start of this Data.
+    func byte(_ at: Int) -> UInt8 {
+        guard at >= 0, at < count else { return 0 }
+        return self[index(startIndex, offsetBy: at)]
+    }
+
     func uint32BE(_ at: Int) -> UInt32 {
         guard at + 4 <= count else { return 0 }
-        return withUnsafeBytes { raw in
-            (UInt32(raw[at]) << 24) | (UInt32(raw[at + 1]) << 16) | (UInt32(raw[at + 2]) << 8) | UInt32(raw[at + 3])
-        }
+        let b0 = UInt32(byte(at)) << 24
+        let b1 = UInt32(byte(at + 1)) << 16
+        let b2 = UInt32(byte(at + 2)) << 8
+        let b3 = UInt32(byte(at + 3))
+        return b0 | b1 | b2 | b3
     }
 
     func uint32LE(_ at: Int) -> UInt32 {
         guard at + 4 <= count else { return 0 }
-        return withUnsafeBytes { raw in
-            (UInt32(raw[at + 3]) << 24) | (UInt32(raw[at + 2]) << 16) | (UInt32(raw[at + 1]) << 8) | UInt32(raw[at])
-        }
+        let b0 = UInt32(byte(at))
+        let b1 = UInt32(byte(at + 1)) << 8
+        let b2 = UInt32(byte(at + 2)) << 16
+        let b3 = UInt32(byte(at + 3)) << 24
+        return b0 | b1 | b2 | b3
     }
 
     func uint24BE(_ at: Int) -> UInt32 {
         guard at + 3 <= count else { return 0 }
-        return withUnsafeBytes { raw in (UInt32(raw[at]) << 16) | (UInt32(raw[at + 1]) << 8) | UInt32(raw[at + 2]) }
+        let b0 = UInt32(byte(at)) << 16
+        let b1 = UInt32(byte(at + 1)) << 8
+        let b2 = UInt32(byte(at + 2))
+        return b0 | b1 | b2
     }
 
     func uint16BE(_ at: Int) -> UInt16 {
         guard at + 2 <= count else { return 0 }
-        return withUnsafeBytes { raw in (UInt16(raw[at]) << 8) | UInt16(raw[at + 1]) }
+        let high = UInt16(byte(at)) << 8
+        let low = UInt16(byte(at + 1))
+        return high | low
     }
 
     func uint64BE(_ at: Int) -> UInt64 {
-        (UInt64(uint32BE(at)) << 32) | UInt64(uint32BE(at + 4))
-    }
-
-    func byte(_ at: Int) -> UInt8 {
-        at < count ? self[startIndex + at] : 0
+        let high = UInt64(uint32BE(at)) << 32
+        let low = UInt64(uint32BE(at + 4))
+        return high | low
     }
 
     func slice(_ from: Int, _ length: Int) -> Data {
