@@ -22,8 +22,8 @@ struct LyricsPalette: Equatable, Sendable {
     /// A light (or, under dark text, deep) tint of the hue for a card's rim.
     let rim: UInt32
 
-    /// No artwork (or not yet loaded): the app's own deep burgundy.
-    static let fallback = from(hue: 345, saturation: 0.38, artworkLightness: 0.3)
+    /// No artwork (or still loading): neutral, so another hue never flashes over a real cover.
+    static let fallback = from(hue: 210, saturation: 0, artworkLightness: 0.16)
 
     static let textContrast = 4.5
 
@@ -293,19 +293,19 @@ struct LyricsColors: Equatable {
 actor LyricsPaletteCache {
     static let shared = LyricsPaletteCache()
     private static let samplePixels = 32
-    private static let entries = 64
-    private struct Entry { let revision: Int; let palette: LyricsPalette }
-    private var palettes: [URL: Entry] = [:]
-    private var order: [URL] = []
+    private nonisolated let memory = PaletteMemory()
+
+    /// Safe to read while constructing a view: no actor hop, file IO, decoding or placeholder frame.
+    nonisolated func cachedPalette(for url: URL) -> LyricsPalette? {
+        memory.get(url, revision: ArtworkLoader.shared.revision(for: url.path))
+    }
 
     func palette(for url: URL) async -> LyricsPalette {
         let revision = ArtworkLoader.shared.revision(for: url.path)
-        if let cached = palettes[url], cached.revision == revision { return cached.palette }
+        if let cached = memory.get(url, revision: revision) { return cached }
         let image = await ArtworkLoader.shared.image(for: url, maxPixels: Self.samplePixels * 4)
         let palette = image?.cgImage.flatMap(Self.sample).map(LyricsPalette.fromPixels) ?? .fallback
-        if palettes[url] == nil { order.append(url) }
-        palettes[url] = Entry(revision: revision, palette: palette)
-        if order.count > Self.entries { palettes[order.removeFirst()] = nil }
+        memory.put(palette, url: url, revision: revision)
         return palette
     }
 
@@ -344,5 +344,36 @@ extension EnvironmentValues {
     var lyricsColors: LyricsColors? {
         get { self[LyricsColorsKey.self] }
         set { self[LyricsColorsKey.self] = newValue }
+    }
+}
+
+/// NSCache is thread-safe; immutable entries can be read from views and written by the cache actor.
+private final class PaletteMemory: @unchecked Sendable {
+    private final class Entry: NSObject {
+        let value: LyricsPalette
+        init(_ value: LyricsPalette) { self.value = value }
+    }
+    private let cache = NSCache<NSString, Entry>()
+    init() { cache.countLimit = 64 }
+    private func key(_ url: URL, _ revision: Int) -> NSString { "\(url.path)|\(revision)" as NSString }
+    func get(_ url: URL, revision: Int) -> LyricsPalette? { cache.object(forKey: key(url, revision))?.value }
+    func put(_ value: LyricsPalette, url: URL, revision: Int) { cache.setObject(Entry(value), forKey: key(url, revision)) }
+}
+
+/// A view's async result belongs to one file revision. Never reuse its colour for a new song.
+struct ArtworkPaletteState {
+    private var url: URL?
+    private var revision: Int = -1
+    private var value: LyricsPalette?
+
+    func palette(for url: URL?) -> LyricsPalette {
+        guard let url else { return .fallback }
+        if self.url == url, revision == ArtworkLoader.shared.revision(for: url.path), let value { return value }
+        return LyricsPaletteCache.shared.cachedPalette(for: url) ?? .fallback
+    }
+    mutating func set(_ value: LyricsPalette, for url: URL, revision: Int) {
+        self.url = url
+        self.revision = revision
+        self.value = value
     }
 }

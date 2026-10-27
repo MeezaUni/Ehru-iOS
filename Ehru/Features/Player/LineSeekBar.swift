@@ -15,6 +15,7 @@ struct LineSeekBar: View {
     let onSeek: (Int64) -> Void
     @Environment(PlayerController.self) private var player
     @Environment(\.palette) private var palette
+    @Environment(\.playerInMotion) private var playerInMotion
 
     private static let touchHeight: CGFloat = 48
     private static let thin: CGFloat = 4
@@ -25,7 +26,7 @@ struct LineSeekBar: View {
 
     var body: some View {
         GeometryReader { geometry in
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || previewMs != nil)) { _ in
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || previewMs != nil || playerInMotion)) { _ in
                 let position = previewMs ?? player.currentPositionMs()
                 Canvas { context, size in draw(in: &context, size: size, position: position) }
             }

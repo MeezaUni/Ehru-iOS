@@ -8,6 +8,7 @@ struct CollectionHeader<Cover: View>: View {
     let facts: String
     var note: String?
     var coverShape: AnyShape = AnyShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+    var coverInset: CGFloat = 64
     let canPlay: Bool
     let onPlay: () -> Void
     let onShuffle: () -> Void
@@ -21,7 +22,7 @@ struct CollectionHeader<Cover: View>: View {
                 .overlay { cover() }
                 .clipShape(coverShape)
                 .frame(maxWidth: ArtworkSize.heroMax)
-                .padding(.horizontal, 64)
+                .padding(.horizontal, coverInset)
                 .shadow(color: .black.opacity(0.25), radius: 16, y: 8)
                 .padding(.bottom, Spacing.lg)
             Text(title).font(.title.weight(.bold)).multilineTextAlignment(.center).lineLimit(2)
@@ -72,7 +73,7 @@ struct AlbumDetailView: View {
                 let facts = collectionFacts(year: album.year, songs: songs)
                 VStack(spacing: 0) {
                     CollectionHeader(title: album.title, subtitle: album.artist, facts: songs.contains(where: \.isLossless) ? "\(facts) · Lossless" : facts,
-                                     canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
+                                     coverInset: Spacing.md, canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
                                      onShuffle: { actions.playShuffled(songs, origin: origin) }) { AlbumArtworkView(albumId: albumId, maxPixels: 900) }
                     TransitionStudioRow(collection: origin).padding(.bottom, Spacing.sm)
                     SongList(songs: songs, origin: origin, showTrackNumbers: true)

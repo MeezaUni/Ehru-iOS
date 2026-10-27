@@ -11,10 +11,11 @@ struct LyricsPanel: View {
     /// source and the lyrics options, drawn on whatever is behind.
     var onExpand: (() -> Void)?
     @Environment(\.palette) private var palette
-    @State private var colors = LyricsColors(.fallback)
+    @State private var artworkPalette = ArtworkPaletteState()
     @State private var artworkRevision = 0
 
     var body: some View {
+        let colors = LyricsColors(artworkPalette.palette(for: song.url))
         let shape = RoundedRectangle(cornerRadius: Radius.large, style: .continuous)
         LyricsPanelContent(song: song, onExpand: onExpand)
             .environment(\.palette, palette.lyrics(colors))
@@ -26,10 +27,11 @@ struct LyricsPanel: View {
                 if note.object as? String == song.url.path { artworkRevision += 1 }
             }
             .task(id: "\(song.url.path)|\(artworkRevision)") {
-                // The previous colours stay while the next artwork is sampled, then cross-fade.
-                let next = LyricsColors(await LyricsPaletteCache.shared.palette(for: song.url))
+                // Resolve cached colours synchronously; this task only fills a cold or edited cover.
+                let revision = ArtworkLoader.shared.revision(for: song.url.path)
+                let next = await LyricsPaletteCache.shared.palette(for: song.url)
                 guard !Task.isCancelled else { return }
-                withAnimation(.easeInOut(duration: 0.6)) { colors = next }
+                artworkPalette.set(next, for: song.url, revision: revision)
             }
     }
 }

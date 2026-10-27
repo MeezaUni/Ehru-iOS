@@ -118,7 +118,6 @@ struct ThemedRoot<Content: View>: View {
         content
             .environment(\.palette, palette)
             .tint(palette.primary)
-            .animation(.easeInOut(duration: 0.6), value: palette)
             .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
                 if note.object as? String == artworkURL?.path { artworkRevision += 1 }
             }

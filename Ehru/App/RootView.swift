@@ -45,7 +45,7 @@ struct RootView: View {
             GeometryReader { geometry in
                 ZStack {
                     if router.showsNowPlaying {
-                        NowPlayingView()
+                        PlayerPresentation()
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             // Move beyond both unsafe edges too, so the outgoing header cannot
                             // remain visible over the home indicator at the end of dismissal.
@@ -58,7 +58,7 @@ struct RootView: View {
             .allowsHitTesting(router.showsNowPlaying)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
-        .animation(.spring(response: 0.42, dampingFraction: 0.9), value: router.showsNowPlaying)
+        .animation(.smooth(duration: 0.32), value: router.showsNowPlaying)
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .sheet(isPresented: $router.showsSearch) { SearchView() }
         .routerSheets(active: !router.showsNowPlaying)
