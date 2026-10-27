@@ -100,7 +100,7 @@ final class VybeStore {
     func play(_ results: [VybeResult], index: Int) {
         if results.isEmpty { return }
         player.setShuffleModeEnabled(false)
-        player.playCollection(results.map(\.song), startIndex: index.clamped(to: 0...(results.count - 1)), origin: nil)
+        player.playCollection(results.map(\.song), startIndex: min(max(index, 0), results.count - 1), origin: nil)
     }
 
     func shuffle(_ results: [VybeResult]) {
