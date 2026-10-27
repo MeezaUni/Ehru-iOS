@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// Now Playing: the artwork, title and artist, favourite, the seek bar, transport, shuffle and
-/// repeat, the queue, and the overflow menu (radio, playlists, hiding from mixes).
+/// Now Playing (Android's layout): a scrolling page with the queue's covers as swipeable cards
+/// (the neighbours peeking at the sides), the time row and seek bar, transport, the add /
+/// visualizer / queue row, and the lyrics card, which expands to full screen. The overflow menu
+/// holds radio, bookmarks, playlists and hiding from mixes.
 struct NowPlayingView: View {
     @Environment(PlayerController.self) private var player
     @Environment(LibraryActions.self) private var actions
@@ -9,9 +11,6 @@ struct NowPlayingView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
-    @State private var scrubbing: Int64?
-    @State private var waveform: WaveformLoad = .loading
-    @State private var bookmarks: [Int64] = []
     @State private var showsQueue = false
     @State private var showsLyrics = false
     @State private var showsMarks = false
@@ -24,40 +23,33 @@ struct NowPlayingView: View {
         VStack(spacing: 0) {
             header
             if let song = state.currentSong {
-                if showsLyrics {
-                    LyricsPanel(song: song)
-                        .frame(maxHeight: .infinity)
-                        .transition(.opacity)
-                } else {
-                    Spacer(minLength: Spacing.md)
-                    SongArtworkView(song: song, maxPixels: 1200)
-                        .aspectRatio(1, contentMode: .fit)
-                        .modifier(MovingArtwork(isPlaying: state.isPlaying))
-                        .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
-                        .shadow(color: .black.opacity(0.3), radius: 24, y: 12)
-                        .scaleEffect(state.isPlaying ? 1 : 0.92)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: state.isPlaying)
-                        .padding(.horizontal, Spacing.heroGutter)
-                        .frame(maxWidth: ArtworkSize.heroMax)
-                        .transition(.opacity)
-                    Spacer(minLength: Spacing.lg)
+                ScrollView {
+                    VStack(spacing: 0) {
+                        CoverCarousel()
+                            .padding(.top, Spacing.sm)
+                        SeekSection(song: song)
+                        transport(state)
+                        secondaryRow
+                        lyricsCard(song)
+                    }
+                    .padding(.bottom, Spacing.xxl)
                 }
-                titleRow(song)
-                seekBar(state)
-                transport(state)
-                bottomRow
+                .scrollIndicators(.hidden)
             } else {
                 Spacer()
                 EmptyState(message: "Nothing is playing.", systemImage: "music.note")
                 Spacer()
             }
         }
-        .padding(.bottom, Spacing.lg)
         .background(backdrop(state.currentSong).ignoresSafeArea())
+        .overlay(alignment: .bottom) { toast }
+        .animation(.easeInOut(duration: 0.2), value: actions.message)
+        .routerSheets(active: true)
         .sheet(isPresented: $showsQueue) { QueueSheet() }
         .sheet(isPresented: $showsMarks) { MarksSheet() }
         .sheet(isPresented: $showsAudioDetails) { AudioDetailsView() }
         .fullScreenCover(isPresented: $showsVisualizer) { VisualizerView() }
+        .fullScreenCover(isPresented: $showsLyrics) { LyricsFullScreen() }
         .sheet(isPresented: $showsEqualizer) {
             NavigationStack {
                 EqualizerView().toolbar { Button("Done") { showsEqualizer = false } }
@@ -65,15 +57,29 @@ struct NowPlayingView: View {
         }
     }
 
+    @ViewBuilder
+    private var toast: some View {
+        if let message = actions.message {
+            Toast(text: message)
+                .padding(.bottom, Spacing.xl)
+                .task(id: message) {
+                    try? await Task.sleep(for: .seconds(2.5))
+                    withAnimation { if actions.message == message { actions.message = nil } }
+                }
+        }
+    }
+
     private var header: some View {
         HStack {
             Button { dismiss() } label: { Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }
                 .accessibilityLabel("Close")
-            Spacer()
-            if let origin = player.state.currentCollection {
-                Text(origin.kind == .album ? "Playing from album" : "Playing from playlist")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.onSurfaceVariant)
+            VStack(alignment: .leading, spacing: 0) {
+                Text("Now Playing").font(.title3.weight(.semibold))
+                if let origin = player.state.currentCollection {
+                    Text(origin.kind == .album ? "Playing from album" : "Playing from playlist")
+                        .font(.caption)
+                        .foregroundStyle(palette.onSurfaceVariant)
+                }
             }
             Spacer()
             menu
@@ -129,55 +135,6 @@ struct NowPlayingView: View {
         }
     }
 
-    private func titleRow(_ song: Song) -> some View {
-        HStack(alignment: .center, spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.title).font(.title2.weight(.bold)).foregroundStyle(palette.onSurface).lineLimit(1)
-                Button {
-                    dismiss()
-                    if song.artistId != 0 { router.open(.artist(song.artistId)) }
-                } label: {
-                    Text(song.artist).font(.title3).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
-                }
-                .buttonStyle(.plain)
-            }
-            Spacer(minLength: 0)
-            Button { actions.toggleFavorite(song) } label: {
-                Image(systemName: song.isFavorite ? "heart.fill" : "heart").font(.title2).frame(width: 44, height: 44)
-            }
-            .foregroundStyle(palette.onSurface)
-            .accessibilityLabel(song.isFavorite ? "Remove from favorites" : "Add to favorites")
-        }
-        .padding(.horizontal, Spacing.heroGutter)
-    }
-
-    private func seekBar(_ state: PlaybackState) -> some View {
-        let position = scrubbing ?? state.positionMs
-        let levels: [Float]? = if case .ready(let values) = waveform { values } else { nil }
-        return VStack(spacing: Spacing.xs) {
-            WaveformSeekBar(levels: levels, positionMs: state.positionMs, durationMs: state.durationMs, bookmarks: bookmarks,
-                            loop: state.abLoop?.songId == state.currentSong?.id ? state.abLoop : nil, previewMs: $scrubbing) {
-                player.seek(to: $0)
-            }
-            HStack {
-                Text(formatDuration(position))
-                Spacer()
-                Text("-" + formatDuration(max(state.durationMs - position, 0)))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(palette.onSurfaceVariant)
-        }
-        .padding(.horizontal, Spacing.heroGutter)
-        .padding(.top, Spacing.md)
-        .task(id: state.currentSong?.id) {
-            waveform = .loading
-            bookmarks = []
-            guard let song = state.currentSong else { return }
-            bookmarks = ((try? AppServices.shared.database.bookmarks(songId: song.id)) ?? []).map(\.positionMs)
-            waveform = await AppServices.shared.waveforms.waveform(song)
-        }
-    }
-
     private func transport(_ state: PlaybackState) -> some View {
         HStack {
             Button { player.setShuffleModeEnabled(!state.shuffleModeEnabled) } label: {
@@ -186,20 +143,20 @@ struct NowPlayingView: View {
             }
             .accessibilityLabel(state.shuffleModeEnabled ? "Shuffle on" : "Shuffle off")
             Spacer()
-            Button { player.skipPrevious() } label: { Image(systemName: "backward.fill").font(.largeTitle).frame(width: 60, height: 60) }
+            Button { player.skipPrevious() } label: { Image(systemName: "backward.end.fill").font(.title).frame(width: 56, height: 56) }
                 .accessibilityLabel("Previous")
             Spacer()
             Button { player.togglePlayPause() } label: {
                 Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
                     .font(.system(size: 30, weight: .bold))
                     .foregroundStyle(palette.onPrimary)
-                    .frame(width: 72, height: 72)
+                    .frame(width: 76, height: 76)
                     .background(Circle().fill(palette.primary))
             }
             .buttonStyle(PressScaleStyle(scale: 0.92))
             .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
             Spacer()
-            Button { player.skipNext() } label: { Image(systemName: "forward.fill").font(.largeTitle).frame(width: 60, height: 60) }
+            Button { player.skipNext() } label: { Image(systemName: "forward.end.fill").font(.title).frame(width: 56, height: 56) }
                 .accessibilityLabel("Next")
             Spacer()
             Button { player.cycleRepeatMode() } label: {
@@ -214,23 +171,43 @@ struct NowPlayingView: View {
         .padding(.vertical, Spacing.md)
     }
 
-    private var bottomRow: some View {
+    private var secondaryRow: some View {
         HStack {
             Button { if let song = player.state.currentSong { router.songsForPlaylist = [song] } } label: {
                 Image(systemName: "plus").font(.title3).frame(width: 44, height: 44)
             }
             .accessibilityLabel("Add to playlist")
             Spacer()
-            Button { withAnimation(.easeInOut(duration: 0.25)) { showsLyrics.toggle() } } label: {
-                Image(systemName: showsLyrics ? "quote.bubble.fill" : "quote.bubble").font(.title3).frame(width: 44, height: 44)
+            Button { showsVisualizer = true } label: {
+                Image(systemName: "square.3.layers.3d").font(.title3).frame(width: 44, height: 44)
             }
-            .accessibilityLabel(showsLyrics ? "Hide lyrics" : "Show lyrics")
+            .accessibilityLabel("Visualizer")
             Spacer()
             Button { showsQueue = true } label: { Image(systemName: "list.bullet").font(.title3).frame(width: 44, height: 44) }
                 .accessibilityLabel("Queue")
         }
         .foregroundStyle(palette.onSurface)
-        .padding(.horizontal, Spacing.heroGutter)
+        .padding(.horizontal, Spacing.heroGutter + Spacing.sm)
+    }
+
+    /// The lyrics in a card under the controls (scroll down to read along); the corner button
+    /// opens them full screen.
+    private func lyricsCard(_ song: Song) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Lyrics").font(.subheadline.weight(.semibold))
+                Spacer()
+                Button { showsLyrics = true } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").font(.body.weight(.semibold)).frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Open lyrics full screen")
+            }
+            .foregroundStyle(palette.onSurface)
+            .padding(.horizontal, Spacing.lg + Spacing.xs)
+            LyricsPanel(song: song)
+                .frame(height: 420)
+        }
+        .padding(.top, Spacing.lg)
     }
 
     /// The artwork, blurred, behind everything.
@@ -245,6 +222,178 @@ struct NowPlayingView: View {
             }
             palette.background.opacity(0.35)
         }
+    }
+}
+
+/// The queue's covers as cards in a row: the playing one in the middle with its title, artist,
+/// album and favourite, the previous and next peeking at the sides. Swiping to a card plays it.
+private struct CoverCarousel: View {
+    @Environment(PlayerController.self) private var player
+    @State private var shown: UUID?
+
+    var body: some View {
+        let state = player.state
+        ScrollView(.horizontal) {
+            LazyHStack(spacing: Spacing.md) {
+                ForEach(Array(state.queue.enumerated()), id: \.element.id) { index, entry in
+                    let current = index == state.currentIndex
+                    CoverCard(song: current ? state.currentSong ?? entry.song : entry.song, isCurrent: current, isPlaying: current && state.isPlaying)
+                        .containerRelativeFrame(.horizontal)
+                        .scrollTransition(axis: .horizontal) { content, phase in
+                            content.scaleEffect(phase.isIdentity ? 1 : 0.9).opacity(phase.isIdentity ? 1 : 0.6)
+                        }
+                        .id(entry.id)
+                }
+            }
+            .scrollTargetLayout()
+        }
+        .contentMargins(.horizontal, 36, for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollIndicators(.hidden)
+        .scrollPosition(id: $shown)
+        .onAppear { shown = state.currentEntry?.id }
+        .onChange(of: state.currentEntry?.id) { _, id in
+            guard shown != id else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.85)) { shown = id }
+        }
+        .task(id: shown) {
+            // Once the swipe settles on another card, not on every card it passes.
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled, let id = shown, id != player.state.currentEntry?.id,
+                  let index = player.state.queue.firstIndex(where: { $0.id == id }) else { return }
+            player.skipToQueueItem(index)
+        }
+    }
+}
+
+private struct CoverCard: View {
+    let song: Song
+    let isCurrent: Bool
+    let isPlaying: Bool
+    @Environment(LibraryActions.self) private var actions
+    @Environment(AppRouter.self) private var router
+    @Environment(\.palette) private var palette
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            SongArtworkView(song: song, maxPixels: 1200)
+                .aspectRatio(1, contentMode: .fit)
+                .modifier(MovingArtwork(isPlaying: isPlaying))
+                .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+            HStack(alignment: .center, spacing: Spacing.sm) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title).font(.title2.weight(.bold)).foregroundStyle(palette.onSurface).lineLimit(1)
+                    Button {
+                        guard song.artistId != 0 else { return }
+                        dismiss()
+                        router.open(.artist(song.artistId))
+                    } label: {
+                        Text(song.artist).font(.body).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    if !song.album.isEmpty {
+                        Text(song.album).font(.footnote).foregroundStyle(palette.onSurfaceVariant.opacity(0.8)).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 0)
+                Button { actions.toggleFavorite(song) } label: {
+                    Image(systemName: song.isFavorite ? "heart.fill" : "heart").font(.title2).frame(width: 44, height: 44)
+                }
+                .foregroundStyle(song.isFavorite ? palette.primary : palette.onSurface)
+                .accessibilityLabel(song.isFavorite ? "Remove from favorites" : "Add to favorites")
+            }
+            .padding(.horizontal, Spacing.xs)
+        }
+        .padding(Spacing.md)
+        .background(RoundedRectangle(cornerRadius: Radius.large + Spacing.md, style: .continuous).fill(palette.surface.opacity(0.55)))
+        .shadow(color: .black.opacity(isCurrent ? 0.3 : 0.15), radius: 18, y: 10)
+    }
+}
+
+/// Elapsed · position in the queue · length, and the waveform seek bar. On its own so only it
+/// redraws as the song plays.
+private struct SeekSection: View {
+    let song: Song
+    @Environment(PlayerController.self) private var player
+    @Environment(\.palette) private var palette
+    @State private var scrubbing: Int64?
+    @State private var waveform: WaveformLoad = .loading
+    @State private var bookmarks: [Int64] = []
+
+    private var levels: [Float]? {
+        if case .ready(let values) = waveform { values } else { nil }
+    }
+
+    var body: some View {
+        let state = player.state
+        let live = player.clock.positionMs
+        let position = scrubbing ?? live
+        VStack(spacing: Spacing.xs) {
+            HStack {
+                Text(formatDuration(position))
+                Spacer()
+                Text("\(state.currentIndex + 1) / \(state.queue.count)")
+                Spacer()
+                Text(formatDuration(state.durationMs))
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(palette.onSurfaceVariant)
+            WaveformSeekBar(levels: levels, positionMs: live, durationMs: state.durationMs, bookmarks: bookmarks,
+                            loop: state.abLoop?.songId == song.id ? state.abLoop : nil, previewMs: $scrubbing) {
+                player.seek(to: $0)
+            }
+        }
+        .padding(.horizontal, Spacing.heroGutter)
+        .padding(.top, Spacing.lg)
+        .task(id: song.id) {
+            waveform = .loading
+            bookmarks = ((try? AppServices.shared.database.bookmarks(songId: song.id)) ?? []).map(\.positionMs)
+            waveform = await AppServices.shared.waveforms.waveform(song)
+        }
+    }
+}
+
+/// The lyrics full screen (Android's expanded lyrics): the song at the top, the lyrics, and
+/// previous / play / next at the bottom.
+private struct LyricsFullScreen: View {
+    @Environment(PlayerController.self) private var player
+    @Environment(\.palette) private var palette
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        let state = player.state
+        VStack(spacing: 0) {
+            HStack(spacing: Spacing.sm) {
+                Button { dismiss() } label: { Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }
+                    .accessibilityLabel("Close lyrics")
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(state.currentSong?.title ?? "").font(.headline).lineLimit(1)
+                    Text(state.currentSong?.artist ?? "").font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
+                }
+                Spacer()
+            }
+            .foregroundStyle(palette.onSurface)
+            .padding(.horizontal, Spacing.sm)
+            if let song = state.currentSong {
+                LyricsPanel(song: song).frame(maxHeight: .infinity)
+            } else {
+                Spacer()
+            }
+            HStack(spacing: Spacing.xxl * 2) {
+                Button { player.skipPrevious() } label: { Image(systemName: "backward.end.fill").font(.title2) }
+                    .accessibilityLabel("Previous")
+                Button { player.togglePlayPause() } label: {
+                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 30, weight: .bold))
+                }
+                .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
+                Button { player.skipNext() } label: { Image(systemName: "forward.end.fill").font(.title2) }
+                    .accessibilityLabel("Next")
+            }
+            .foregroundStyle(palette.onSurface)
+            .padding(.vertical, Spacing.lg)
+        }
+        .background(palette.background.ignoresSafeArea())
     }
 }
 

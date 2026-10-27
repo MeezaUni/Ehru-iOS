@@ -110,6 +110,16 @@ final class FixTagsStore {
         queue += songs.filter { !present.contains($0.id) }.map { RepairItem(song: $0) }
     }
 
+    /// Android's "Scan for bad / incomplete tracks": no title, artist or album, or a title carrying
+    /// a download site's leftovers.
+    nonisolated static func incomplete(_ songs: [Song]) -> [Song] {
+        songs.filter { song in
+            song.title.isBlank || song.artist.isBlank || song.artist == unknownArtist || song.album.isBlank
+                || song.album.caseInsensitiveCompare("Unknown Album") == .orderedSame
+                || song.title.localizedCaseInsensitiveContains("mp3") || song.title.localizedCaseInsensitiveContains(".com")
+        }
+    }
+
     func remove(_ item: RepairItem) {
         guard !isRunning else { return }
         if let backup = item.backup { try? FileManager.default.removeItem(at: backup) }

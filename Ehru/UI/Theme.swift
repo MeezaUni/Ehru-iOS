@@ -55,6 +55,9 @@ struct AppPalette: Equatable {
 /// The theme the listener picked (Settings › Appearance).
 enum ThemeChoice: String, CaseIterable, Codable, Identifiable {
     case system, light, dark
+    /// Android's "Dominant Color": a dark theme tinted by the playing song's cover, or the cover of
+    /// the album or playlist page in front.
+    case artwork
     var id: String { rawValue }
 
     var label: String {
@@ -62,6 +65,7 @@ enum ThemeChoice: String, CaseIterable, Codable, Identifiable {
         case .system: "System default"
         case .light: "Light"
         case .dark: "Dark"
+        case .artwork: "Colours from artwork"
         }
     }
 
@@ -69,7 +73,7 @@ enum ThemeChoice: String, CaseIterable, Codable, Identifiable {
         switch self {
         case .system: nil
         case .light: .light
-        case .dark: .dark
+        case .dark, .artwork: .dark
         }
     }
 }
@@ -85,21 +89,40 @@ extension EnvironmentValues {
     }
 }
 
-/// Supplies the palette that matches the effective colour scheme.
+/// Supplies the palette that matches the effective colour scheme, or the artwork's.
 struct ThemedRoot<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
     @Environment(AppSettings.self) private var settings
+    @Environment(PlayerController.self) private var player
+    @Environment(AppRouter.self) private var router
     @ViewBuilder let content: Content
+    @State private var artworkPalette: AppPalette?
 
     var body: some View {
-        let palette = settings.customTheme?.palette ?? (scheme == .dark ? .dark : .light)
+        let followsArtwork = settings.customTheme == nil && settings.theme == .artwork
+        let palette = settings.customTheme?.palette
+            ?? (followsArtwork ? artworkPalette ?? .dark : (scheme == .dark ? .dark : .light))
+        let artworkURL = followsArtwork ? router.focusedArtwork ?? player.state.currentSong?.url : nil
         content
             .environment(\.palette, palette)
             .tint(palette.primary)
+            .animation(.easeInOut(duration: 0.6), value: palette)
+            .task(id: artworkURL) {
+                guard let artworkURL else {
+                    artworkPalette = nil
+                    return
+                }
+                let image = await ArtworkLoader.shared.image(for: artworkURL, maxPixels: DominantColorExtractor.sampleSize * 2)
+                guard !Task.isCancelled else { return }
+                artworkPalette = DominantColorExtractor.palette(DominantColorExtractor.colors(of: image))
+            }
     }
 }
 
 extension View {
+    /// While this page is in front, the artwork theme follows [url] instead of the playing song.
+    func artworkFocus(_ url: URL?) -> some View { modifier(ArtworkFocus(url: url)) }
+
     /// A floating glass surface: Liquid Glass on iOS 26, a material elsewhere.
     @ViewBuilder
     func glassSurface(cornerRadius: CGFloat, enabled: Bool = true) -> some View {
@@ -137,4 +160,20 @@ func formatDuration(_ ms: Int64) -> String {
     let minutes = (total % 3600) / 60
     let seconds = total % 60
     return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, seconds) : String(format: "%d:%02d", minutes, seconds)
+}
+
+private struct ArtworkFocus: ViewModifier {
+    let url: URL?
+    @Environment(AppRouter.self) private var router
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { focus(url) }
+            .onChange(of: url) { _, new in focus(new) }
+            .onDisappear { if router.artworkFocus?.url == url { router.artworkFocus = nil } }
+    }
+
+    private func focus(_ url: URL?) {
+        router.artworkFocus = url.map { (router.section, $0) }
+    }
 }

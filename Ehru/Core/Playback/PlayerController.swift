@@ -11,6 +11,9 @@ import UIKit
 @Observable
 final class PlayerController {
     private(set) var state = PlaybackState()
+    /// The playing position, published on its own: it changes four times a second, and only the
+    /// views showing progress should redraw for it (a menu open elsewhere would otherwise reset).
+    let clock = PlaybackClock()
 
     @ObservationIgnored let engine = AudioEngine()
     @ObservationIgnored private let database: LibraryDatabase
@@ -132,7 +135,7 @@ final class PlayerController {
             handleError(entry)
             return
         }
-        state.positionMs = target
+        setPosition(target)
         reevaluateTransition()
         updateNowPlaying()
     }
@@ -318,7 +321,7 @@ final class PlayerController {
         removals.clear()
         state.queue = entries
         state.currentIndex = entries.isEmpty ? -1 : startIndex.clamped(0, entries.count - 1)
-        state.positionMs = 0
+        setPosition(0)
     }
 
     /// Starts the current entry at [positionMs] from a fresh engine start.
@@ -327,7 +330,7 @@ final class PlayerController {
         if playing { activateAudioSession() }
         do {
             try engine.play(entryId: entry.id, url: entry.song.url, positionMs: positionMs, startPlaying: playing)
-            state.positionMs = positionMs
+            setPosition(positionMs)
             state.durationMs = entry.song.durationMs
             if playing { consecutiveErrors = 0 }
             currentEntryChanged(sameEntryRepeated: false)
@@ -355,7 +358,7 @@ final class PlayerController {
             // End of the queue: back to the start of the last track, paused (Media3's ENDED).
             listening.onEnded()
             engine.stopAll()
-            state.positionMs = 0
+            setPosition(0)
             playingChanged(false)
             state.status = .idle
             persistState()
@@ -365,7 +368,7 @@ final class PlayerController {
         if !repeated, engine.hasQueued(state.queue[next].id) {
             // Gapless: the engine already plays it.
             state.currentIndex = next
-            state.positionMs = 0
+            setPosition(0)
             state.durationMs = state.queue[next].song.durationMs
             currentEntryChanged(sameEntryRepeated: false)
         } else {
@@ -443,7 +446,7 @@ final class PlayerController {
         ticks += 1
         let position = currentPositionMs()
         if ticks % Self.publishEvery == 0 {
-            refreshPosition()
+            refreshPosition(publishState: false)
             listening.onProgress(durationMs: state.durationMs)
         }
         if ticks % Self.persistEvery == 0 { persistState() }
@@ -454,9 +457,17 @@ final class PlayerController {
         checkGapless(position: position)
     }
 
-    private func refreshPosition() {
-        state.positionMs = currentPositionMs()
-        if let duration = state.currentSong?.durationMs, duration > 0 { state.durationMs = duration }
+    /// While playing only [clock] moves; [state] keeps the position of the last seek, start or pause.
+    private func refreshPosition(publishState: Bool = true) {
+        let position = currentPositionMs()
+        if clock.positionMs != position { clock.positionMs = position }
+        if publishState { setPosition(position) }
+        if let duration = state.currentSong?.durationMs, duration > 0, state.durationMs != duration { state.durationMs = duration }
+    }
+
+    private func setPosition(_ positionMs: Int64) {
+        state.positionMs = positionMs
+        clock.positionMs = positionMs
     }
 
     // MARK: Transitions
@@ -506,7 +517,7 @@ final class PlayerController {
             guard let self, self.state.queue.indices.contains(planned.plan.nextIndex),
                   self.state.queue[planned.plan.nextIndex].id == next.id else { return }
             self.state.currentIndex = planned.plan.nextIndex
-            self.state.positionMs = planned.plan.incomingStartMs
+            self.setPosition(planned.plan.incomingStartMs)
             self.state.durationMs = next.song.durationMs
             self.currentEntryChanged(sameEntryRepeated: false)
         }
@@ -569,7 +580,7 @@ final class PlayerController {
         }
         state.queue = entries
         state.currentIndex = restored.startIndex
-        state.positionMs = restored.startPositionMs
+        setPosition(restored.startPositionMs)
         state.durationMs = state.currentSong?.durationMs ?? 0
         state.shuffleModeEnabled = saved.shuffleModeEnabled
         state.repeatMode = saved.repeatMode
@@ -583,7 +594,7 @@ final class PlayerController {
     private func restartAfterConfigurationChange() {
         guard state.currentEntry != nil else { return }
         let wasPlaying = state.isPlaying
-        startCurrent(at: state.positionMs, playing: wasPlaying)
+        startCurrent(at: currentPositionMs(), playing: wasPlaying)
     }
 
     // MARK: Audio session, remote commands, Now Playing
@@ -727,4 +738,11 @@ private enum CollectionKindRef {
     init(_ ref: CollectionRef) {
         self = ref.kind == .album ? .album(ref.id) : .playlist(ref.id)
     }
+}
+
+/// The live playing position (see [PlayerController.clock]).
+@MainActor
+@Observable
+final class PlaybackClock {
+    var positionMs: Int64 = 0
 }

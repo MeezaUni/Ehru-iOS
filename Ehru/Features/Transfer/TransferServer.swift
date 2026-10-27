@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// A small HTTP server for one transfer session, listening only on the Wi-Fi address (never on
+/// A small HTTP server for one transfer session, listening only on the Wi-Fi interface (never on
 /// every interface). One request per connection; at most [TransferLimits.maxConnections] at once
 /// (others get a quick 503); stalled connections time out. [stop] closes the listener and every
 /// connection, which ends any upload in progress (the router then deletes its partial file).
@@ -32,35 +32,28 @@ final class TransferServer: @unchecked Sendable {
     }
 
     private func listen(on port: UInt16) async throws -> UInt16 {
+        // Bound to the Wi-Fi interface rather than to its address: NWListener can't reliably
+        // listen on one local address, and the interface restriction keeps cellular and VPN out.
         let parameters = NWParameters.tcp
         parameters.requiredInterfaceType = .wifi
         parameters.allowLocalEndpointReuse = true
-        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(address), port: NWEndpoint.Port(rawValue: port) ?? .any)
-        let listener = try NWListener(using: parameters)
+        let listener = try NWListener(using: parameters, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port) ?? .any)
         let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
-            var resumed = false
-            listener.stateUpdateHandler = { [weak self] state in
+            let resumed = OnceFlag()
+            listener.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    if !resumed, let port = listener.port?.rawValue {
-                        resumed = true
-                        continuation.resume(returning: port)
-                    }
-                case .failed(let error):
-                    if !resumed {
-                        resumed = true
+                    if let port = listener.port?.rawValue, resumed.claim() { continuation.resume(returning: port) }
+                case .failed(let error), .waiting(let error):
+                    if resumed.claim() {
+                        listener.cancel()
                         continuation.resume(throwing: error)
                     }
-                    listener.cancel()
                 case .cancelled:
-                    if !resumed {
-                        resumed = true
-                        continuation.resume(throwing: CancellationError())
-                    }
+                    if resumed.claim() { continuation.resume(throwing: CancellationError()) }
                 default:
                     break
                 }
-                _ = self
             }
             listener.start(queue: queue)
         }
@@ -216,4 +209,19 @@ func wifiAddress() -> String? {
         if !text.hasPrefix("169.254.") && text != "127.0.0.1" { return text }
     }
     return nil
+}
+
+/// A flag that is claimed once, from any thread.
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    /// True the first time only.
+    func claim() -> Bool {
+        lock.withLock {
+            if claimed { return false }
+            claimed = true
+            return true
+        }
+    }
 }

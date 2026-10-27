@@ -81,7 +81,7 @@ struct WifiTransferView: View {
             switch reason {
             case .noWifi: return ("Not connected to Wi-Fi", "Connect the phone to the same Wi-Fi as your computer, then start again.")
             case .wifiLost: return ("Wi-Fi disconnected", "Connect the phone to the same Wi-Fi as your computer, then start again.")
-            case .failedToStart: return ("Could not start", "The transfer server could not open a port. Check Local Network access for empee3 and try again.")
+            case .failedToStart(let detail): return ("Could not start", "The transfer server didn't start (\(detail)). Check that Wi-Fi is on, then try again.")
             case .idleTimeout: return ("Transfer is off", "Stopped after 10 minutes without activity.")
             case .sessionExpired: return ("Transfer is off", "The session reached its time limit.")
             case .backgrounded: return ("Transfer is off", "Stopped because empee3 left the screen.")

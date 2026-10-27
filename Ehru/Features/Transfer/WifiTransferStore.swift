@@ -4,7 +4,8 @@ import UIKit
 
 /// Why a session is not running (nil: never started).
 enum StopReason: Equatable {
-    case user, noWifi, wifiLost, idleTimeout, sessionExpired, backgrounded, failedToStart
+    case user, noWifi, wifiLost, idleTimeout, sessionExpired, backgrounded
+    case failedToStart(String)
 }
 
 enum TransferServerState: Equatable {
@@ -98,7 +99,7 @@ final class WifiTransferStore {
                 state = .running(address: base, pairingUrl: "\(base)/#t=\(newSession.token)", pairingCode: newSession.pairingCode)
             } catch {
                 newServer.stop()
-                finish(.failedToStart)
+                finish(.failedToStart(error.localizedDescription))
             }
         }
     }

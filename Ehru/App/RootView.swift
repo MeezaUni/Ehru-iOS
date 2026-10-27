@@ -27,7 +27,7 @@ struct RootView: View {
                     .accessibilityHidden(router.section != section)
             }
             bottomChrome
-            if let message = actions.message {
+            if let message = actions.message, !router.showsNowPlaying {
                 Toast(text: message)
                     .padding(.bottom, player.state.currentSong == nil ? 96 : 160)
                     .task(id: message) {
@@ -41,11 +41,7 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .sheet(isPresented: $router.showsSearch) { SearchView() }
         .fullScreenCover(isPresented: $router.showsNowPlaying) { NowPlayingView() }
-        .sheet(item: Binding(get: { router.songsForPlaylist.map(SongBatch.init) }, set: { router.songsForPlaylist = $0?.songs })) { batch in
-            AddToPlaylistSheet(songs: batch.songs)
-        }
-        .sheet(item: $router.songForDetails) { song in SongDetailsSheet(song: song) }
-        .sheet(item: $router.songForTagEdit) { song in EditTagsSheet(song: song) }
+        .routerSheets(active: !router.showsNowPlaying)
         .alert("New playlist", isPresented: $router.showsNewPlaylist) { NewPlaylistAlert() }
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { library.importFiles(urls) }
@@ -188,6 +184,30 @@ struct RootView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+extension View {
+    /// The song sheets anyone can ask the router for, presented by whichever screen is on top
+    /// ([active]): the root, or Now Playing over it (a sheet from the root would open behind it).
+    func routerSheets(active: Bool) -> some View { modifier(RouterSheets(active: active)) }
+}
+
+private struct RouterSheets: ViewModifier {
+    let active: Bool
+    @Environment(AppRouter.self) private var router
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: Binding(get: { active ? router.songsForPlaylist.map(SongBatch.init) : nil }, set: { router.songsForPlaylist = $0?.songs })) { batch in
+                AddToPlaylistSheet(songs: batch.songs)
+            }
+            .sheet(item: Binding(get: { active ? router.songForDetails : nil }, set: { router.songForDetails = $0 })) { song in
+                SongDetailsSheet(song: song)
+            }
+            .sheet(item: Binding(get: { active ? router.songForTagEdit : nil }, set: { router.songForTagEdit = $0 })) { song in
+                EditTagsSheet(song: song)
+            }
     }
 }
 

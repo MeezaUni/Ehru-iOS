@@ -4,11 +4,13 @@ import SwiftUI
 /// outcome with what was looked up, and Revert for the tracks that were changed.
 struct FixTagsView: View {
     @Environment(FixTagsStore.self) private var store
+    @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
     @State private var addingSongs = false
     @State private var selectedForRevert = Set<Int64>()
     @State private var detail: RepairItem?
     @State private var confirmingClear = false
+    @State private var scanMessage: String?
 
     var body: some View {
         List {
@@ -85,11 +87,24 @@ struct FixTagsView: View {
                 }
             } else {
                 Button {
+                    let found = FixTagsStore.incomplete(library.songs)
+                    store.enqueue(found)
+                    scanMessage = found.isEmpty ? "Every track has a title, artist and album." : "Added \(countLabel(found.count, "track")) with missing or odd tags."
+                } label: {
+                    Label("Find tracks with missing tags", systemImage: "wand.and.stars")
+                }
+                Button { addingSongs = true } label: { Label("Add songs…", systemImage: "plus") }
+                Button {
                     store.start()
                 } label: {
                     Label(store.queue.contains { $0.status != .pending && $0.status.toProcess } ? "Resume" : "Start", systemImage: "play.fill")
                 }
                 .disabled(!store.hasWork)
+                if !store.hasWork {
+                    Text(store.queue.isEmpty ? "Add songs or find the ones with missing tags first." : "Nothing left to fix in the queue.")
+                        .font(.footnote).foregroundStyle(palette.onSurfaceVariant)
+                }
+                if let scanMessage { Text(scanMessage).font(.footnote).foregroundStyle(palette.onSurfaceVariant) }
             }
             if let reason = store.pauseReason {
                 Text(reason).font(.footnote).foregroundStyle(palette.onSurfaceVariant)
@@ -98,7 +113,7 @@ struct FixTagsView: View {
                 Text(summary).font(.footnote).foregroundStyle(palette.onSurfaceVariant)
             }
         } footer: {
-            Text("Searches iTunes, MusicBrainz and Deezer with the track's title, artist, album and length (and its file name when the tags are missing). Your music is never uploaded. Each changed file's original is kept until you clear the queue, so it can be reverted.")
+            Text("Searches iTunes, MusicBrainz, Deezer (and Last.fm with your key) with the track's title, artist, album and length (and its file name when the tags are missing). Your music is never uploaded. Each changed file's original is kept until you clear the queue, so it can be reverted.")
         }
     }
 

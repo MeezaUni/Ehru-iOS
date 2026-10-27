@@ -30,7 +30,7 @@ struct CollectionHeader<Cover: View>: View {
             Text(facts).font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
             HStack(spacing: Spacing.sm) {
                 Button(action: onPlay) {
-                    Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity)
+                    Label("Play", systemImage: "play.fill").frame(maxWidth: .infinity).foregroundStyle(palette.onPrimary)
                 }
                 .buttonStyle(.borderedProminent)
                 Button(action: onShuffle) {
@@ -99,6 +99,7 @@ struct AlbumDetailView: View {
         }
         .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .task(id: library.songs) { songs = (try? library.database.songsOfAlbum(albumId)) ?? [] }
+        .artworkFocus(library.albumCoverSong[albumId]?.url)
     }
 }
 
