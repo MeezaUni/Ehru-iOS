@@ -26,12 +26,21 @@ final class ThemeImportTests: XCTestCase {
         }
         let nameBytes = Array(name.utf8)
         let method = deflate ? 8 : 0
-        var local: [UInt8] = [0x50, 0x4B, 0x03, 0x04] + le16(20) + le16(0) + le16(method) + le32(0) + le32(0)
-        local += le32(payload.count) + le32(content.count) + le16(nameBytes.count) + le16(0) + nameBytes
-        var central: [UInt8] = [0x50, 0x4B, 0x01, 0x02] + le16(20) + le16(20) + le16(0) + le16(method) + le32(0) + le32(0)
-        central += le32(payload.count) + le32(content.count) + le16(nameBytes.count) + le16(0) + le16(0) + le16(0) + le16(0) + le32(0) + le32(0) + nameBytes
+        var local: [UInt8] = [0x50, 0x4B, 0x03, 0x04]
+        for part in [le16(20), le16(0), le16(method), le32(0), le32(0), le32(payload.count), le32(content.count),
+                     le16(nameBytes.count), le16(0), nameBytes] {
+            local.append(contentsOf: part)
+        }
+        var central: [UInt8] = [0x50, 0x4B, 0x01, 0x02]
+        for part in [le16(20), le16(20), le16(0), le16(method), le32(0), le32(0), le32(payload.count), le32(content.count),
+                     le16(nameBytes.count), le16(0), le16(0), le16(0), le16(0), le32(0), le32(0), nameBytes] {
+            central.append(contentsOf: part)
+        }
         let centralOffset = local.count + payload.count
-        let end: [UInt8] = [0x50, 0x4B, 0x05, 0x06] + le16(0) + le16(0) + le16(1) + le16(1) + le32(central.count) + le32(centralOffset) + le16(0)
+        var end: [UInt8] = [0x50, 0x4B, 0x05, 0x06]
+        for part in [le16(0), le16(0), le16(1), le16(1), le32(central.count), le32(centralOffset), le16(0)] {
+            end.append(contentsOf: part)
+        }
         return Data(local) + payload + Data(central) + Data(end)
     }
 
