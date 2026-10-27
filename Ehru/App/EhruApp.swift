@@ -8,6 +8,7 @@ struct EhruApp: App {
         WindowGroup {
             RootView()
                 .environment(services.library)
+                .environment(services.player)
         }
     }
 }

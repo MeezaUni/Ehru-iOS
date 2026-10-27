@@ -3,6 +3,7 @@ import SwiftUI
 /// Temporary shell while the Android screens are being ported.
 struct RootView: View {
     @Environment(LibraryStore.self) private var library
+    @Environment(PlayerController.self) private var player
     @Environment(\.scenePhase) private var scenePhase
     @State private var showsImporter = false
 
@@ -23,11 +24,16 @@ struct RootView: View {
                     }
                 }
                 Section("Songs (\(library.songs.count))") {
-                    ForEach(library.songs) { song in
-                        VStack(alignment: .leading) {
-                            Text(song.title)
-                            Text(song.subtitle).font(.caption).foregroundStyle(.secondary)
+                    ForEach(Array(library.songs.enumerated()), id: \.element.id) { index, song in
+                        Button {
+                            player.playSongs(library.songs, startIndex: index)
+                        } label: {
+                            VStack(alignment: .leading) {
+                                Text(song.title)
+                                Text(song.subtitle).font(.caption).foregroundStyle(.secondary)
+                            }
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -36,6 +42,24 @@ struct RootView: View {
                 Button { showsImporter = true } label: { Image(systemName: "plus") }
             }
             .refreshable { library.scan() }
+            .safeAreaInset(edge: .bottom) {
+                if let song = player.state.currentSong {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(song.title).lineLimit(1)
+                            Text(song.subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        Spacer()
+                        Button { player.skipPrevious() } label: { Image(systemName: "backward.fill") }
+                        Button { player.togglePlayPause() } label: {
+                            Image(systemName: player.state.isPlaying ? "pause.fill" : "play.fill")
+                        }
+                        Button { player.skipNext() } label: { Image(systemName: "forward.fill") }
+                    }
+                    .padding()
+                    .background(.regularMaterial)
+                }
+            }
         }
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { library.importFiles(urls) }

@@ -7,10 +7,14 @@ final class AppServices {
 
     let database: LibraryDatabase
     let library: LibraryStore
+    let transitions: TransitionSettingsStore
+    let player: PlayerController
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
         database = (try? LibraryDatabase.open()) ?? (try! LibraryDatabase.inMemory())
         library = LibraryStore(database: database)
+        transitions = TransitionSettingsStore()
+        player = PlayerController(database: database, transitions: transitions)
     }
 }

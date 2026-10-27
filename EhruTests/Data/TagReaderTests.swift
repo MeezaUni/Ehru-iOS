@@ -3,9 +3,13 @@ import XCTest
 
 /// Builds small tagged files byte by byte, so the readers are tested without real music.
 enum TagFixtures {
-    static func be32(_ v: Int) -> Data { Data([UInt8(v >> 24 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)]) }
-    static func le32(_ v: Int) -> Data { Data([UInt8(v & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 24 & 0xFF)]) }
-    static func syncsafe(_ v: Int) -> Data { Data([UInt8(v >> 21 & 0x7F), UInt8(v >> 14 & 0x7F), UInt8(v >> 7 & 0x7F), UInt8(v & 0x7F)]) }
+    static func bytes(_ v: Int, shifts: [Int], mask: Int) -> Data {
+        Data(shifts.map { UInt8((v >> $0) & mask) })
+    }
+
+    static func be32(_ v: Int) -> Data { bytes(v, shifts: [24, 16, 8, 0], mask: 0xFF) }
+    static func le32(_ v: Int) -> Data { bytes(v, shifts: [0, 8, 16, 24], mask: 0xFF) }
+    static func syncsafe(_ v: Int) -> Data { bytes(v, shifts: [21, 14, 7, 0], mask: 0x7F) }
 
     static func id3Frame(_ id: String, _ payload: Data, v4: Bool) -> Data {
         Data(id.utf8) + (v4 ? syncsafe(payload.count) : be32(payload.count)) + Data([0, 0]) + payload
@@ -25,8 +29,9 @@ enum TagFixtures {
     static let jpeg = Data([0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4])
 
     static func mp3(v4: Bool) -> Data {
-        id3Tag([
-            textFrame("TIT2", "IGOR’S THEME", v4: v4),
+        var frames: [Data] = []
+        frames.append(textFrame("TIT2", "IGOR’S THEME", v4: v4))
+        frames += [
             textFrame("TPE1", "Tyler/ The Creator", v4: v4),
             textFrame("TPE2", "Tyler, The Creator", v4: v4),
             textFrame("TALB", "IGOR", v4: v4),
@@ -36,8 +41,11 @@ enum TagFixtures {
             textFrame("TCON", "(7)Hip Hop/Rap", v4: v4),
             textFrame("TBPM", "128", v4: v4),
             id3Frame("USLT", Data([3]) + Data("eng".utf8) + Data([0]) + Data("la la la".utf8), v4: v4),
-            id3Frame("APIC", Data([0]) + Data("image/jpeg".utf8) + Data([0, 3]) + Data([0]) + jpeg, v4: v4),
-        ], v4: v4) + Data(repeating: 0, count: 64)
+        ]
+        var apic = Data([0]) + Data("image/jpeg".utf8)
+        apic += Data([0, 3, 0]) + jpeg
+        frames.append(id3Frame("APIC", apic, v4: v4))
+        return id3Tag(frames, v4: v4) + Data(repeating: 0, count: 64)
     }
 
     static func atom(_ name: String, _ body: Data) -> Data { be32(body.count + 8) + Data(name.utf8) + body }
@@ -48,20 +56,23 @@ enum TagFixtures {
     }
 
     static func m4a() -> Data {
-        let copyright: UInt8 = 0xA9
-        let ilst = atom("ilst",
-            ilstItem([copyright] + Array("nam".utf8), type: 1, Data("Rich Flex".utf8))
-            + ilstItem([copyright] + Array("ART".utf8), type: 1, Data("Drake/21 Savage".utf8))
-            + ilstItem(Array("aART".utf8), type: 1, Data("Drake & 21 Savage".utf8))
-            + ilstItem([copyright] + Array("alb".utf8), type: 1, Data("Her Loss".utf8))
-            + ilstItem([copyright] + Array("day".utf8), type: 1, Data("2022-11-04T12:00:00Z".utf8))
-            + ilstItem(Array("trkn".utf8), type: 0, Data([0, 0, 0, 1, 0, 16, 0, 0]))
-            + ilstItem(Array("disk".utf8), type: 0, Data([0, 0, 0, 1, 0, 1]))
-            + ilstItem(Array("tmpo".utf8), type: 21, Data([0, 153]))
-            + ilstItem(Array("cpil".utf8), type: 21, Data([1]))
-            + ilstItem(Array("covr".utf8), type: 13, jpeg))
-        let meta = atom("meta", Data([0, 0, 0, 0]) + atom("hdlr", Data(repeating: 0, count: 25)) + ilst)
-        return atom("ftyp", Data("M4A ".utf8) + be32(0)) + atom("moov", atom("udta", meta))
+        let c: [UInt8] = [0xA9]
+        var items = Data()
+        items += ilstItem(c + Array("nam".utf8), type: 1, Data("Rich Flex".utf8))
+        items += ilstItem(c + Array("ART".utf8), type: 1, Data("Drake/21 Savage".utf8))
+        items += ilstItem(Array("aART".utf8), type: 1, Data("Drake & 21 Savage".utf8))
+        items += ilstItem(c + Array("alb".utf8), type: 1, Data("Her Loss".utf8))
+        items += ilstItem(c + Array("day".utf8), type: 1, Data("2022-11-04T12:00:00Z".utf8))
+        items += ilstItem(Array("trkn".utf8), type: 0, Data([0, 0, 0, 1, 0, 16, 0, 0]))
+        items += ilstItem(Array("disk".utf8), type: 0, Data([0, 0, 0, 1, 0, 1]))
+        items += ilstItem(Array("tmpo".utf8), type: 21, Data([0, 153]))
+        items += ilstItem(Array("cpil".utf8), type: 21, Data([1]))
+        items += ilstItem(Array("covr".utf8), type: 13, jpeg)
+        let ilst = atom("ilst", items)
+        let hdlr = atom("hdlr", Data(repeating: 0, count: 25))
+        let meta = atom("meta", Data([0, 0, 0, 0]) + hdlr + ilst)
+        let ftyp = atom("ftyp", Data("M4A ".utf8) + be32(0))
+        return ftyp + atom("moov", atom("udta", meta))
     }
 
     static func flac() -> Data {
@@ -73,11 +84,20 @@ enum TagFixtures {
                         "DATE=2017-10-31", "GENRE=Hip Hop", "GENRE=Trap", "LYRICS=words"]
         var vorbis = le32(6) + Data("vendor".utf8) + le32(comments.count)
         for comment in comments { vorbis += le32(comment.utf8.count) + Data(comment.utf8) }
-        let picture = be32(3) + be32(10) + Data("image/jpeg".utf8) + be32(0) + Data(repeating: 0, count: 16) + be32(jpeg.count) + jpeg
+        var picture = be32(3) + be32(10)
+        picture += Data("image/jpeg".utf8)
+        picture += be32(0) + Data(repeating: 0, count: 16)
+        picture += be32(jpeg.count) + jpeg
         func block(_ type: UInt8, last: Bool, _ body: Data) -> Data {
-            Data([last ? type | 0x80 : type, UInt8(body.count >> 16 & 0xFF), UInt8(body.count >> 8 & 0xFF), UInt8(body.count & 0xFF)]) + body
+            let first: UInt8 = last ? type | 0x80 : type
+            let length = [UInt8(body.count >> 16 & 0xFF), UInt8(body.count >> 8 & 0xFF), UInt8(body.count & 0xFF)]
+            return Data([first] + length) + body
         }
-        return Data("fLaC".utf8) + block(0, last: false, streamInfo) + block(4, last: false, vorbis) + block(6, last: true, picture)
+        var file = Data("fLaC".utf8)
+        file += block(0, last: false, streamInfo)
+        file += block(4, last: false, vorbis)
+        file += block(6, last: true, picture)
+        return file
     }
 
     static func write(_ data: Data, name: String) -> URL {
