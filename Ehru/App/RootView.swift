@@ -45,6 +45,7 @@ struct RootView: View {
             AddToPlaylistSheet(songs: batch.songs)
         }
         .sheet(item: $router.songForDetails) { song in SongDetailsSheet(song: song) }
+        .sheet(item: $router.songForTagEdit) { song in EditTagsSheet(song: song) }
         .alert("New playlist", isPresented: $router.showsNewPlaylist) { NewPlaylistAlert() }
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { library.importFiles(urls) }

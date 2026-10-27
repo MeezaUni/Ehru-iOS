@@ -57,10 +57,10 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Android | iOS | Notes |
 |---|---|---|
 | Wi-Fi Transfer | ✅ | Same page, routes, pairing and checks. Runs only while empee3 is open (iOS suspends apps in the background). Ogg and Opus are refused because iOS cannot play them. |
-| Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ⏳ | Largest remaining piece |
+| Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz and Deezer searched; native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Last.fm (needs a key), renaming files (song identity is the path on iOS) |
 | Artwork Fetcher (album covers, artist photos, Fanart.tv) | ⏳ | |
 | Animated album artwork (Apple Music motion covers) | ⏳ | |
-| BPM finder | ⏳ | |
+| BPM finder | ✅ | AcousticBrainz, then the on-device tempo estimate; only fills a missing BPM |
 | Themes, skins, theme import and rollback | 🟡 | Light / dark / system and the glass effect are ported; imported themes and skins are not |
 | Update checker (GitHub releases) | ➖ | Sideloaded builds are updated by reinstalling |
 

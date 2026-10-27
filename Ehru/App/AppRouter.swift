@@ -100,6 +100,8 @@ final class AppRouter {
     var showsNowPlaying = false
     var songsForPlaylist: [Song]?
     var songForDetails: Song?
+    /// The song whose tags are being edited by hand.
+    var songForTagEdit: Song?
     var showsNewPlaylist = false
 
     func open(_ route: Route) {
@@ -132,6 +134,11 @@ final class AppRouter {
             startRadio: { actions.startRadio(.song($0.id)) },
             addToPlaylist: { [weak self] song in self?.songsForPlaylist = [song] },
             viewDetails: { [weak self] song in self?.songForDetails = song },
+            editTags: { [weak self] song in self?.songForTagEdit = song },
+            fixTags: { [weak self] song in
+                AppServices.shared.fixTags.enqueue([song])
+                self?.open(.autoFixTags)
+            },
             hideFromMixes: hideFromMixes
         )
     }

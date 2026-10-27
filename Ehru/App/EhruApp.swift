@@ -18,6 +18,7 @@ struct EhruApp: App {
                 .environment(services.sound)
                 .environment(services.lyrics)
                 .environment(services.transfer)
+                .environment(services.fixTags)
                 .environment(services.transitions)
                 .preferredColorScheme(services.settings.theme.colorScheme)
         }

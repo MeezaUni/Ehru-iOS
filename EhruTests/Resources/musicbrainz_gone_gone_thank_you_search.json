@@ -1,0 +1,113 @@
+{
+ "created": "2026-10-13T17:55:53.415Z",
+ "query": "recording:\"THANK YOU\" AND artist:\"Tyler/ The Creator\"",
+ "count": 3,
+ "recordings": [
+  {
+   "id": "1b27ca76-48fd-4362-952a-37ad0f342bff",
+   "title": "GONE, GONE / THANK YOU",
+   "length": 272000,
+   "first-release-date": "2019-10-24",
+   "artist-credit": [
+    {
+     "name": "Tyler, The Creator",
+     "joinphrase": ""
+    }
+   ],
+   "releases": [
+    {
+     "id": "a8a67012-0aa4-4a41-a9d7-f1c4f32414c3",
+     "title": "IGOR",
+     "status": "Official",
+     "date": "2019-10-24",
+     "release-group": {
+      "id": "0f1b9e07-b38b-4bba-9794-55e0924d7177",
+      "title": "IGOR",
+      "primary-type": "Album",
+      "secondary-types": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "82f7c746-924f-47fb-b4ab-1410b6e68a69",
+   "title": "GONE, GONE / THANK YOU",
+   "length": 279000,
+   "disambiguation": "Apple Music Presents",
+   "first-release-date": "2019-08-13",
+   "artist-credit": [
+    {
+     "name": "Tyler, The Creator",
+     "joinphrase": ""
+    }
+   ],
+   "releases": [
+    {
+     "id": "8fec8853-7f22-4d55-8705-97dae226f37c",
+     "title": "Apple Music Presents: Tyler, The Creator",
+     "status": "Official",
+     "date": null,
+     "release-group": {
+      "id": "138cdc96-3ed9-401c-a01e-93298af3f83c",
+      "title": "Apple Music Presents: Tyler, The Creator",
+      "primary-type": "Album",
+      "secondary-types": [
+       "Live"
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "id": "fb010874-ff33-45c9-b2f6-4afe146096b0",
+   "title": "GONE, GONE / THANK YOU",
+   "length": 375000,
+   "disambiguation": "explicit",
+   "first-release-date": "2019-05-17",
+   "artist-credit": [
+    {
+     "name": "Tyler, The Creator",
+     "joinphrase": ""
+    }
+   ],
+   "releases": [
+    {
+     "id": "8fc14822-33d9-4541-94e5-b5fedc7810ed",
+     "title": "IGOR",
+     "status": "Official",
+     "date": "2019-08-23",
+     "release-group": {
+      "id": "0f1b9e07-b38b-4bba-9794-55e0924d7177",
+      "title": "IGOR",
+      "primary-type": "Album",
+      "secondary-types": []
+     }
+    },
+    {
+     "id": "dafab458-d6dd-4150-89df-bbc9a335d1ad",
+     "title": "IGOR",
+     "status": "Official",
+     "date": "2019-08-23",
+     "release-group": {
+      "id": "0f1b9e07-b38b-4bba-9794-55e0924d7177",
+      "title": "IGOR",
+      "primary-type": "Album",
+      "secondary-types": []
+     }
+    },
+    {
+     "id": "765263d3-4588-43ad-ba08-303b62b31e9e",
+     "title": "Igor",
+     "status": "Official",
+     "date": "2019-08-23",
+     "release-group": {
+      "id": "0f1b9e07-b38b-4bba-9794-55e0924d7177",
+      "title": "IGOR",
+      "primary-type": "Album",
+      "secondary-types": []
+     }
+    }
+   ]
+  }
+ ]
+}

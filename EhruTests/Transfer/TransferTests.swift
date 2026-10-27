@@ -211,10 +211,16 @@ final class TransferRouterTests: XCTestCase {
     private let sink = FakeSink()
     private let registry = TransferRegistry()
     private let saved = Counter()
-    private lazy var router = TransferRouter(
-        session: session, hostPort: host, sink: sink, registry: registry, limits: TransferLimits(maxFileBytes: 1_000_000),
-        events: TransferEvents(onFileSaved: { [saved] in saved.increment() }), clock: { 1 }
-    )
+    // Built once per test, before any concurrent task touches it (a lazy var could be built twice).
+    private var router: TransferRouter!
+
+    override func setUp() {
+        super.setUp()
+        router = TransferRouter(
+            session: session, hostPort: host, sink: sink, registry: registry, limits: TransferLimits(maxFileBytes: 1_000_000),
+            events: TransferEvents(onFileSaved: { [saved] in saved.increment() }), clock: { 1 }
+        )
+    }
 
     private final class Counter: @unchecked Sendable {
         private let lock = NSLock()
