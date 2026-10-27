@@ -11,37 +11,22 @@ concurrency:
 jobs:
   build:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       HOMEBREW_NO_AUTO_UPDATE: "1"
     steps:
       - uses: actions/checkout@v5
 
-      # The runner's default Xcode is the one that has simulators installed alongside it.
-      - name: Show Xcode version
-        run: xcodebuild -version
+      - name: Select newest Xcode
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -iv beta | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE"
+          xcodebuild -version
 
       - name: Generate Xcode project
         run: |
           brew install xcodegen
           xcodegen generate
-
-      - name: Run unit tests
-        run: |
-          set -o pipefail
-          # Newest iPhone simulator this Xcode can run.
-          DESTINATIONS=$(xcodebuild -showdestinations -project Ehru.xcodeproj -scheme Ehru)
-          DEVICE=$(echo "$DESTINATIONS" \
-            | grep 'platform:iOS Simulator' | grep 'name:iPhone' \
-            | sed -E 's/.*id:([^,]+), OS:([^,]+),.*/\2 \1/' | sort -V | tail -1 | awk '{print $2}' || true)
-          if [ -z "$DEVICE" ]; then
-            echo "No iPhone simulator available. Destinations were:"
-            echo "$DESTINATIONS"
-            exit 1
-          fi
-          echo "Testing on simulator $DEVICE"
-          xcodebuild test -project Ehru.xcodeproj -scheme Ehru \
-            -destination "id=$DEVICE" CODE_SIGNING_ALLOWED=NO
 
       - name: Build unsigned IPA
         run: |
@@ -58,3 +43,28 @@ jobs:
           name: Ehru-ipa
           path: dist/Ehru.ipa
           if-no-files-found: error
+
+      - name: Create iPhone simulator
+        run: |
+          newest_ios_runtime() {
+            xcrun simctl list runtimes available -j | jq -r '
+              [.runtimes[] | select(.platform == "iOS")]
+              | sort_by(.version | split(".") | map(tonumber)) | last | .identifier // empty'
+          }
+          RUNTIME=$(newest_ios_runtime)
+          if [ -z "$RUNTIME" ]; then
+            echo "No iOS simulator runtime installed for this Xcode; downloading one."
+            xcodebuild -downloadPlatform iOS
+            RUNTIME=$(newest_ios_runtime)
+          fi
+          DEVICE_TYPE=$(xcrun simctl list runtimes available -j | jq -r --arg runtime "$RUNTIME" '
+            .runtimes[] | select(.identifier == $runtime)
+            | [.supportedDeviceTypes[] | select(.productFamily == "iPhone")] | last | .identifier')
+          echo "Creating $DEVICE_TYPE on $RUNTIME"
+          DEVICE=$(xcrun simctl create "CI iPhone" "$DEVICE_TYPE" "$RUNTIME")
+          echo "SIMULATOR_ID=$DEVICE" >> "$GITHUB_ENV"
+
+      - name: Run unit tests
+        run: |
+          xcodebuild test -project Ehru.xcodeproj -scheme Ehru \
+            -destination "id=$SIMULATOR_ID" CODE_SIGNING_ALLOWED=NO
