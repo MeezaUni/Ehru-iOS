@@ -229,14 +229,15 @@ final class TransferRouterTests: XCTestCase {
         return try! HttpParser.readHead(Data(head.utf8))
     }
 
-    private func api(token: String?? = .some(nil), _ extra: [(String, String)] = []) -> [(String, String)] {
+    /// [token]: nil sends the session's token, .some(nil) sends none.
+    private func api(token: String?? = nil, _ extra: [(String, String)] = []) -> [(String, String)] {
         var headers = [(TransferRouter.clientHeader, TransferRouter.clientValue)]
-        let value: String? = token == .some(nil) ? session.token : token!
+        let value: String? = token == nil ? session.token : token!
         if let value { headers.append((TransferRouter.tokenHeader, value)) }
         return headers + extra
     }
 
-    private func upload(_ name: String, _ body: Data, token: String?? = .some(nil), reader: BodyReader? = nil, length: Int? = nil) async -> HttpResponse? {
+    private func upload(_ name: String, _ body: Data, token: String?? = nil, reader: BodyReader? = nil, length: Int? = nil) async -> HttpResponse? {
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? name
         let headers = api(token: token, [(TransferRouter.nameHeader, encoded), ("Content-Length", "\(length ?? body.count)")])
         return await router.handle(request("POST", "/api/upload", headers), body: reader ?? MemoryBody(body))
