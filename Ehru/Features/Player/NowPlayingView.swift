@@ -9,10 +9,14 @@ struct NowPlayingView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
-    @State private var scrubbing: Double?
+    @State private var scrubbing: Int64?
+    @State private var waveform: WaveformLoad = .loading
+    @State private var bookmarks: [Int64] = []
     @State private var showsQueue = false
     @State private var showsLyrics = false
     @State private var showsMarks = false
+    @State private var showsVisualizer = false
+    @State private var showsEqualizer = false
 
     var body: some View {
         let state = player.state
@@ -50,6 +54,12 @@ struct NowPlayingView: View {
         .background(backdrop(state.currentSong).ignoresSafeArea())
         .sheet(isPresented: $showsQueue) { QueueSheet() }
         .sheet(isPresented: $showsMarks) { MarksSheet() }
+        .fullScreenCover(isPresented: $showsVisualizer) { VisualizerView() }
+        .sheet(isPresented: $showsEqualizer) {
+            NavigationStack {
+                EqualizerView().toolbar { Button("Done") { showsEqualizer = false } }
+            }
+        }
     }
 
     private var header: some View {
@@ -94,6 +104,8 @@ struct NowPlayingView: View {
                     Button { actions.refreshRadio() } label: { Label("New radio picks", systemImage: "arrow.clockwise") }
                 }
                 Button { showsQueue = true } label: { Label("Queue", systemImage: "list.bullet") }
+                Button { showsVisualizer = true } label: { Label("Visualizer", systemImage: "waveform") }
+                Button { showsEqualizer = true } label: { Label("Equalizer", systemImage: "slider.vertical.3") }
             }
         } label: {
             Image(systemName: "ellipsis").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
@@ -136,26 +148,30 @@ struct NowPlayingView: View {
     }
 
     private func seekBar(_ state: PlaybackState) -> some View {
-        let duration = Double(max(state.durationMs, 1))
-        let position = scrubbing ?? Double(state.positionMs)
+        let position = scrubbing ?? state.positionMs
+        let levels: [Float]? = if case .ready(let values) = waveform { values } else { nil }
         return VStack(spacing: Spacing.xs) {
-            Slider(value: Binding(get: { position }, set: { scrubbing = $0 }), in: 0...duration) { editing in
-                if !editing, let target = scrubbing {
-                    player.seek(to: Int64(target))
-                    scrubbing = nil
-                }
+            WaveformSeekBar(levels: levels, positionMs: state.positionMs, durationMs: state.durationMs, bookmarks: bookmarks,
+                            loop: state.abLoop?.songId == state.currentSong?.id ? state.abLoop : nil, previewMs: $scrubbing) {
+                player.seek(to: $0)
             }
-            .tint(palette.primary)
             HStack {
-                Text(formatDuration(Int64(position)))
+                Text(formatDuration(position))
                 Spacer()
-                Text("-" + formatDuration(Int64(duration - position)))
+                Text("-" + formatDuration(max(state.durationMs - position, 0)))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(palette.onSurfaceVariant)
         }
         .padding(.horizontal, Spacing.heroGutter)
         .padding(.top, Spacing.md)
+        .task(id: state.currentSong?.id) {
+            waveform = .loading
+            bookmarks = []
+            guard let song = state.currentSong else { return }
+            bookmarks = ((try? AppServices.shared.database.bookmarks(songId: song.id)) ?? []).map(\.positionMs)
+            waveform = await AppServices.shared.waveforms.waveform(song)
+        }
     }
 
     private func transport(_ state: PlaybackState) -> some View {
