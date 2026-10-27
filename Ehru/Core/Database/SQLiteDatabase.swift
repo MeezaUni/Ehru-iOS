@@ -75,6 +75,7 @@ final class SQLiteDatabase: @unchecked Sendable {
     private let lock = NSRecursiveLock()
     private var transactionDepth = 0
     private var notifyScheduled = false
+    private var changedTables: Set<String> = []
 
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
@@ -108,7 +109,7 @@ final class SQLiteDatabase: @unchecked Sendable {
             let result = sqlite3_step(statement)
             guard result == SQLITE_DONE || result == SQLITE_ROW else { throw error(sql) }
             let changes = Int(sqlite3_changes(handle))
-            if !sql.uppercased().hasPrefix("PRAGMA") && !sql.uppercased().hasPrefix("SELECT") { markDirty() }
+            if changes > 0, let table = Self.writtenTable(sql) { markDirty(table: table) }
             return changes
         }
     }
@@ -187,13 +188,36 @@ final class SQLiteDatabase: @unchecked Sendable {
         DatabaseError(message: String(cString: sqlite3_errmsg(handle)), sql: sql)
     }
 
-    private func markDirty() {
+    /// Coalesced notifications identify the written tables, so cache writes do not rebuild the library.
+    static func affects(_ notification: Notification, tables: Set<String>) -> Bool {
+        guard let changed = notification.userInfo?["tables"] as? Set<String> else { return true }
+        return changed.contains("*") || !changed.isDisjoint(with: tables)
+    }
+
+    private static func writtenTable(_ sql: String) -> String? {
+        let words = sql.lowercased().split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard let command = words.first else { return nil }
+        switch command {
+        case "insert", "replace":
+            guard let into = words.firstIndex(of: "into"), words.indices.contains(into + 1) else { return "*" }
+            return words[into + 1].components(separatedBy: "(")[0]
+        case "update": return words.count > 1 && words[1] != "or" ? words[1] : "*"
+        case "delete": return words.count > 2 ? words[2] : "*"
+        default: return nil
+        }
+    }
+
+    private func markDirty(table: String = "*") {
+        changedTables.insert(table)
         guard !notifyScheduled else { return }
         notifyScheduled = true
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
-            self.locked { self.notifyScheduled = false }
-            NotificationCenter.default.post(name: Self.didChange, object: self)
+            let tables = self.locked { () -> Set<String> in
+                defer { self.notifyScheduled = false; self.changedTables.removeAll() }
+                return self.changedTables
+            }
+            NotificationCenter.default.post(name: Self.didChange, object: self, userInfo: ["tables": tables])
         }
     }
 }

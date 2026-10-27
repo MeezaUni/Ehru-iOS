@@ -36,7 +36,8 @@ final class MixStore {
         guard !started else { return }
         started = true
         rebuild()
-        observer = NotificationCenter.default.addObserver(forName: SQLiteDatabase.didChange, object: database.db, queue: .main) { [weak self] _ in
+        observer = NotificationCenter.default.addObserver(forName: SQLiteDatabase.didChange, object: database.db, queue: .main) { [weak self] note in
+            guard SQLiteDatabase.affects(note, tables: ["songs", "listening_stats"]) else { return }
             MainActor.assumeIsolated { self?.scheduleRebuild() }
         }
     }

@@ -7,6 +7,15 @@ import UIKit
 /// picture are remembered too, so they are not read again.
 final class ArtworkLoader: @unchecked Sendable {
     static let shared = ArtworkLoader()
+    static let didChange = Notification.Name("ArtworkLoader.didChange")
+    private let revisionsLock = NSLock()
+    private var revisions: [String: Int] = [:]
+
+    func revision(for path: String) -> Int { revisionsLock.withLock { revisions[path, default: 0] } }
+
+    private func key(for url: URL, maxPixels: Int) -> NSString {
+        "\(url.path)|\(maxPixels)|\(revision(for: url.path))" as NSString
+    }
 
     private let cache = NSCache<NSString, UIImage>()
     private let misses = NSCache<NSString, NSNumber>()
@@ -14,23 +23,25 @@ final class ArtworkLoader: @unchecked Sendable {
 
     private init() {
         cache.countLimit = 300
+        cache.totalCostLimit = 64 * 1024 * 1024
         misses.countLimit = 2_000
     }
 
     /// The cover of the file at [url], at most [maxPixels] on its longer side, or nil.
     func image(for url: URL, maxPixels: Int) async -> UIImage? {
-        let key = "\(url.path)|\(maxPixels)" as NSString
+        let key = key(for: url, maxPixels: maxPixels)
+        let missKey = "\(url.path)|\(revision(for: url.path))" as NSString
         if let cached = cache.object(forKey: key) { return cached }
-        if misses.object(forKey: url.path as NSString) != nil { return nil }
+        if misses.object(forKey: missKey) != nil { return nil }
         return await withCheckedContinuation { continuation in
             queue.async {
                 guard let data = TagReader.artwork(url) else {
-                    self.misses.setObject(1, forKey: url.path as NSString)
+                    self.misses.setObject(1, forKey: missKey)
                     continuation.resume(returning: nil)
                     return
                 }
                 let image = Self.downsample(data, maxPixels: maxPixels)
-                if let image { self.cache.setObject(image, forKey: key) }
+                if let image { self.cache.setObject(image, forKey: key, cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0) }
                 continuation.resume(returning: image)
             }
         }
@@ -38,7 +49,7 @@ final class ArtworkLoader: @unchecked Sendable {
 
     /// A cached image without loading (for drawing the first frame without a flash).
     func cachedImage(for url: URL, maxPixels: Int) -> UIImage? {
-        cache.object(forKey: "\(url.path)|\(maxPixels)" as NSString)
+        cache.object(forKey: key(for: url, maxPixels: maxPixels))
     }
 
     /// An image file (custom artist or playlist cover) at [path], downsampled.
@@ -52,15 +63,16 @@ final class ArtworkLoader: @unchecked Sendable {
                     continuation.resume(returning: nil)
                     return
                 }
-                self.cache.setObject(image, forKey: key)
+                self.cache.setObject(image, forKey: key, cost: image.cgImage.map { $0.bytesPerRow * $0.height } ?? 0)
                 continuation.resume(returning: image)
             }
         }
     }
 
     func forget(path: String) {
-        cache.removeAllObjects()
-        misses.removeObject(forKey: path as NSString)
+        revisionsLock.withLock { revisions[path, default: 0] += 1 }
+        // Versioned keys isolate this file, including reads already in flight.
+        NotificationCenter.default.post(name: Self.didChange, object: path)
     }
 
     static func downsample(_ data: Data, maxPixels: Int) -> UIImage? {

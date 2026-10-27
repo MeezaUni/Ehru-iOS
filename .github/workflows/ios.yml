@@ -67,4 +67,12 @@ jobs:
       - name: Run unit tests
         run: |
           xcodebuild test -project Ehru.xcodeproj -scheme Ehru \
-            -destination "id=$SIMULATOR_ID" CODE_SIGNING_ALLOWED=NO
+            -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload test results and performance measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Ehru-test-results
+          path: build/TestResults.xcresult
+          if-no-files-found: warn

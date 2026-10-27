@@ -36,7 +36,8 @@ final class LibraryStore {
     init(database: LibraryDatabase) {
         self.database = database
         reload()
-        observer = NotificationCenter.default.addObserver(forName: SQLiteDatabase.didChange, object: database.db, queue: .main) { [weak self] _ in
+        observer = NotificationCenter.default.addObserver(forName: SQLiteDatabase.didChange, object: database.db, queue: .main) { [weak self] note in
+            guard SQLiteDatabase.affects(note, tables: ["songs", "albums", "artists", "playlists", "playlist_song_cross_ref", "artist_artwork", "recently_played", "listening_stats"]) else { return }
             MainActor.assumeIsolated { self?.reload() }
         }
     }

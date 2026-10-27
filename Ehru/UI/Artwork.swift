@@ -7,6 +7,7 @@ struct SongArtworkView: View {
     var placeholder = "music.note"
     @Environment(\.palette) private var palette
     @State private var image: UIImage?
+    @State private var artworkRevision = 0
 
     var body: some View {
         ZStack {
@@ -19,13 +20,20 @@ struct SongArtworkView: View {
                     .foregroundStyle(palette.onSurfaceVariant)
             }
         }
-        .task(id: url) {
+        .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
+            if note.object as? String == url?.path { artworkRevision += 1 }
+        }
+        .task(id: "\(url?.path ?? "")|\(maxPixels)|\(artworkRevision)") {
             guard let url else {
                 image = nil
                 return
             }
             image = ArtworkLoader.shared.cachedImage(for: url, maxPixels: maxPixels)
-            if image == nil { image = await ArtworkLoader.shared.image(for: url, maxPixels: maxPixels) }
+            if image == nil {
+                let loaded = await ArtworkLoader.shared.image(for: url, maxPixels: maxPixels)
+                guard !Task.isCancelled else { return }
+                image = loaded
+            }
         }
     }
 }

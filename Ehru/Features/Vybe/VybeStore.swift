@@ -62,7 +62,8 @@ final class VybeStore {
         guard !started else { return }
         started = true
         Task { await engine.refresh() }
-        observer = NotificationCenter.default.addObserver(forName: SQLiteDatabase.didChange, object: database.db, queue: .main) { [weak self] _ in
+        observer = NotificationCenter.default.addObserver(forName: SQLiteDatabase.didChange, object: database.db, queue: .main) { [weak self] note in
+            guard SQLiteDatabase.affects(note, tables: ["songs"]) else { return }
             MainActor.assumeIsolated { self?.libraryChanged() }
         }
     }

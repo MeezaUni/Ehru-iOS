@@ -598,6 +598,14 @@ final class PlayerController {
 
     private func observeAudioSession() {
         let center = NotificationCenter.default
+        observers.append(center.addObserver(forName: ArtworkLoader.didChange, object: nil, queue: .main) { [weak self] note in
+            let path = note.object as? String
+            MainActor.assumeIsolated {
+                guard let self, path == self.state.currentSong?.url.path else { return }
+                self.artworkSongId = nil
+                self.updateNowPlaying()
+            }
+        })
         let session = AVAudioSession.sharedInstance()
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] note in
             let type = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
@@ -624,8 +632,7 @@ final class PlayerController {
         switch interruption {
         case .began:
             if state.isPlaying {
-                refreshPosition()
-                playingChanged(false)
+                pause()
             }
         case .ended:
             if AVAudioSession.InterruptionOptions(rawValue: options ?? 0).contains(.shouldResume) { play() }
@@ -666,6 +673,7 @@ final class PlayerController {
 
     private func updateNowPlaying() {
         guard let song = state.currentSong else {
+            MPNowPlayingInfoCenter.default().playbackState = .stopped
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
         }
@@ -684,6 +692,7 @@ final class PlayerController {
         ]
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
+        MPNowPlayingInfoCenter.default().playbackState = state.isPlaying ? .playing : .paused
     }
 
     private func loadArtwork(for song: Song) {

@@ -61,6 +61,12 @@ actor VybeEngine {
             update(.failed("The library couldn't be read: \(error.localizedDescription)"))
             return
         }
+        if songs == library {
+            switch status {
+            case .ready, .indexing: return
+            default: break
+            }
+        }
         indexing?.cancel()
         indexing = Task { await self.reindex(songs) }
     }

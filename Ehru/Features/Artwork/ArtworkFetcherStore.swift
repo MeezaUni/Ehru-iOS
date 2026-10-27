@@ -89,27 +89,33 @@ final class ArtworkFetcherStore {
     }
 
     /// Downloads [candidate] and embeds it into every song of [album] (each write verified).
-    func applyCover(_ candidate: ArtworkCandidate, to album: Album) async {
+    @discardableResult
+    func applyCover(_ candidate: ArtworkCandidate, to album: Album) async -> Bool {
         albumStatus[album.id] = .writing
         do {
             let image = try await service.downloadArtwork(candidate.url)
             try await embed(image, in: album)
             albumStatus[album.id] = .done
             albums.removeAll { $0.id == album.id }
+            return true
         } catch {
             albumStatus[album.id] = .failed(error.localizedDescription)
+            return false
         }
     }
 
     /// Embeds image bytes the user picked into every song of [album].
-    func applyCover(_ image: Data, to album: Album) async {
+    @discardableResult
+    func applyCover(_ image: Data, to album: Album) async -> Bool {
         albumStatus[album.id] = .writing
         do {
             try await embed(image, in: album)
             albumStatus[album.id] = .done
             albums.removeAll { $0.id == album.id }
+            return true
         } catch {
             albumStatus[album.id] = .failed(error.localizedDescription)
+            return false
         }
     }
 
@@ -135,15 +141,18 @@ final class ArtworkFetcherStore {
     }
 
     /// Downloads [candidate] and stores it as [artist]'s photo.
-    func applyPhoto(_ candidate: ArtworkCandidate, to artist: Artist) async {
+    @discardableResult
+    func applyPhoto(_ candidate: ArtworkCandidate, to artist: Artist) async -> Bool {
         artistStatus[artist.id] = .writing
         do {
             let image = try await service.downloadArtwork(candidate.url)
             try storePhoto(image, for: artist, source: "CUSTOM")
             artistStatus[artist.id] = .done
             artists.removeAll { $0.id == artist.id }
+            return true
         } catch {
             artistStatus[artist.id] = .failed(error.localizedDescription)
+            return false
         }
     }
 

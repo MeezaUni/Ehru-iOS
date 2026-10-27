@@ -126,6 +126,7 @@ struct ArtworkPickerSheet: View {
     @State private var loading = true
     @State private var saving = false
     @State private var photo: PhotosPickerItem?
+    @State private var saveError: String?
 
     var body: some View {
         NavigationStack {
@@ -167,6 +168,9 @@ struct ArtworkPickerSheet: View {
             }
             .disabled(saving)
             .overlay { if saving { ProgressView("Saving…").padding().background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12)) } }
+            .alert("Couldn’t save artwork", isPresented: Binding(get: { saveError != nil }, set: { if !$0 { saveError = nil } })) {
+                Button("OK") { saveError = nil }
+            } message: { Text(saveError ?? "") }
             .navigationTitle(target.name)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
@@ -174,7 +178,14 @@ struct ArtworkPickerSheet: View {
             .onChange(of: photo) { _, item in
                 guard let item else { return }
                 Task {
-                    if let data = try? await item.loadTransferable(type: Data.self) { await apply(data) }
+                    do {
+                        guard let data = try await item.loadTransferable(type: Data.self) else {
+                            saveError = "The selected photo could not be loaded."
+                            return
+                        }
+                        await apply(data)
+                    } catch { saveError = error.localizedDescription }
+                    photo = nil
                 }
             }
         }
@@ -188,23 +199,40 @@ struct ArtworkPickerSheet: View {
         loading = false
     }
 
-    private func apply(_ candidate: ArtworkCandidate) async {
-        saving = true
+    private var failureReason: String {
+        let status: ArtworkStatus?
         switch target {
-        case .album(let album): await store.applyCover(candidate, to: album)
-        case .artist(let artist): await store.applyPhoto(candidate, to: artist)
+        case .album(let album): status = store.albumStatus[album.id]
+        case .artist(let artist): status = store.artistStatus[artist.id]
+        }
+        if case .failed(let reason)? = status { return reason }
+        return "The image could not be saved. Try another image."
+    }
+
+    private func apply(_ candidate: ArtworkCandidate) async {
+        guard !saving else { return }
+        saving = true
+        let saved: Bool
+        switch target {
+        case .album(let album): saved = await store.applyCover(candidate, to: album)
+        case .artist(let artist): saved = await store.applyPhoto(candidate, to: artist)
         }
         saving = false
-        dismiss()
+        if saved { dismiss() } else { saveError = failureReason }
     }
 
     private func apply(_ image: Data) async {
+        guard !saving else { return }
         saving = true
+        defer { saving = false }
         switch target {
-        case .album(let album): await store.applyCover(image, to: album)
-        case .artist(let artist): try? store.storePhoto(image, for: artist, source: "CUSTOM")
+        case .album(let album):
+            if await store.applyCover(image, to: album) { dismiss() } else { saveError = failureReason }
+        case .artist(let artist):
+            do {
+                try store.storePhoto(image, for: artist, source: "CUSTOM")
+                dismiss()
+            } catch { saveError = error.localizedDescription }
         }
-        saving = false
-        dismiss()
     }
 }

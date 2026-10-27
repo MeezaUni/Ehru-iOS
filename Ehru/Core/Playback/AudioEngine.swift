@@ -23,6 +23,8 @@ final class AudioEngine {
         var segments: [Segment] = []
         /// Bumped whenever the deck is stopped, so callbacks of earlier schedules are ignored.
         var generation = 0
+        /// The render clock may be unavailable after pausing the node.
+        var pausedFrame: AVAudioFramePosition = 0
     }
 
     struct Segment {
@@ -178,7 +180,12 @@ final class AudioEngine {
     }
 
     func pause() {
-        for deck in decks where deck.player.isPlaying { deck.player.pause() }
+        for deck in decks where deck.player.isPlaying {
+            deck.pausedFrame = playedFrames(deck)
+            deck.player.pause()
+        }
+        // Stop rendering the DSP graph while retaining the scheduled segments.
+        engine.pause()
     }
 
     /// Resumes the active deck (and an outgoing crossfade deck that is still sounding).
@@ -191,6 +198,7 @@ final class AudioEngine {
     func stopAll() {
         stop(other)
         stop(active)
+        engine.pause()
     }
 
     var isPlaying: Bool { active.player.isPlaying }
@@ -262,7 +270,8 @@ final class AudioEngine {
     }
 
     private func playedFrames(_ deck: Deck) -> AVAudioFramePosition {
-        guard let nodeTime = deck.player.lastRenderTime, let playerTime = deck.player.playerTime(forNodeTime: nodeTime) else { return 0 }
+        guard deck.player.isPlaying else { return deck.pausedFrame }
+        guard let nodeTime = deck.player.lastRenderTime, let playerTime = deck.player.playerTime(forNodeTime: nodeTime) else { return deck.pausedFrame }
         return max(playerTime.sampleTime, 0)
     }
 
@@ -318,6 +327,7 @@ final class AudioEngine {
         deck.generation += 1
         deck.player.stop()
         deck.segments.removeAll()
+        deck.pausedFrame = 0
     }
 
     private func handleConfigurationChange() {

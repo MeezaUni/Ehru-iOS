@@ -289,15 +289,17 @@ actor LyricsPaletteCache {
     static let shared = LyricsPaletteCache()
     private static let samplePixels = 32
     private static let entries = 64
-    private var palettes: [URL: LyricsPalette] = [:]
+    private struct Entry { let revision: Int; let palette: LyricsPalette }
+    private var palettes: [URL: Entry] = [:]
     private var order: [URL] = []
 
     func palette(for url: URL) async -> LyricsPalette {
-        if let cached = palettes[url] { return cached }
+        let revision = ArtworkLoader.shared.revision(for: url.path)
+        if let cached = palettes[url], cached.revision == revision { return cached.palette }
         let image = await ArtworkLoader.shared.image(for: url, maxPixels: Self.samplePixels * 4)
         let palette = image?.cgImage.flatMap(Self.sample).map(LyricsPalette.fromPixels) ?? .fallback
         if palettes[url] == nil { order.append(url) }
-        palettes[url] = palette
+        palettes[url] = Entry(revision: revision, palette: palette)
         if order.count > Self.entries { palettes[order.removeFirst()] = nil }
         return palette
     }
