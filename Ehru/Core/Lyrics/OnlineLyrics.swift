@@ -175,7 +175,7 @@ enum LyricsMatcher {
     private static func artistSimilarity(_ query: String, _ candidate: String) -> Double {
         let a = artists(query)
         let b = artists(candidate)
-        if !a.isEmpty && !a.isDisjoint(with: b) { return 1 }
+        if !a.isEmpty && !Set(a).isDisjoint(with: b) { return 1 }
         // A name inside another ("Someone" in "Someone Else") is a different artist: never confident.
         return min(textSimilarity(a.joined(separator: " "), b.joined(separator: " ")), 0.6)
     }

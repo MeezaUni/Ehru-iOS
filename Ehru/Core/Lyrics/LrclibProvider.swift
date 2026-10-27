@@ -70,7 +70,7 @@ struct LrclibRecord: Decodable, Equatable {
     func toCandidate() -> LyricsCandidate? {
         guard let id, let title = trackName, !title.isBlank else { return nil }
         return LyricsCandidate(
-            provider: LrclibProvider.name, providerId: id, trackName: title, artistName: artistName ?? "", albumName: albumName,
+            provider: LrclibProvider.providerName, providerId: id, trackName: title, artistName: artistName ?? "", albumName: albumName,
             durationSec: duration, instrumental: instrumental || Lyricsfile.isInstrumental(lyricsfile),
             plainLyrics: plainLyrics?.nonBlank, syncedLyrics: syncedLyrics?.nonBlank,
             wordSyncedLrc: hasWordSync ? Lyricsfile.toEnhancedLrc(lyricsfile) : nil
@@ -82,8 +82,8 @@ struct LrclibRecord: Decodable, Equatable {
 /// 429 no request at all until its Retry-After has passed. Only the track's title, artist, album and
 /// duration are sent. Word timing is taken only from the Lyricsfile when LRCLIB says it has it.
 actor LrclibProvider: OnlineLyricsProvider {
-    static let name = "LRCLIB"
-    nonisolated let name = LrclibProvider.name
+    static let providerName = "LRCLIB"
+    nonisolated let name = LrclibProvider.providerName
     private static let base = URL(string: "https://lrclib.net/")!
     private static let userAgent = "empee3/1.0.0 (https://github.com/lochanpthakke/empee3)"
     static let defaultRetryMs: Int64 = 60_000

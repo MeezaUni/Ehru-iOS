@@ -29,8 +29,11 @@ final class SentenceEmbedder: TextEmbedder {
     private let mode: Mode
     let modelId: String
     let dimension: Int
-    /// Calibrated for EmbeddingGemma on Android; Apple's models may spread scores differently.
-    let weakBest: Float = 0.30
+    /// Best similarity below this: nothing is described like the query. The sentence model keeps
+    /// Android's EmbeddingGemma value until it is measured on a device; averaged word vectors score
+    /// everything higher (CI, 2026-10-27: genre and mood queries topped at 0.70-0.76, "sad but
+    /// beautiful" at 0.56, a song with no tags at 0.55), so their bar is 0.6.
+    var weakBest: Float { usesSentenceModel ? 0.30 : 0.60 }
 
     init(language: NLLanguage = .english, allowSentence: Bool = true) throws {
         if allowSentence, let sentence = NLEmbedding.sentenceEmbedding(for: language) {

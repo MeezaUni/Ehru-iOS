@@ -12,6 +12,7 @@ struct NowPlayingView: View {
     @State private var scrubbing: Double?
     @State private var showsQueue = false
     @State private var showsLyrics = false
+    @State private var showsMarks = false
 
     var body: some View {
         let state = player.state
@@ -48,6 +49,7 @@ struct NowPlayingView: View {
         .padding(.bottom, Spacing.lg)
         .background(backdrop(state.currentSong).ignoresSafeArea())
         .sheet(isPresented: $showsQueue) { QueueSheet() }
+        .sheet(isPresented: $showsMarks) { MarksSheet() }
     }
 
     private var header: some View {
@@ -75,6 +77,10 @@ struct NowPlayingView: View {
                 Button { router.songForDetails = song } label: { Label("Music information", systemImage: "info.circle") }
             }
             Section("Library") {
+                Button { addBookmark() } label: { Label("Bookmark this moment", systemImage: "bookmark") }
+                Button { showsMarks = true } label: {
+                    Label(player.state.abLoop?.enabled == true ? "Bookmarks & A–B loop (on)" : "Bookmarks & A–B loop", systemImage: "bookmark.square")
+                }
                 Button { if let song { router.songsForPlaylist = [song] } } label: { Label("Add to playlist", systemImage: "text.badge.plus") }
                 if let song {
                     Button { mixes.setHidden(song.id, !hidden) } label: {
@@ -94,6 +100,17 @@ struct NowPlayingView: View {
         }
         .disabled(song == nil)
         .accessibilityLabel("More options")
+    }
+
+    private func addBookmark() {
+        guard let song = player.state.currentSong else { return }
+        let position = player.currentPositionMs()
+        do {
+            _ = try AppServices.shared.database.addBookmark(songId: song.id, positionMs: position)
+            actions.show("Bookmarked \(formatDuration(position))")
+        } catch {
+            actions.show("Couldn't save the bookmark: \(error.localizedDescription)")
+        }
     }
 
     private func titleRow(_ song: Song) -> some View {
