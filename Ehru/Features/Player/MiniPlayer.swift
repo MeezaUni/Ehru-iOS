@@ -10,7 +10,6 @@ struct MiniPlayer: View {
 
     var body: some View {
         let state = player.state
-        let progress = state.durationMs > 0 ? Double(state.positionMs) / Double(state.durationMs) : 0
         HStack(spacing: Spacing.md) {
             Button(action: onOpen) {
                 HStack(spacing: Spacing.md) {
@@ -28,24 +27,39 @@ struct MiniPlayer: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens Now Playing")
-            Button { player.skipPrevious() } label: { Image(systemName: "backward.fill").frame(width: 36, height: 44) }
+            Button { player.skipPrevious() } label: { Image(systemName: "backward.fill").frame(width: 44, height: 48).contentShape(Rectangle()) }
                 .accessibilityLabel("Previous track")
             Button { player.togglePlayPause() } label: {
-                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").font(.title2).frame(width: 40, height: 44)
+                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").font(.title2).frame(width: 44, height: 48).contentShape(Rectangle())
             }
             .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
-            Button { player.skipNext() } label: { Image(systemName: "forward.fill").frame(width: 36, height: 44) }
+            Button { player.skipNext() } label: { Image(systemName: "forward.fill").frame(width: 44, height: 48).contentShape(Rectangle()) }
                 .accessibilityLabel("Next track")
         }
         .foregroundStyle(palette.onSurface)
+        .buttonStyle(.plain)
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs + 2)
+        // The whole bar takes touches, so nothing behind it can be pressed through its gaps.
+        .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
-            GeometryReader { geometry in
-                Capsule().fill(palette.primary).frame(width: geometry.size.width * progress, height: 3)
-            }
-            .frame(height: 3)
-            .padding(.horizontal, Spacing.md)
+            ProgressLine(durationMs: state.durationMs)
+                .frame(height: 3)
+                .padding(.horizontal, Spacing.md)
+        }
+    }
+}
+
+/// The mini player's progress, on its own so only it redraws as the song plays.
+private struct ProgressLine: View {
+    let durationMs: Int64
+    @Environment(PlayerController.self) private var player
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        let progress = durationMs > 0 ? min(Double(player.clock.positionMs) / Double(durationMs), 1) : 0
+        GeometryReader { geometry in
+            Capsule().fill(palette.primary).frame(width: geometry.size.width * progress, height: 3)
         }
     }
 }

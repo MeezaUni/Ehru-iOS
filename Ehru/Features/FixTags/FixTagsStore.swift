@@ -110,6 +110,16 @@ final class FixTagsStore {
         queue += songs.filter { !present.contains($0.id) }.map { RepairItem(song: $0) }
     }
 
+    /// Android's "Scan for bad / incomplete tracks": no title, artist or album, or a title carrying
+    /// a download site's leftovers.
+    nonisolated static func incomplete(_ songs: [Song]) -> [Song] {
+        songs.filter { song in
+            song.title.isBlank || song.artist.isBlank || song.artist == unknownArtist || song.album.isBlank
+                || song.album.caseInsensitiveCompare("Unknown Album") == .orderedSame
+                || song.title.localizedCaseInsensitiveContains("mp3") || song.title.localizedCaseInsensitiveContains(".com")
+        }
+    }
+
     func remove(_ item: RepairItem) {
         guard !isRunning else { return }
         if let backup = item.backup { try? FileManager.default.removeItem(at: backup) }
@@ -314,6 +324,31 @@ final class FixTagsStore {
             item.reason = error.localizedDescription
         }
         return item
+    }
+
+    /// Writes [match], picked by the listener for a track that needed review (or had no confident
+    /// match), with the same plan and backup as an automatic fix.
+    func apply(_ match: MetadataCandidate, to id: Int64) async {
+        guard !isRunning, let start = queue.firstIndex(where: { $0.id == id }) else { return }
+        isRunning = true
+        defer { isRunning = false }
+        var item = queue[start]
+        item.status = .fixing
+        queue[start] = item
+        let url = item.song.url
+        let embedded = await Task.detached(priority: .utility) { TagReader.read(url) }.value
+        let plan = await planFix(match, candidates: item.diagnostics?.topCandidates ?? [match], local: embedded, song: item.song, url: url,
+                                 selection: FieldSelection(selectedFields), acceptAt: settings.acceptAt)
+        item.changes = plan.changes
+        item.notes = plan.notes
+        if let request = plan.request {
+            item = await write(request, plan: plan, item: item)
+        } else {
+            item.status = .unchanged
+            item.reason = plan.notes.joined(separator: "; ").nonBlank ?? "The tags already match this choice"
+        }
+        if let index = queue.firstIndex(where: { $0.id == id }) { queue[index] = item }
+        if item.status == .done || item.status == .partial { library.scan() }
     }
 
     /// Puts the selected tracks' files back exactly as they were before their fix.

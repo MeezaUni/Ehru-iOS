@@ -535,3 +535,71 @@ struct DeezerProvider: MetadataProvider {
         return title.trimmed
     }
 }
+
+// MARK: - Last.fm
+
+/// Last.fm track search, with the listener's own API key. Its search has no album, year, genre or
+/// BPM, so those stay empty; a key error is a credentials failure, never "no results".
+struct LastFmProvider: MetadataProvider {
+    let client: HTTPClient
+    let apiKey: @Sendable () -> String?
+    let providerName = "Last.fm"
+    static let notConfigured = "No Last.fm API key: add one in Settings › Online sources"
+    /// Last.fm's grey star shown when it has no picture; not artwork.
+    private static let placeholderImage = "2a96cbd8b46e442fc41c2b86b821562f"
+
+    struct Response: Decodable {
+        struct Results: Decodable {
+            struct Matches: Decodable { var track: [Track]? }
+            var trackmatches: Matches?
+        }
+        struct Track: Decodable {
+            struct Image: Decodable {
+                var url: String
+                var size: String
+                enum CodingKeys: String, CodingKey { case url = "#text", size }
+            }
+            var name: String
+            var artist: String
+            var image: [Image]?
+        }
+        var results: Results?
+        /// Set instead of [results] on failure, e.g. 10 = "Invalid API key".
+        var error: Int?
+        var message: String?
+    }
+
+    func searchTrack(title: String, artist: String?, album: String?) async throws -> [MetadataCandidate] {
+        guard let key = apiKey() else { throw ProviderError(status: .notConfigured, message: Self.notConfigured) }
+        var items = [("method", "track.search"), ("track", title), ("api_key", key), ("format", "json"), ("limit", "10")]
+        if let artist = artist?.nonBlank { items.insert(("artist", artist), at: 2) }
+        let (data, response) = try await client.get(requestURL("https://ws.audioscrobbler.com/2.0/", items), headers: ["User-Agent": metadataUserAgent])
+        // Last.fm answers API errors with a JSON body, often with an HTTP 4xx.
+        if let parsed = try? JSONDecoder().decode(Response.self, from: data), let code = parsed.error {
+            throw Self.apiError(code, parsed.message)
+        }
+        try checkStatus(response)
+        return try Self.candidates(JSONDecoder().decode(Response.self, from: data))
+    }
+
+    /// Key errors (10 invalid, 26 suspended) are credential failures; 29 is the rate limit.
+    static func apiError(_ code: Int, _ message: String?) -> ProviderError {
+        let text = "Last.fm error \(code): \(message ?? "request rejected")"
+        switch code {
+        case 10, 26: return ProviderError(status: .authFailed, message: text, sessionWide: true)
+        case 29: return ProviderError(status: .rateLimited, message: text, retryable: true)
+        default: return ProviderError(status: .failed, message: text)
+        }
+    }
+
+    static func candidates(_ response: Response) throws -> [MetadataCandidate] {
+        if let code = response.error { throw apiError(code, response.message) }
+        return (response.results?.trackmatches?.track ?? []).map { track in
+            let cover = (track.image ?? []).first { $0.size == "extralarge" || $0.size == "large" }?.url
+            return MetadataCandidate(
+                id: "lastfm_\(track.name)_\(track.artist)", title: track.name, artist: track.artist, album: "",
+                coverArtUrl: cover.flatMap { $0.isBlank || $0.contains(placeholderImage) ? nil : $0 }, sourceName: "Last.fm"
+            )
+        }
+    }
+}

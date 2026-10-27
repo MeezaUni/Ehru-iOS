@@ -274,8 +274,13 @@ struct LyricsColors: Equatable {
     let content: Color
     let secondary: Color
     let accent: Color
+    /// A card's diagonal body and its rim (see [LyricsPalette.cardGradient]).
+    let cardGradient: [Color]
+    let rim: Color
 
     init(_ palette: LyricsPalette) {
+        cardGradient = palette.cardGradient.map { Color(argb: $0) }
+        rim = Color(argb: palette.rim)
         surface = Color(argb: palette.surface)
         gradient = palette.gradient.map { Color(argb: $0) }
         content = Color(argb: palette.content)

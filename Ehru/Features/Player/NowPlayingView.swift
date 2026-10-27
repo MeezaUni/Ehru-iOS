@@ -1,62 +1,81 @@
 import SwiftUI
 
-/// Now Playing: the artwork, title and artist, favourite, the seek bar, transport, shuffle and
-/// repeat, the queue, and the overflow menu (radio, playlists, hiding from mixes).
+/// Now Playing (Android's NowPlayingScreen): one scrolling page. The first screen is the cover
+/// carousel, the progress row and the controls, with the lyrics heading just showing at the bottom;
+/// the lyrics card follows below and expands to full screen. The overflow menu holds information,
+/// bookmarks, playlists, mixes, radio, the queue, the visualizer, the equalizer and audio details.
 struct NowPlayingView: View {
     @Environment(PlayerController.self) private var player
     @Environment(LibraryActions.self) private var actions
     @Environment(MixStore.self) private var mixes
     @Environment(AppRouter.self) private var router
+    @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
-    @Environment(\.dismiss) private var dismiss
-    @State private var scrubbing: Int64?
-    @State private var waveform: WaveformLoad = .loading
-    @State private var bookmarks: [Int64] = []
+    @State private var artworkTarget: ArtworkTarget?
+    /// How far the player has been pulled down (it follows the finger, then closes or springs back).
+    @State private var pull: CGFloat = 0
     @State private var showsQueue = false
     @State private var showsLyrics = false
     @State private var showsMarks = false
     @State private var showsVisualizer = false
     @State private var showsEqualizer = false
     @State private var showsAudioDetails = false
+    /// The neighbour cards side by side (the default each time) or stacked behind the current one.
+    @State private var stacked = false
+
+    /// How much of the lyrics card shows at the bottom of the first screen.
+    private static let lyricsPeek: CGFloat = 64
 
     var body: some View {
         let state = player.state
         VStack(spacing: 0) {
             header
             if let song = state.currentSong {
-                if showsLyrics {
-                    LyricsPanel(song: song)
-                        .frame(maxHeight: .infinity)
-                        .transition(.opacity)
-                } else {
-                    Spacer(minLength: Spacing.md)
-                    SongArtworkView(song: song, maxPixels: 1200)
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
-                        .shadow(color: .black.opacity(0.3), radius: 24, y: 12)
-                        .scaleEffect(state.isPlaying ? 1 : 0.92)
-                        .animation(.spring(response: 0.45, dampingFraction: 0.8), value: state.isPlaying)
-                        .padding(.horizontal, Spacing.heroGutter)
-                        .frame(maxWidth: ArtworkSize.heroMax)
-                        .transition(.opacity)
-                    Spacer(minLength: Spacing.lg)
+                GeometryReader { geometry in
+                    let viewport = geometry.size.height
+                    ScrollView {
+                        VStack(spacing: 0) {
+                            VStack(spacing: Spacing.md) {
+                                TrackCarousel(stacked: stacked, previous: previousEntry(state), current: state.currentEntry,
+                                              next: nextEntry(state), currentSong: song, isPlaying: state.isPlaying,
+                                              skip: { $0 > 0 ? player.skipNext() : player.skipToPreviousItem() },
+                                              onPull: pulled, onPullEnd: pullEnded)
+                                    .frame(maxHeight: .infinity)
+                                VStack(spacing: Spacing.sm) {
+                                    ProgressSection(song: song)
+                                    controls(state)
+                                }
+                                .padding(.horizontal, Spacing.heroGutter)
+                            }
+                            .padding(.top, Spacing.sm)
+                            .padding(.bottom, Spacing.md)
+                            .frame(height: max(viewport - Self.lyricsPeek, 420))
+                            LyricsPanel(song: song) { showsLyrics = true }
+                                .frame(height: min(max(viewport * 0.62, 300), 560))
+                                .padding(.horizontal, Spacing.heroGutter)
+                            Spacer().frame(height: Spacing.xl)
+                        }
+                    }
+                    .scrollIndicators(.hidden)
                 }
-                titleRow(song)
-                seekBar(state)
-                transport(state)
-                bottomRow
             } else {
                 Spacer()
-                EmptyState(message: "Nothing is playing.", systemImage: "music.note")
+                EmptyState(message: "Nothing is playing. Pick a song from your library.", systemImage: "music.note")
                 Spacer()
             }
         }
-        .padding(.bottom, Spacing.lg)
+        .buttonStyle(.plain)
         .background(backdrop(state.currentSong).ignoresSafeArea())
+        .offset(y: pull)
+        .overlay(alignment: .bottom) { toast }
+        .animation(.easeInOut(duration: 0.2), value: actions.message)
+        .routerSheets(active: true)
         .sheet(isPresented: $showsQueue) { QueueSheet() }
+        .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .sheet(isPresented: $showsMarks) { MarksSheet() }
         .sheet(isPresented: $showsAudioDetails) { AudioDetailsView() }
         .fullScreenCover(isPresented: $showsVisualizer) { VisualizerView() }
+        .fullScreenCover(isPresented: $showsLyrics) { ExpandedLyrics(previous: previous, next: next) }
         .sheet(isPresented: $showsEqualizer) {
             NavigationStack {
                 EqualizerView().toolbar { Button("Done") { showsEqualizer = false } }
@@ -64,21 +83,75 @@ struct NowPlayingView: View {
         }
     }
 
+    /// The header and the cover carousel pull the player down (Android's collapse drag).
+    private var pullGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { pulled($0.translation.height) }
+            .onEnded { pullEnded($0.translation.height, $0.predictedEndTranslation.height) }
+    }
+
+    private func pulled(_ distance: CGFloat) {
+        pull = max(distance, 0)
+    }
+
+    private func pullEnded(_ distance: CGFloat, _ predicted: CGFloat) {
+        if distance > 140 || predicted > 420 {
+            close()
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { pull = 0 }
+        }
+    }
+
+    private func close() {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.9)) { router.showsNowPlaying = false }
+    }
+
+    private func previousEntry(_ state: PlaybackState) -> QueueEntry? {
+        PlayOrder.previous(before: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode).map { state.queue[$0] }
+    }
+
+    private func nextEntry(_ state: PlaybackState) -> QueueEntry? {
+        PlayOrder.next(after: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode, userSkip: true).map { state.queue[$0] }
+    }
+
+    /// Previous restarts the song after a few seconds; otherwise both buttons slide the carousel
+    /// like a swipe.
+    private func previous() {
+        if player.currentPositionMs() > 3_000 || previousEntry(player.state) == nil {
+            player.skipPrevious()
+        } else {
+            player.skipToPreviousItem()
+        }
+    }
+
+    private func next() { player.skipNext() }
+
+    @ViewBuilder
+    private var toast: some View {
+        if let message = actions.message {
+            Toast(text: message)
+                .padding(.bottom, Spacing.xl)
+                .task(id: message) {
+                    try? await Task.sleep(for: .seconds(2.5))
+                    withAnimation { if actions.message == message { actions.message = nil } }
+                }
+        }
+    }
+
     private var header: some View {
-        HStack {
-            Button { dismiss() } label: { Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 44, height: 44) }
-                .accessibilityLabel("Close")
-            Spacer()
-            if let origin = player.state.currentCollection {
-                Text(origin.kind == .album ? "Playing from album" : "Playing from playlist")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(palette.onSurfaceVariant)
+        HStack(spacing: Spacing.xs) {
+            Button(action: close) {
+                Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 48, height: 48).contentShape(Rectangle())
             }
+            .accessibilityLabel("Close")
+            Text("Now Playing").font(.title2)
             Spacer()
             menu
         }
-        .padding(.horizontal, Spacing.sm)
+        .padding(.horizontal, Spacing.xs)
         .foregroundStyle(palette.onSurface)
+        .contentShape(Rectangle())
+        .gesture(pullGesture)
     }
 
     private var menu: some View {
@@ -87,6 +160,10 @@ struct NowPlayingView: View {
         return Menu {
             Section("Track") {
                 Button { router.songForDetails = song } label: { Label("Music information", systemImage: "info.circle") }
+                Button { showsAudioDetails = true } label: { Label("Audio details", systemImage: "waveform.badge.magnifyingglass") }
+                if let album = song.flatMap({ library.album($0.albumId) }) {
+                    Button { artworkTarget = .album(album) } label: { Label("Find a better cover", systemImage: "photo.badge.magnifyingglass") }
+                }
             }
             Section("Library") {
                 Button { addBookmark() } label: { Label("Bookmark this moment", systemImage: "bookmark") }
@@ -105,14 +182,15 @@ struct NowPlayingView: View {
                 if let radio = actions.radio, let song, radio.startSongId == song.id || radio.suggested.contains(song.id) {
                     Button { actions.refreshRadio() } label: { Label("New radio picks", systemImage: "arrow.clockwise") }
                 }
-                Button { showsQueue = true } label: { Label("Queue", systemImage: "list.bullet") }
+                Button { showsQueue = true } label: { Label("Queue", systemImage: "music.note.list") }
                 Button { showsVisualizer = true } label: { Label("Visualizer", systemImage: "waveform") }
                 Button { showsEqualizer = true } label: { Label("Equalizer", systemImage: "slider.vertical.3") }
-                Button { showsAudioDetails = true } label: { Label("Audio details", systemImage: "info.circle") }
             }
         } label: {
-            Image(systemName: "ellipsis").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
+            Image(systemName: "ellipsis").rotationEffect(.degrees(90)).font(.title3.weight(.semibold))
+                .frame(width: 48, height: 48).contentShape(Rectangle())
         }
+        .menuStyle(.button)
         .disabled(song == nil)
         .accessibilityLabel("More options")
     }
@@ -128,121 +206,202 @@ struct NowPlayingView: View {
         }
     }
 
-    private func titleRow(_ song: Song) -> some View {
-        HStack(alignment: .center, spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(song.title).font(.title2.weight(.bold)).foregroundStyle(palette.onSurface).lineLimit(1)
-                Button {
-                    dismiss()
-                    if song.artistId != 0 { router.open(.artist(song.artistId)) }
-                } label: {
-                    Text(song.artist).font(.title3).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
+    /// Shuffle, previous, play / pause, next, repeat; under shuffle, play / pause and repeat: add to
+    /// a playlist, the album stack toggle and the queue. One grid of five equal columns.
+    private func controls(_ state: PlaybackState) -> some View {
+        VStack(spacing: Spacing.sm) {
+            HStack(spacing: 0) {
+                slot {
+                    ToggleIcon(systemImage: "shuffle", active: state.shuffleModeEnabled) { player.setShuffleModeEnabled(!state.shuffleModeEnabled) }
+                        .accessibilityLabel(state.shuffleModeEnabled ? "Shuffle on" : "Shuffle off")
                 }
-                .buttonStyle(.plain)
+                slot {
+                    Button(action: previous) { Image(systemName: "backward.end.fill").font(.system(size: 30)).frame(width: 52, height: 52).contentShape(Rectangle()) }
+                        .buttonStyle(PressScaleStyle(scale: 0.88))
+                        .accessibilityLabel("Previous")
+                }
+                slot {
+                    Button { player.togglePlayPause() } label: {
+                        Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
+                            .font(.system(size: 32, weight: .bold))
+                            .foregroundStyle(palette.onPrimary)
+                            .contentTransition(.symbolEffect(.replace))
+                            .frame(width: 80, height: 80)
+                            .background(Circle().fill(palette.primary))
+                    }
+                    .buttonStyle(PressScaleStyle(scale: 0.92))
+                    .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
+                }
+                slot {
+                    Button(action: next) { Image(systemName: "forward.end.fill").font(.system(size: 30)).frame(width: 52, height: 52).contentShape(Rectangle()) }
+                        .buttonStyle(PressScaleStyle(scale: 0.88))
+                        .accessibilityLabel("Next")
+                }
+                slot {
+                    ToggleIcon(systemImage: state.repeatMode == .one ? "repeat.1" : "repeat", active: state.repeatMode != .off) { player.cycleRepeatMode() }
+                        .accessibilityLabel("Repeat \(state.repeatMode == .off ? "off" : state.repeatMode == .one ? "one" : "all")")
+                }
             }
-            Spacer(minLength: 0)
-            Button { actions.toggleFavorite(song) } label: {
-                Image(systemName: song.isFavorite ? "heart.fill" : "heart").font(.title2).frame(width: 44, height: 44)
+            HStack(spacing: 0) {
+                slot {
+                    Button { if let song = player.state.currentSong { router.songsForPlaylist = [song] } } label: {
+                        Image(systemName: "plus").font(.title3).frame(width: 48, height: 48).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Add to playlist")
+                }
+                slot {}
+                slot {
+                    Button { withAnimation(.spring(response: 0.5, dampingFraction: 0.85)) { stacked.toggle() } } label: {
+                        Image(systemName: stacked ? "rectangle.split.3x1.fill" : "square.3.layers.3d")
+                            .font(.title3).contentTransition(.symbolEffect(.replace))
+                            .frame(width: 48, height: 48).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel(stacked ? "Show albums side by side" : "Stack background albums")
+                }
+                slot {}
+                slot {
+                    Button { showsQueue = true } label: {
+                        Image(systemName: "music.note.list").font(.title3).frame(width: 48, height: 48).contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Queue")
+                }
             }
-            .foregroundStyle(palette.onSurface)
-            .accessibilityLabel(song.isFavorite ? "Remove from favorites" : "Add to favorites")
-        }
-        .padding(.horizontal, Spacing.heroGutter)
-    }
-
-    private func seekBar(_ state: PlaybackState) -> some View {
-        let position = scrubbing ?? state.positionMs
-        let levels: [Float]? = if case .ready(let values) = waveform { values } else { nil }
-        return VStack(spacing: Spacing.xs) {
-            WaveformSeekBar(levels: levels, positionMs: state.positionMs, durationMs: state.durationMs, bookmarks: bookmarks,
-                            loop: state.abLoop?.songId == state.currentSong?.id ? state.abLoop : nil, previewMs: $scrubbing) {
-                player.seek(to: $0)
-            }
-            HStack {
-                Text(formatDuration(position))
-                Spacer()
-                Text("-" + formatDuration(max(state.durationMs - position, 0)))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(palette.onSurfaceVariant)
-        }
-        .padding(.horizontal, Spacing.heroGutter)
-        .padding(.top, Spacing.md)
-        .task(id: state.currentSong?.id) {
-            waveform = .loading
-            bookmarks = []
-            guard let song = state.currentSong else { return }
-            bookmarks = ((try? AppServices.shared.database.bookmarks(songId: song.id)) ?? []).map(\.positionMs)
-            waveform = await AppServices.shared.waveforms.waveform(song)
-        }
-    }
-
-    private func transport(_ state: PlaybackState) -> some View {
-        HStack {
-            Button { player.setShuffleModeEnabled(!state.shuffleModeEnabled) } label: {
-                Image(systemName: "shuffle").font(.title3).foregroundStyle(state.shuffleModeEnabled ? palette.primary : palette.onSurfaceVariant)
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel(state.shuffleModeEnabled ? "Shuffle on" : "Shuffle off")
-            Spacer()
-            Button { player.skipPrevious() } label: { Image(systemName: "backward.fill").font(.largeTitle).frame(width: 60, height: 60) }
-                .accessibilityLabel("Previous")
-            Spacer()
-            Button { player.togglePlayPause() } label: {
-                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(palette.onPrimary)
-                    .frame(width: 72, height: 72)
-                    .background(Circle().fill(palette.primary))
-            }
-            .buttonStyle(PressScaleStyle(scale: 0.92))
-            .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
-            Spacer()
-            Button { player.skipNext() } label: { Image(systemName: "forward.fill").font(.largeTitle).frame(width: 60, height: 60) }
-                .accessibilityLabel("Next")
-            Spacer()
-            Button { player.cycleRepeatMode() } label: {
-                Image(systemName: state.repeatMode == .one ? "repeat.1" : "repeat").font(.title3)
-                    .foregroundStyle(state.repeatMode == .off ? palette.onSurfaceVariant : palette.primary)
-                    .frame(width: 44, height: 44)
-            }
-            .accessibilityLabel("Repeat \(state.repeatMode == .off ? "off" : state.repeatMode == .one ? "one" : "all")")
         }
         .foregroundStyle(palette.onSurface)
-        .padding(.horizontal, Spacing.heroGutter)
-        .padding(.vertical, Spacing.md)
     }
 
-    private var bottomRow: some View {
-        HStack {
-            Button { if let song = player.state.currentSong { router.songsForPlaylist = [song] } } label: {
-                Image(systemName: "plus").font(.title3).frame(width: 44, height: 44)
-            }
-            .accessibilityLabel("Add to playlist")
-            Spacer()
-            Button { withAnimation(.easeInOut(duration: 0.25)) { showsLyrics.toggle() } } label: {
-                Image(systemName: showsLyrics ? "quote.bubble.fill" : "quote.bubble").font(.title3).frame(width: 44, height: 44)
-            }
-            .accessibilityLabel(showsLyrics ? "Hide lyrics" : "Show lyrics")
-            Spacer()
-            Button { showsQueue = true } label: { Image(systemName: "list.bullet").font(.title3).frame(width: 44, height: 44) }
-                .accessibilityLabel("Queue")
-        }
-        .foregroundStyle(palette.onSurface)
-        .padding(.horizontal, Spacing.heroGutter)
+    private func slot<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content().frame(maxWidth: .infinity)
     }
 
-    /// The artwork, blurred, behind everything.
+    /// The artwork, strongly blurred and dimmed, behind everything.
     private func backdrop(_ song: Song?) -> some View {
         ZStack {
             palette.background
             if let song {
                 SongArtworkView(song: song, maxPixels: 200)
-                    .blur(radius: 60)
-                    .opacity(0.55)
-                    .scaleEffect(1.4)
+                    .blur(radius: 70)
+                    .scaleEffect(1.5)
+                    .opacity(0.7)
             }
-            palette.background.opacity(0.35)
+            Color.black.opacity(0.42)
+        }
+    }
+}
+
+/// A toggle in the controls (shuffle, repeat): its icon dimmed when off, on a soft disc when on.
+private struct ToggleIcon: View {
+    let systemImage: String
+    let active: Bool
+    let action: () -> Void
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage).font(.title3.weight(.semibold))
+                .foregroundStyle(active ? palette.primary : palette.onSurface.opacity(0.6))
+                .frame(width: 48, height: 48)
+                .background(Circle().fill(palette.primary.opacity(active ? 0.18 : 0)))
+                .contentShape(Circle())
+        }
+        .animation(.easeInOut(duration: 0.2), value: active)
+    }
+}
+
+/// Elapsed · position in the queue · length over the line seek bar. On its own, so only it redraws
+/// as the song plays.
+private struct ProgressSection: View {
+    let song: Song
+    @Environment(PlayerController.self) private var player
+    @Environment(\.palette) private var palette
+    @State private var previewMs: Int64?
+    @State private var bookmarks: [Int64] = []
+    @State private var accent: Color?
+
+    var body: some View {
+        let state = player.state
+        let duration = max(state.durationMs > 0 ? state.durationMs : song.durationMs, 1)
+        VStack(spacing: 2) {
+            HStack {
+                Text(formatDuration(min(max(previewMs ?? player.clock.positionMs, 0), duration)))
+                Spacer()
+                if state.queue.count > 1 {
+                    Text("\(state.currentIndex + 1) / \(state.queue.count)").font(.caption2.weight(.medium))
+                    Spacer()
+                }
+                Text(formatDuration(duration))
+            }
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(palette.onSurfaceVariant)
+            LineSeekBar(durationMs: duration, isPlaying: state.isPlaying, bookmarks: bookmarks,
+                        loop: state.abLoop?.songId == song.id ? state.abLoop : nil, accent: accent ?? palette.primary,
+                        previewMs: $previewMs) { player.seek(to: $0) }
+        }
+        .task(id: song.id) {
+            bookmarks = ((try? AppServices.shared.database.bookmarks(songId: song.id)) ?? []).map(\.positionMs)
+            // The artwork's accent (chosen to read on a dark surface) on the player's dark backdrop.
+            let sampled = await LyricsPaletteCache.shared.palette(for: song.url)
+            let colors = LyricsColors(sampled)
+            withAnimation(.easeInOut(duration: 0.4)) { accent = relativeLuminance(sampled.surface) < 0.4 ? colors.accent : nil }
+        }
+    }
+}
+
+/// The full lyrics over Now Playing (Android's ExpandedLyrics): the song at the top, the lyrics in
+/// the artwork's colours on its gradient, previous / play / next underneath.
+private struct ExpandedLyrics: View {
+    let previous: () -> Void
+    let next: () -> Void
+    @Environment(PlayerController.self) private var player
+    @Environment(\.dismiss) private var dismiss
+    @State private var colors = LyricsColors(.fallback)
+
+    var body: some View {
+        let state = player.state
+        VStack(spacing: 0) {
+            HStack(spacing: Spacing.xs) {
+                Button { dismiss() } label: {
+                    Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 48, height: 48).contentShape(Rectangle())
+                }
+                .accessibilityLabel("Close lyrics")
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(state.currentSong?.title ?? "").font(.headline).foregroundStyle(colors.content).lineLimit(1)
+                    Text(state.currentSong?.artist ?? "").font(.caption).foregroundStyle(colors.secondary).lineLimit(1)
+                }
+                Spacer()
+            }
+            .foregroundStyle(colors.content)
+            .padding(.leading, Spacing.xs)
+            .padding(.trailing, Spacing.lg)
+            .padding(.top, Spacing.sm)
+            if let song = state.currentSong {
+                LyricsPanel(song: song).frame(maxHeight: .infinity)
+            } else {
+                Spacer()
+            }
+            HStack {
+                Button(action: previous) { Image(systemName: "backward.end.fill").font(.system(size: 28)).frame(width: 56, height: 56).contentShape(Rectangle()) }
+                    .accessibilityLabel("Previous")
+                    .frame(maxWidth: .infinity)
+                Button { player.togglePlayPause() } label: {
+                    Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").font(.system(size: 30)).contentTransition(.symbolEffect(.replace))
+                        .frame(width: 56, height: 56).contentShape(Rectangle())
+                }
+                .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
+                .frame(maxWidth: .infinity)
+                Button(action: next) { Image(systemName: "forward.end.fill").font(.system(size: 28)).frame(width: 56, height: 56).contentShape(Rectangle()) }
+                    .accessibilityLabel("Next")
+                    .frame(maxWidth: .infinity)
+            }
+            .foregroundStyle(colors.content)
+            .padding(.vertical, Spacing.sm)
+        }
+        .buttonStyle(.plain)
+        .background(LinearGradient(colors: colors.gradient, startPoint: .top, endPoint: .bottom).ignoresSafeArea())
+        .task(id: state.currentSong?.url) {
+            guard let url = state.currentSong?.url else { return }
+            let next = LyricsColors(await LyricsPaletteCache.shared.palette(for: url))
+            withAnimation(.easeInOut(duration: 0.6)) { colors = next }
         }
     }
 }
@@ -352,5 +511,32 @@ struct QueueSheet: View {
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// A slow drift and zoom of the artwork while music plays, so the cover feels alive without being
+/// a video. Still when paused, when turned off in Settings, or with Reduce Motion on.
+struct MovingArtwork: ViewModifier {
+    let isPlaying: Bool
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One full drift cycle.
+    private static let period: Double = 24
+
+    func body(content: Content) -> some View {
+        if settings.movingArtwork && !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying)) { context in
+                let phase = context.date.timeIntervalSinceReferenceDate / Self.period * 2 * .pi
+                GeometryReader { geometry in
+                    let travel = geometry.size.width * 0.03
+                    content
+                        .scaleEffect(1.08 + 0.02 * CGFloat(sin(phase * 0.5)))
+                        .offset(x: travel * CGFloat(cos(phase)), y: travel * CGFloat(sin(phase)))
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+            }
+        } else {
+            content
+        }
     }
 }

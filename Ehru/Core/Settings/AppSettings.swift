@@ -15,6 +15,8 @@ final class AppSettings {
         /// An imported theme in use instead of [theme], by id.
         var customThemeId: String?
         var importedThemes: [ImportedTheme] = []
+        /// A slow drift of the Now Playing artwork while music plays (instead of Apple Music's motion covers).
+        var movingArtwork = true
 
         init() {}
 
@@ -27,6 +29,7 @@ final class AppSettings {
             visualizer = (try? c.decodeIfPresent(VisualizerSettings.self, forKey: .visualizer)) ?? VisualizerSettings()
             customThemeId = try? c.decodeIfPresent(String.self, forKey: .customThemeId)
             importedThemes = (try? c.decodeIfPresent([ImportedTheme].self, forKey: .importedThemes)) ?? []
+            movingArtwork = (try? c.decodeIfPresent(Bool.self, forKey: .movingArtwork)) ?? true
         }
     }
 
@@ -48,6 +51,11 @@ final class AppSettings {
     var startSection: LibrarySection {
         get { LibrarySection(rawValue: stored.startSection) ?? .home }
         set { update { $0.startSection = newValue.rawValue } }
+    }
+
+    var movingArtwork: Bool {
+        get { stored.movingArtwork }
+        set { update { $0.movingArtwork = newValue } }
     }
 
     var visualizer: VisualizerSettings {

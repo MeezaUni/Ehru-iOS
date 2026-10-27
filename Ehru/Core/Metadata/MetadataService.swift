@@ -6,9 +6,12 @@ enum MetadataSources {
     static let iTunes = "iTunes"
     static let musicBrainz = "MusicBrainz"
     static let deezer = "Deezer"
+    static let lastFm = "Last.fm"
 
     /// The choices offered for Fix Tags.
-    static let options: [(key: String, label: String)] = [(all, "All sources"), (iTunes, "iTunes"), (musicBrainz, "MusicBrainz"), (deezer, "Deezer")]
+    static let options: [(key: String, label: String)] = [
+        (all, "All sources"), (iTunes, "iTunes"), (musicBrainz, "MusicBrainz"), (deezer, "Deezer"), (lastFm, "Last.fm"),
+    ]
 
     static func matches(_ provider: String, _ selection: String) -> Bool {
         selection.lowercased() == all.lowercased() || provider.lowercased() == selection.lowercased()
@@ -26,6 +29,8 @@ enum GenreLookup: Equatable {
 /// Whether a provider may be asked at all this session.
 enum ProviderAvailability: Equatable {
     case available
+    /// No key in Settings: never called.
+    case notConfigured(String)
     /// Its credentials were rejected earlier this session: not called again.
     case rejected(String)
     /// It said earlier this session that it doesn't serve this country: not called again.
@@ -42,6 +47,7 @@ actor MetadataService {
     private let iTunes: ITunesProvider
     private let musicBrainz: MusicBrainzProvider
     private let deezer: DeezerProvider
+    private let lastFm: LastFmProvider
     private let retry: RetryPolicy
     private var unusable: [String: ProviderAvailability] = [:]
 
@@ -51,19 +57,30 @@ actor MetadataService {
         iTunes = ITunesProvider(client: client)
         musicBrainz = MusicBrainzProvider(client: client)
         deezer = DeezerProvider(client: client)
+        lastFm = LastFmProvider(client: client, apiKey: { APIKeys.shared.value(.lastFm) })
     }
 
-    private var providers: [MetadataProvider] { [iTunes, musicBrainz, deezer] }
+    private var providers: [MetadataProvider] { [iTunes, musicBrainz, deezer, lastFm] }
+
+    private func availability(of provider: MetadataProvider) -> ProviderAvailability {
+        if provider.providerName == lastFm.providerName && !APIKeys.shared.isSet(.lastFm) { return .notConfigured(LastFmProvider.notConfigured) }
+        return unusable[provider.providerName] ?? .available
+    }
+
+    /// Forgets this session's refusals (after a key was changed in Settings).
+    func forgetRefusals() {
+        unusable = [:]
+    }
 
     /// Every provider's scored candidates and outcome for one query.
     func search(title: String, artist: String?, album: String?, durationMs: Int64?, selection: String) async -> SearchResponse {
         let list = providers
-        let availability = list.map { unusable[$0.providerName] ?? .available }
+        let availabilities = list.map { self.availability(of: $0) }
         let retry = retry
         let results = await withTaskGroup(of: (Int, [MetadataCandidate], ProviderOutcome).self) { group in
             for (index, provider) in list.enumerated() {
                 group.addTask {
-                    let (candidates, outcome) = await Self.searchOne(provider, selection: selection, availability: availability[index],
+                    let (candidates, outcome) = await Self.searchOne(provider, selection: selection, availability: availabilities[index],
                                                                      title: title, artist: artist, album: album, durationMs: durationMs, retry: retry)
                     return (index, candidates, outcome)
                 }
@@ -95,6 +112,7 @@ actor MetadataService {
             return ([], ProviderOutcome(providerName: name, status: .skipped, errorMessage: "Not selected (source: \(selection))"))
         }
         switch availability {
+        case .notConfigured(let reason): return ([], ProviderOutcome(providerName: name, status: .notConfigured, errorMessage: reason))
         case .rejected(let reason): return ([], ProviderOutcome(providerName: name, status: .authFailed, errorMessage: "\(reason) (not retried)"))
         case .unavailable(let reason): return ([], ProviderOutcome(providerName: name, status: .unavailable, errorMessage: "\(reason) (not asked again)"))
         case .available: break

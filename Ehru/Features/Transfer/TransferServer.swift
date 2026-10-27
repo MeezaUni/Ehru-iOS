@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// A small HTTP server for one transfer session, listening only on the Wi-Fi address (never on
+/// A small HTTP server for one transfer session, listening only on the Wi-Fi interface (never on
 /// every interface). One request per connection; at most [TransferLimits.maxConnections] at once
 /// (others get a quick 503); stalled connections time out. [stop] closes the listener and every
 /// connection, which ends any upload in progress (the router then deletes its partial file).
@@ -32,35 +32,26 @@ final class TransferServer: @unchecked Sendable {
     }
 
     private func listen(on port: UInt16) async throws -> UInt16 {
+        // Plain TCP: iOS refuses (EINVAL) a listener restricted to one address or interface.
+        // Each connection is checked to arrive over Wi-Fi instead (see [accept]).
         let parameters = NWParameters.tcp
-        parameters.requiredInterfaceType = .wifi
-        parameters.allowLocalEndpointReuse = true
-        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(address), port: NWEndpoint.Port(rawValue: port) ?? .any)
-        let listener = try NWListener(using: parameters)
+        let listener = try NWListener(using: parameters, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port) ?? .any)
         let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
-            var resumed = false
-            listener.stateUpdateHandler = { [weak self] state in
+            let resumed = OnceFlag()
+            listener.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    if !resumed, let port = listener.port?.rawValue {
-                        resumed = true
-                        continuation.resume(returning: port)
-                    }
-                case .failed(let error):
-                    if !resumed {
-                        resumed = true
+                    if let port = listener.port?.rawValue, resumed.claim() { continuation.resume(returning: port) }
+                case .failed(let error), .waiting(let error):
+                    if resumed.claim() {
+                        listener.cancel()
                         continuation.resume(throwing: error)
                     }
-                    listener.cancel()
                 case .cancelled:
-                    if !resumed {
-                        resumed = true
-                        continuation.resume(throwing: CancellationError())
-                    }
+                    if resumed.claim() { continuation.resume(throwing: CancellationError()) }
                 default:
                     break
                 }
-                _ = self
             }
             listener.start(queue: queue)
         }
@@ -88,11 +79,33 @@ final class TransferServer: @unchecked Sendable {
             connections[ObjectIdentifier(connection)] = connection
             return true
         }
-        connection.start(queue: queue)
         guard admitted else {
+            connection.start(queue: queue)
             sendAndClose(HttpResponse.error(HttpStatus.serviceUnavailable, "Too many connections, try again"), on: connection)
             return
         }
+        let started = OnceFlag()
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                // Only the Wi-Fi network: nothing over cellular, VPN or another interface.
+                guard started.claim() else { return }
+                if connection.currentPath?.usesInterfaceType(.wifi) == false {
+                    connection.cancel()
+                    self?.lock.withLock { _ = self?.connections.removeValue(forKey: ObjectIdentifier(connection)) }
+                    return
+                }
+                self?.serve(connection, router)
+            case .failed, .cancelled:
+                self?.lock.withLock { _ = self?.connections.removeValue(forKey: ObjectIdentifier(connection)) }
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    private func serve(_ connection: NWConnection, _ router: TransferRouter) {
         let reader = ConnectionReader(connection: connection, timeout: limits.readTimeoutSeconds)
         Task {
             let response: HttpResponse?
@@ -216,4 +229,19 @@ func wifiAddress() -> String? {
         if !text.hasPrefix("169.254.") && text != "127.0.0.1" { return text }
     }
     return nil
+}
+
+/// A flag that is claimed once, from any thread.
+private final class OnceFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    /// True the first time only.
+    func claim() -> Bool {
+        lock.withLock {
+            if claimed { return false }
+            claimed = true
+            return true
+        }
+    }
 }

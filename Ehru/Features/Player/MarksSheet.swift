@@ -34,7 +34,7 @@ struct MarksSheet: View {
                     Button {
                         addBookmark()
                     } label: {
-                        Label("Add at \(formatDuration(player.state.positionMs))", systemImage: "bookmark")
+                        Label("Add at \(formatDuration(player.clock.positionMs))", systemImage: "bookmark")
                     }
                     .disabled(song == nil)
                     if bookmarks.isEmpty {

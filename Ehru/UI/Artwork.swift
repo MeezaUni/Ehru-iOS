@@ -12,7 +12,7 @@ struct SongArtworkView: View {
     var body: some View {
         ZStack {
             if let image {
-                Image(uiImage: image).resizable().scaledToFill()
+                FillImage(image: image)
             } else {
                 Rectangle().fill(palette.surfaceVariant)
                 Image(systemName: placeholder)
@@ -64,7 +64,7 @@ struct FileImageView<Fallback: View>: View {
 
     var body: some View {
         ZStack {
-            if let image { Image(uiImage: image).resizable().scaledToFill() } else { fallback() }
+            if let image { FillImage(image: image) } else { fallback() }
         }
         .task(id: path) {
             guard let path else {
@@ -113,5 +113,17 @@ struct ArtistMonogram: View {
             Rectangle().fill(palette.surfaceVariant)
             Text(letter).font(.system(size: fontSize, weight: .bold)).foregroundStyle(palette.onSurface)
         }
+    }
+}
+
+/// A picture filling exactly the space it is given, cropped to it. A bare scaledToFill image
+/// reports its overflowing size, so a non-square cover would widen whatever holds it.
+struct FillImage: View {
+    let image: UIImage
+
+    var body: some View {
+        Color.clear
+            .overlay { Image(uiImage: image).resizable().scaledToFill() }
+            .clipped()
     }
 }

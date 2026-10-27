@@ -124,7 +124,7 @@ struct VybeView: View {
             Text(results.title).font(.headline)
             if let note = results.note { Text(note).font(.caption).foregroundStyle(palette.onSurfaceVariant) }
             HStack(spacing: Spacing.sm) {
-                Button { vybe.play(results.songs, index: 0) } label: { Label("Play \(results.songs.count)", systemImage: "play.fill") }
+                Button { vybe.play(results.songs, index: 0) } label: { Label("Play \(results.songs.count)", systemImage: "play.fill").foregroundStyle(palette.onPrimary) }
                     .buttonStyle(.borderedProminent)
                 Button { vybe.shuffle(results.songs) } label: { Image(systemName: "shuffle") }
                     .buttonStyle(.bordered)
