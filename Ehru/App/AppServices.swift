@@ -28,7 +28,8 @@ final class AppServices {
         database = (try? LibraryDatabase.open()) ?? (try! LibraryDatabase.inMemory())
         library = LibraryStore(database: database)
         transitions = TransitionSettingsStore()
-        player = PlayerController(database: database, transitions: transitions)
+        animatedArtwork = AnimatedArtworkStore()
+        player = PlayerController(database: database, transitions: transitions, motionCovers: animatedArtwork)
         vybe = VybeStore(database: database, player: player)
         mixes = MixStore(database: database, vybe: vybe.engine)
         actions = LibraryActions(database: database, player: player, mixes: mixes)
@@ -42,7 +43,6 @@ final class AppServices {
         fixTags = FixTagsStore(library: library)
         artwork = ArtworkFetcherStore(library: library, service: fixTags.service)
         waveforms = WaveformStore(database: database)
-        animatedArtwork = AnimatedArtworkStore()
         router.section = settings.startSection
     }
 }

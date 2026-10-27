@@ -16,6 +16,10 @@ struct AnimatedArtworkView: View {
                 Toggle("Play downloaded motion covers", isOn: $store.enabled)
                 Text("Download an album’s Apple motion cover to use it offline in Now Playing and on the album page. Covers stay muted and pause in the background, in Low Power Mode, and with Reduce Motion enabled.")
                     .font(.footnote).foregroundStyle(.secondary)
+                if #available(iOS 26.0, *) {
+                    Text("Downloaded covers can also animate on the Lock Screen when supported by iOS. Use Download again to add portrait artwork to previously saved covers.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
             }
             if store.downloading != nil {
                 Section { Button("Cancel download", role: .cancel) { store.cancel() } }

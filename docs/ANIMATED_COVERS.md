@@ -17,8 +17,30 @@ The current Now Playing card and the visible album header loop muted video. The 
 carousel neighbours remain still. Video releases its player when the view is hidden, music is
 paused (Now Playing), the app backgrounds, Low Power Mode activates, or Reduce Motion is enabled.
 The existing cover remains underneath until the first video frame is ready, and remains visible
-if video playback fails. Saved video does not replace lock-screen artwork, which iOS expects as
-a still image.
+if video playback fails.
+
+## Lock screen and system Now Playing
+
+On iOS 26 and later, a downloaded cover is also published through Apple's
+`MPMediaItemAnimatedArtwork` API, under a supported square (1:1) or portrait (3:4) key.
+The preview is generated from the video's first frame, and the video URL is always local.
+New downloads also retain Apple's portrait rendition when available; the publisher prefers it
+when iOS supports portrait artwork. Existing downloaded clips remain compatible. Use **Download
+again** to fetch a portrait rendition for a previously saved square cover. Each rendition has the
+same 64 MB limit; the app does not relabel square video as portrait artwork.
+iOS owns rendering and decides when animation is displayed; no background AVPlayer is kept
+running by the app. Older systems, unsupported shapes/platform keys, missing files and preview
+failures retain the existing still artwork. The Animated covers toggle applies to both in-app
+and system artwork; removing or replacing a download refreshes Now Playing immediately.
+
+The system may retain its artwork handlers after a metadata refresh. A hard-linked file lease
+(or a copy when linking is unavailable) keeps their URLs valid until those handlers are released.
+This does not duplicate downloaded video bytes when hard linking is supported.
+
+To check on a phone running iOS 26: download a cover, play its album, lock the phone and expand
+Now Playing artwork. Check pause/resume, skipping to another album, replacing/removing the cover,
+and toggling animated covers off. Verify the still fallback with no downloaded cover and with
+system motion/power restrictions. Simulator/unit checks do not establish lock-screen appearance.
 
 ## Lookup implementation
 
@@ -39,7 +61,9 @@ and video downloads have not been verified from this environment.
 `MotionArtworkTests` covers catalog resolution through a fake HTTP client, matching, SDR variant
 selection, relative URLs, byte ranges, and rejection of encrypted/live/malformed playlists.
 `MotionTimelineTests` covers 32/64-bit decode times, idempotence, multiple tracks and malformed
-boxes. The standard iOS GitHub Actions workflow builds the app and runs these tests.
+boxes. `LockScreenMotionArtworkTests` generates a real local video to check preview extraction,
+recognized aspect ratios, supported-key filtering, missing-file fallback and file lifetime after
+removal. The standard iOS GitHub Actions workflow builds the app and runs these tests.
 
 On a phone, download a known album that Apple currently supplies motion artwork for. Verify
 that it loops without sound in Now Playing and on the album page; test pause/resume, tab switches,

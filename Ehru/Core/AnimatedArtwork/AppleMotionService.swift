@@ -7,6 +7,7 @@ struct AppleMotionMatch: Equatable, Sendable {
     let artist: String
     let storefront: String
     let master: URL
+    var portraitMaster: URL? = nil
 }
 
 /// Mirrors empee3's Apple web-catalog lookup. The web player's public token is session-only;
@@ -87,8 +88,10 @@ actor AppleMotionService {
                 guard let data else { continue }
                 let video = try JSONDecoder().decode(Catalog.self, from: data).data.first?.attributes.editorialVideo
                 if let raw = video?.motionDetailSquare?.video ?? video?.motionSquareVideo1x1?.video ?? video?.motionDetailTall?.video ?? video?.motionTallVideo3x4?.video {
+                    let portrait = video?.motionDetailTall?.video ?? video?.motionTallVideo3x4?.video
                     return AppleMotionMatch(catalogId: match.collectionId, title: match.collectionName, artist: match.artistName,
-                                            storefront: country, master: try MotionPlaylist.trustedURL(raw))
+                                            storefront: country, master: try MotionPlaylist.trustedURL(raw),
+                                            portraitMaster: try portrait.map { try MotionPlaylist.trustedURL($0) })
                 }
                 try await Task.sleep(for: .milliseconds(500))
             }

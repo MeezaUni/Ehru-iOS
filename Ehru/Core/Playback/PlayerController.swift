@@ -44,6 +44,8 @@ final class PlayerController {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var artwork: MPMediaItemArtwork?
     @ObservationIgnored private var artworkSongId: Int64?
+    @ObservationIgnored private let motionCovers: AnimatedArtworkStore?
+    @ObservationIgnored private let lockScreenMotion = LockScreenMotionArtwork()
 
     /// Media3's "previous restarts the song after 3 s".
     private static let restartThreshold: Int64 = 3_000
@@ -57,9 +59,11 @@ final class PlayerController {
     /// The next track is queued gaplessly once this little of the current one remains.
     private static let gaplessLeadMs: Int64 = 8_000
 
-    init(database: LibraryDatabase, transitions: TransitionSettingsStore) {
+    init(database: LibraryDatabase, transitions: TransitionSettingsStore, motionCovers: AnimatedArtworkStore? = nil) {
         self.database = database
         self.transitions = transitions
+        self.motionCovers = motionCovers
+        motionCovers?.onChange = { [weak self] in self?.updateNowPlaying() }
         transitions.onChange = { [weak self] in self?.reevaluateTransition() }
         engine.onEntryFinished = { [weak self] id in self?.entryFinished(id) }
         engine.onConfigurationChange = { [weak self] in self?.restartAfterConfigurationChange() }
@@ -684,6 +688,7 @@ final class PlayerController {
 
     private func updateNowPlaying() {
         guard let song = state.currentSong else {
+            lockScreenMotion.update(source: nil, onReady: {})
             MPNowPlayingInfoCenter.default().playbackState = .stopped
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
@@ -702,6 +707,12 @@ final class PlayerController {
             MPNowPlayingInfoPropertyPlaybackRate: state.isPlaying ? 1.0 : 0.0,
         ]
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
+        var preferPortrait = false
+        if #available(iOS 26.0, *) {
+            preferPortrait = MPNowPlayingInfoCenter.supportedAnimatedArtworkKeys.contains(MPNowPlayingInfoProperty3x4AnimatedArtwork)
+        }
+        lockScreenMotion.update(source: motionCovers?.url(for: song, preferPortrait: preferPortrait)) { [weak self] in self?.updateNowPlaying() }
+        info.merge(lockScreenMotion.info) { _, animated in animated }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         MPNowPlayingInfoCenter.default().playbackState = state.isPlaying ? .playing : .paused
     }

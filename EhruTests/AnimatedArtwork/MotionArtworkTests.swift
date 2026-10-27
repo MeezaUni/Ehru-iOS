@@ -74,7 +74,7 @@ final class MotionArtworkTests: XCTestCase {
             case "amp-api.music.apple.com":
                 XCTAssertEqual(headers["Origin"], "https://music.apple.com")
                 XCTAssertEqual(headers["Authorization"], "Bearer eyJfixture.cGF5bG9hZA.signature")
-                body = #"{"data":[{"attributes":{"editorialVideo":{"motionDetailSquare":{"video":"https://video-ssl.itunes.apple.com/cover/master.m3u8"}}}}]}"#
+                body = #"{"data":[{"attributes":{"editorialVideo":{"motionDetailSquare":{"video":"https://video-ssl.itunes.apple.com/cover/master.m3u8"},"motionDetailTall":{"video":"https://video-ssl.itunes.apple.com/portrait/master.m3u8"}}}}]}"#
             default: throw URLError(.badURL)
             }
             return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
@@ -86,5 +86,6 @@ final class MotionArtworkTests: XCTestCase {
         let match = try await service.find(album: "IGOR", artist: "Tyler, The Creator", country: "us")
         XCTAssertEqual(match?.catalogId, 1)
         XCTAssertEqual(match?.master.host, "video-ssl.itunes.apple.com")
+        XCTAssertEqual(match?.portraitMaster?.path, "/portrait/master.m3u8")
     }
 }
