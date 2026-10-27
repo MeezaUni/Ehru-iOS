@@ -51,13 +51,17 @@ struct DeezerArtist: Decodable, Equatable, Sendable {
     }
 }
 
-/// Album covers and artist photos from iTunes, the Cover Art Archive (MusicBrainz), Deezer and
-/// Wikipedia / Wikimedia Commons. Only names are sent; nothing from the library is uploaded.
+/// Album covers and artist photos from iTunes, the Cover Art Archive (MusicBrainz), Deezer,
+/// Wikipedia / Wikimedia Commons, and, with the listener's own keys, Fanart.tv and Discogs. Only
+/// names (and MusicBrainz ids) are sent; nothing from the library is uploaded.
 struct ArtworkSearch: Sendable {
     let client: HTTPClient
+    /// The listener's own keys (Settings › Online sources); a source without one is skipped.
+    let key: @Sendable (APIKeyKind) -> String?
 
-    init(client: HTTPClient = URLSessionHTTPClient()) {
+    init(client: HTTPClient = URLSessionHTTPClient(), key: @escaping @Sendable (APIKeyKind) -> String? = { APIKeys.shared.value($0) }) {
         self.client = client
+        self.key = key
     }
 
     // MARK: Album covers
@@ -65,9 +69,13 @@ struct ArtworkSearch: Sendable {
     /// Covers for an album from every source, best sources first, each image once.
     func albumCovers(album: String, artist: String?) async -> [ArtworkCandidate] {
         async let iTunes = iTunesAlbumCovers(album: album, artist: artist)
-        async let archive = coverArtArchive(album: album, artist: artist)
+        async let groups = releaseGroups(album: album, artist: artist)
         async let deezer = deezerAlbumCovers(album: album, artist: artist)
-        let all = await iTunes + archive + deezer
+        async let discogs = discogsAlbumCovers(album: album, artist: artist)
+        let groupIds = await groups
+        let archive = groupIds.map { ArtworkCandidate(url: MusicBrainzProvider.coverArtArchiveUrl($0), source: "Cover Art Archive") }
+        let fanart = await fanartAlbumCovers(groupIds)
+        let all = await iTunes + archive + fanart + deezer + discogs
         var seen = Set<String>()
         return all.filter { seen.insert($0.url).inserted }
     }
@@ -84,7 +92,8 @@ struct ArtworkSearch: Sendable {
         return (response?.results ?? []).compactMap { ($0.artworkUrl100 ?? $0.artworkUrl60).map { ArtworkCandidate(url: ITunesProvider.upgradeArtwork($0), source: "iTunes") } }
     }
 
-    private func coverArtArchive(album: String, artist: String?) async -> [ArtworkCandidate] {
+    /// MusicBrainz release groups for an album (their covers live in the Cover Art Archive and on Fanart.tv).
+    private func releaseGroups(album: String, artist: String?) async -> [String] {
         struct Response: Decodable {
             struct Group: Decodable { var id: String }
             var groups: [Group] = []
@@ -93,7 +102,57 @@ struct ArtworkSearch: Sendable {
         var query = "release:\"\(escapePhrase(album.trimmed))\""
         if let terms = artistSearchTerms(artist.flatMap { isUsableTag($0) ? $0 : nil }) { query += " AND artist:(\(terms))" }
         let response = try? await fetchJSON(Response.self, requestURL("https://musicbrainz.org/ws/2/release-group", [("query", query), ("fmt", "json"), ("limit", "5")]), client: client)
-        return (response?.groups ?? []).map { ArtworkCandidate(url: MusicBrainzProvider.coverArtArchiveUrl($0.id), source: "Cover Art Archive") }
+        return (response?.groups ?? []).map(\.id)
+    }
+
+    /// Fanart.tv covers of the first release groups that have any.
+    private func fanartAlbumCovers(_ groupIds: [String]) async -> [ArtworkCandidate] {
+        guard let apiKey = key(.fanartTv) else { return [] }
+        var urls: [String] = []
+        for id in groupIds.prefix(3) {
+            guard let object = await json(requestURL("https://webservice.fanart.tv/v3/music/albums/\(id)", [("api_key", apiKey)])),
+                  let albums = object["albums"] as? [String: Any]
+            else { continue }
+            for case let album as [String: Any] in albums.values {
+                urls += Self.fanartUrls(album["albumcover"])
+            }
+            if !urls.isEmpty { break }
+        }
+        return urls.map { ArtworkCandidate(url: $0, source: "Fanart.tv") }
+    }
+
+    /// Image addresses of a Fanart.tv list, most liked first, over https.
+    static func fanartUrls(_ list: Any?) -> [String] {
+        func likes(_ image: [String: Any]) -> Int { Int(image["likes"] as? String ?? "") ?? 0 }
+        let images = (list as? [[String: Any]]) ?? []
+        let ranked = images.enumerated().sorted { a, b in
+            likes(a.element) != likes(b.element) ? likes(a.element) > likes(b.element) : a.offset < b.offset
+        }
+        return ranked.compactMap { ($0.element["url"] as? String)?.replacingOccurrences(of: "http://", with: "https://") }
+    }
+
+    private func discogsAlbumCovers(album: String, artist: String?) async -> [ArtworkCandidate] {
+        guard let token = key(.discogs) else { return [] }
+        var items = [("type", "release"), ("release_title", album), ("per_page", "10")]
+        if let artist = artist.flatMap({ isUsableTag($0) ? $0 : nil }) { items.append(("artist", artist)) }
+        guard let object = await json(requestURL("https://api.discogs.com/database/search", items), headers: Self.discogsHeaders(token)) else { return [] }
+        return Self.discogsImages(object["results"], keys: ["cover_image"]).map { ArtworkCandidate(url: $0, source: "Discogs") }
+    }
+
+    static func discogsHeaders(_ token: String) -> [String: String] { ["Authorization": "Discogs token=\(token)"] }
+
+    /// Usable image addresses from Discogs results (its blank "spacer.gif" left out).
+    static func discogsImages(_ list: Any?, keys: [String]) -> [String] {
+        ((list as? [[String: Any]]) ?? []).compactMap { item in keys.lazy.compactMap { item[$0] as? String }.first }
+            .filter { !$0.isBlank && !$0.lowercased().hasSuffix(".gif") }
+    }
+
+    /// A GET answered with a JSON object, or nil.
+    private func json(_ url: URL, headers: [String: String] = [:]) async -> [String: Any]? {
+        guard let answer = try? await client.get(url, headers: ["User-Agent": metadataUserAgent].merging(headers) { $1 }),
+              (200..<300).contains(answer.1.statusCode)
+        else { return nil }
+        return try? JSONSerialization.jsonObject(with: answer.0) as? [String: Any]
     }
 
     private func deezerAlbumCovers(album: String, artist: String?) async -> [ArtworkCandidate] {
@@ -118,8 +177,12 @@ struct ArtworkSearch: Sendable {
     func artistPhotos(_ name: String) async -> [ArtworkCandidate] {
         guard isUsableTag(name) else { return [] }
         async let deezer = deezerArtistPhotos(name)
-        async let wiki = wikimediaPhotos(name)
-        let all = await deezer + wiki
+        async let links = musicBrainzLinks(name)
+        let found = await links
+        async let wiki = wikimediaPhotos(name, links: found)
+        async let fanart = fanartArtistPhotos(found)
+        async let discogs = discogsArtistPhotos(name, links: found)
+        let all = await deezer + fanart + discogs + wiki
         var seen = Set<String>()
         return all.filter { seen.insert($0.url).inserted }
     }
@@ -144,7 +207,14 @@ struct ArtworkSearch: Sendable {
     }
 
     /// Wikipedia page images and Wikidata (P18) portraits of the artist's MusicBrainz entries.
-    private func wikimediaPhotos(_ name: String) async -> [ArtworkCandidate] {
+    /// What MusicBrainz links to an artist: its id and its URL relations (Wikipedia, Wikidata, Discogs).
+    struct ArtistLinks: Sendable {
+        let mbid: String
+        let relations: [(type: String, resource: String)]
+    }
+
+    /// The MusicBrainz entries named exactly [name] (at most two) with their links.
+    private func musicBrainzLinks(_ name: String) async -> [ArtistLinks] {
         struct ArtistSearch: Decodable {
             struct Artist: Decodable { var id: String; var name: String; var score: Int? }
             var artists: [Artist] = []
@@ -157,28 +227,66 @@ struct ArtworkSearch: Sendable {
             }
             var relations: [Relation]?
         }
-        var urls: [String] = []
         let query = "artist:\"\(escapePhrase(name.trimmed))\" OR alias:\"\(escapePhrase(name.trimmed))\""
-        if let search = try? await fetchJSON(ArtistSearch.self, requestURL("https://musicbrainz.org/ws/2/artist", [("query", query), ("fmt", "json"), ("limit", "5")]), client: client) {
-            let exact = search.artists.filter { ($0.score ?? 0) >= 80 && Self.normalizeArtistName($0.name) == Self.normalizeArtistName(name) }
-            for artist in exact.prefix(2) {
-                // MusicBrainz allows about one request a second.
-                try? await Task.sleep(nanoseconds: 1_100_000_000)
-                guard let relations = try? await fetchJSON(Relations.self, requestURL("https://musicbrainz.org/ws/2/artist/\(artist.id)", [("inc", "url-rels"), ("fmt", "json")]), client: client)
-                else { continue }
-                for relation in relations.relations ?? [] {
-                    guard let resource = relation.url?.resource else { continue }
-                    let last = resource.components(separatedBy: "/").last ?? ""
-                    if relation.type.lowercased() == "wikidata", last.uppercased().hasPrefix("Q") {
-                        urls += await wikidataPortraits(last)
-                    } else if relation.type.lowercased() == "wikipedia", !last.isEmpty {
-                        urls += await wikipediaPageImages(titles: last.removingPercentEncoding ?? last)
-                    }
-                }
+        guard let search = try? await fetchJSON(ArtistSearch.self, requestURL("https://musicbrainz.org/ws/2/artist", [("query", query), ("fmt", "json"), ("limit", "5")]), client: client)
+        else { return [] }
+        let exact = search.artists.filter { ($0.score ?? 0) >= 80 && Self.normalizeArtistName($0.name) == Self.normalizeArtistName(name) }
+        var links: [ArtistLinks] = []
+        for artist in exact.prefix(2) {
+            // MusicBrainz allows about one request a second.
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            let relations = try? await fetchJSON(Relations.self, requestURL("https://musicbrainz.org/ws/2/artist/\(artist.id)", [("inc", "url-rels"), ("fmt", "json")]), client: client)
+            let pairs = (relations?.relations ?? []).compactMap { relation in relation.url.map { (type: relation.type.lowercased(), resource: $0.resource) } }
+            links.append(ArtistLinks(mbid: artist.id, relations: pairs))
+        }
+        return links
+    }
+
+    /// Wikipedia page images and Wikidata (P18) portraits of the artist's MusicBrainz entries.
+    private func wikimediaPhotos(_ name: String, links: [ArtistLinks]) async -> [ArtworkCandidate] {
+        var urls: [String] = []
+        for relation in links.flatMap(\.relations) {
+            let last = relation.resource.components(separatedBy: "/").last ?? ""
+            if relation.type == "wikidata", last.uppercased().hasPrefix("Q") {
+                urls += await wikidataPortraits(last)
+            } else if relation.type == "wikipedia", !last.isEmpty {
+                urls += await wikipediaPageImages(titles: last.removingPercentEncoding ?? last)
             }
         }
         urls += await wikipediaPageImages(titles: name.trimmed)
         return urls.map { ArtworkCandidate(url: $0, source: "Wikimedia") }
+    }
+
+    /// Fanart.tv artist thumbnails and backgrounds, most liked first, for the first entry that has any.
+    private func fanartArtistPhotos(_ links: [ArtistLinks]) async -> [ArtworkCandidate] {
+        guard let apiKey = key(.fanartTv) else { return [] }
+        for link in links {
+            guard let object = await json(requestURL("https://webservice.fanart.tv/v3/music/\(link.mbid)", [("api_key", apiKey)])) else { continue }
+            let urls = Self.fanartUrls(object["artistthumb"]) + Self.fanartUrls(object["artistbackground"])
+            if !urls.isEmpty { return urls.map { ArtworkCandidate(url: $0, source: "Fanart.tv") } }
+        }
+        return []
+    }
+
+    /// Discogs images of the artist MusicBrainz links to, else of a Discogs artist search.
+    private func discogsArtistPhotos(_ name: String, links: [ArtistLinks]) async -> [ArtworkCandidate] {
+        guard let token = key(.discogs) else { return [] }
+        let headers = Self.discogsHeaders(token)
+        let ids = links.flatMap(\.relations).filter { $0.type == "discogs" }.compactMap { Self.discogsArtistId($0.resource) }
+        for id in ids {
+            guard let detail = await json(URL(string: "https://api.discogs.com/artists/\(id)")!, headers: headers) else { continue }
+            let urls = Self.discogsImages(detail["images"], keys: ["uri", "uri150"])
+            if !urls.isEmpty { return urls.map { ArtworkCandidate(url: $0, source: "Discogs") } }
+        }
+        guard let search = await json(requestURL("https://api.discogs.com/database/search", [("type", "artist"), ("q", name.trimmed), ("per_page", "10")]), headers: headers)
+        else { return [] }
+        return Self.discogsImages(search["results"], keys: ["cover_image", "thumb"]).map { ArtworkCandidate(url: $0, source: "Discogs") }
+    }
+
+    /// The artist id in a Discogs address ("https://www.discogs.com/artist/123-Name" → 123).
+    static func discogsArtistId(_ address: String) -> Int64? {
+        guard let match = Regex16("/artist/(\\d+)").firstMatch(in: address) else { return nil }
+        return Int64(match.group(1, in: address))
     }
 
     private func wikidataPortraits(_ qid: String) async -> [String] {

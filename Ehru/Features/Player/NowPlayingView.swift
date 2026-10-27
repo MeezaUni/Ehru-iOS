@@ -32,6 +32,7 @@ struct NowPlayingView: View {
                     Spacer(minLength: Spacing.md)
                     SongArtworkView(song: song, maxPixels: 1200)
                         .aspectRatio(1, contentMode: .fit)
+                        .modifier(MovingArtwork(isPlaying: state.isPlaying))
                         .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
                         .shadow(color: .black.opacity(0.3), radius: 24, y: 12)
                         .scaleEffect(state.isPlaying ? 1 : 0.92)
@@ -352,5 +353,32 @@ struct QueueSheet: View {
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
+    }
+}
+
+/// A slow drift and zoom of the artwork while music plays, so the cover feels alive without being
+/// a video. Still when paused, when turned off in Settings, or with Reduce Motion on.
+struct MovingArtwork: ViewModifier {
+    let isPlaying: Bool
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// One full drift cycle.
+    private static let period: Double = 24
+
+    func body(content: Content) -> some View {
+        if settings.movingArtwork && !reduceMotion {
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying)) { context in
+                let phase = context.date.timeIntervalSinceReferenceDate / Self.period * 2 * .pi
+                GeometryReader { geometry in
+                    let travel = geometry.size.width * 0.03
+                    content
+                        .scaleEffect(1.08 + 0.02 * CGFloat(sin(phase * 0.5)))
+                        .offset(x: travel * CGFloat(cos(phase)), y: travel * CGFloat(sin(phase)))
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                }
+            }
+        } else {
+            content
+        }
     }
 }

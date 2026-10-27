@@ -32,7 +32,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Visualizer | ✅ | Analysis engine and the full-screen visualizer |
 | Waveform seek bar | ✅ | Decoded with AVAudioFile into 480 bins, cached in the database |
 | Audio details / DSP diagnostics screen | ✅ | Source file read by Core Audio (with provenance), engine formats, processing chain, iOS route, headroom and peak meter, copy/share report without paths or device names |
-| Home screen widget | ⏳ | Needs a WidgetKit extension sharing an App Group, which unsigned / free-account sideloading can't sign reliably. Lock Screen and Control Center controls work (Now Playing) |
+| Home screen widget | ⏳ | Deferred for now. Needs a WidgetKit extension sharing an App Group, which unsigned / free-account sideloading can't sign reliably. Lock Screen and Control Center controls work (Now Playing) |
 
 ## Discovery
 
@@ -57,9 +57,9 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Android | iOS | Notes |
 |---|---|---|
 | Wi-Fi Transfer | ✅ | Same page, routes, pairing and checks. Runs only while empee3 is open (iOS suspends apps in the background). Ogg and Opus are refused because iOS cannot play them. |
-| Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz and Deezer searched; native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Last.fm (needs a key), renaming files (song identity is the path on iOS) |
-| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer and Wikimedia; automatic artist photos with the Deezer matcher; covers embedded with the verified writer; playlist covers from Photos. Not yet: Fanart.tv (needs a personal key), Genius / DuckDuckGo scraping |
-| Animated album artwork (Apple Music motion covers) | ➖ | Not ported: Android gets these by pulling a private token out of Apple Music's web player to call Apple's internal API. That isn't a public or permitted API |
+| Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz, Deezer and Last.fm searched (Last.fm with the listener's own key from Settings › Online sources); native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Genius (needs its own token), renaming files (song identity is the path on iOS) |
+| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer, Wikimedia, and Fanart.tv and Discogs when their keys are set in Settings › Online sources; automatic artist photos with the Deezer matcher; covers embedded with the verified writer; playlist covers from Photos. Not ported: Genius / DuckDuckGo scraping |
+| Animated album artwork (Apple Music motion covers) | ➖ | Not ported: Android gets these by pulling a private token out of Apple Music's web player to call Apple's internal API. That isn't a public or permitted API. Instead, Now Playing gives the still cover a slow drift (Settings › Moving artwork; off with Reduce Motion) |
 | BPM finder | ✅ | AcousticBrainz, then the on-device tempo estimate; only fills a missing BPM |
 | Themes, skins, theme import and rollback | 🟡 | Light / dark / system, the glass effect and imported theme packages (colours) are ported; fonts and widget skins aren't used on iOS |
 | Update checker (GitHub releases) | ➖ | Sideloaded builds are updated by reinstalling |
@@ -68,3 +68,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 
 CI (`.github/workflows/ios.yml`) builds an unsigned IPA and runs the unit tests on a simulator on
 every push. The IPA is signed on install with a free Apple ID through SideStore or AltStore.
+
+## API keys
+
+Last.fm, Fanart.tv and Discogs keys are the listener's own: they are entered in Settings › Online sources and kept in the iOS Keychain on that device only. None is in this repository or the built IPA; without a key, that source is skipped.

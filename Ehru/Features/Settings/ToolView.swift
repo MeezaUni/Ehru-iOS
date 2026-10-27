@@ -51,6 +51,7 @@ struct SettingsView: View {
                 }
                 if let themeMessage { Text(themeMessage).font(.footnote).foregroundStyle(.secondary) }
                 Toggle("Glass effect", isOn: $settings.glassEnabled)
+                Toggle("Moving artwork in Now Playing", isOn: $settings.movingArtwork)
                 Picker("Start on", selection: $settings.startSection) {
                     ForEach(LibrarySection.allCases) { Text($0.label).tag($0) }
                 }
@@ -59,6 +60,7 @@ struct SettingsView: View {
             } footer: {
                 Text("Themes made for empee3 on Android (a .zip with a manifest.json, or the manifest itself) bring their colours; their fonts and widget skins aren't used on iOS.")
             }
+            OnlineSourcesSection()
             Section {
                 Button("Rescan music folder") { library.scan() }
                     .disabled(library.isScanning)
@@ -93,5 +95,51 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+    }
+}
+
+/// Personal API keys for the extra sources, kept in the Keychain on this phone only.
+private struct OnlineSourcesSection: View {
+    @State private var drafts: [APIKeyKind: String] = [:]
+    @State private var saved: [APIKeyKind: Bool] = Dictionary(uniqueKeysWithValues: APIKeyKind.allCases.map { ($0, APIKeys.shared.isSet($0)) })
+
+    var body: some View {
+        Section {
+            ForEach(APIKeyKind.allCases) { kind in
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    HStack {
+                        Text(kind.label).font(.subheadline)
+                        Spacer()
+                        Text(saved[kind] == true ? "Saved" : "Not set").font(.caption).foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        SecureField(saved[kind] == true ? "Paste a new one to replace it" : "Paste it here", text: Binding(
+                            get: { drafts[kind] ?? "" }, set: { drafts[kind] = $0 }
+                        ))
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        Button("Save") { save(kind, drafts[kind]) }
+                            .disabled((drafts[kind] ?? "").trimmed.isEmpty)
+                        if saved[kind] == true {
+                            Button("Remove", role: .destructive) { save(kind, nil) }
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    Text(kind.help).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+        } header: {
+            Text("Online sources")
+        } footer: {
+            Text("Optional. Each key is your own, stored in this iPhone's Keychain only: never in the app's files or the repository, and not carried over to other devices. Without a key that source is simply skipped.")
+        }
+    }
+
+    private func save(_ kind: APIKeyKind, _ value: String?) {
+        APIKeys.shared.set(kind, value)
+        saved[kind] = APIKeys.shared.isSet(kind)
+        drafts[kind] = nil
+        // A source refused with an old key may be asked again.
+        Task { await AppServices.shared.fixTags.service.forgetRefusals() }
     }
 }
