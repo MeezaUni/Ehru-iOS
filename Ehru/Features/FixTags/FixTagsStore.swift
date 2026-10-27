@@ -326,6 +326,31 @@ final class FixTagsStore {
         return item
     }
 
+    /// Writes [match], picked by the listener for a track that needed review (or had no confident
+    /// match), with the same plan and backup as an automatic fix.
+    func apply(_ match: MetadataCandidate, to id: Int64) async {
+        guard !isRunning, let start = queue.firstIndex(where: { $0.id == id }) else { return }
+        isRunning = true
+        defer { isRunning = false }
+        var item = queue[start]
+        item.status = .fixing
+        queue[start] = item
+        let url = item.song.url
+        let embedded = await Task.detached(priority: .utility) { TagReader.read(url) }.value
+        let plan = await planFix(match, candidates: item.diagnostics?.topCandidates ?? [match], local: embedded, song: item.song, url: url,
+                                 selection: FieldSelection(selectedFields), acceptAt: settings.acceptAt)
+        item.changes = plan.changes
+        item.notes = plan.notes
+        if let request = plan.request {
+            item = await write(request, plan: plan, item: item)
+        } else {
+            item.status = .unchanged
+            item.reason = plan.notes.joined(separator: "; ").nonBlank ?? "The tags already match this choice"
+        }
+        if let index = queue.firstIndex(where: { $0.id == id }) { queue[index] = item }
+        if item.status == .done || item.status == .partial { library.scan() }
+    }
+
     /// Puts the selected tracks' files back exactly as they were before their fix.
     func revert(_ ids: Set<Int64>) async {
         guard !isRunning else { return }

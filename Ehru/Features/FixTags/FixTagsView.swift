@@ -218,8 +218,12 @@ private struct StatusBadge: View {
 /// What one lookup saw: the track's identity, each query and every provider's answer, the best
 /// candidates and the changes made (or why none were).
 private struct RepairItemDetail: View {
+    private var canChoose: Bool { item.status == .needsReview || item.status == .noMatch }
+
     let item: RepairItem
+    @Environment(FixTagsStore.self) private var store
     @Environment(\.dismiss) private var dismiss
+    @State private var choice: MetadataCandidate?
 
     var body: some View {
         NavigationStack {
@@ -266,13 +270,36 @@ private struct RepairItemDetail: View {
                         }
                     }
                     if !diagnostics.topCandidates.isEmpty {
-                        Section("Best candidates") {
+                        Section {
                             ForEach(diagnostics.topCandidates) { candidate in
-                                Text(TrackMatcher.describe(candidate, diagnostics.identity)).font(.footnote)
+                                if canChoose {
+                                    Button { choice = candidate } label: {
+                                        HStack {
+                                            Text(TrackMatcher.describe(candidate, diagnostics.identity)).font(.footnote).foregroundStyle(.primary)
+                                            Spacer()
+                                            Text("Use").font(.footnote.weight(.semibold))
+                                        }
+                                    }
+                                    .disabled(store.isRunning)
+                                } else {
+                                    Text(TrackMatcher.describe(candidate, diagnostics.identity)).font(.footnote)
+                                }
                             }
+                        } header: {
+                            Text("Best candidates")
+                        } footer: {
+                            if canChoose { Text("Pick the right one to write it, with the fields chosen on the Fix tags page. The original is kept for Revert.") }
                         }
                     }
                 }
+            }
+            .confirmationDialog("Write this match?", isPresented: Binding(get: { choice != nil }, set: { if !$0 { choice = nil } }),
+                                titleVisibility: .visible, presenting: choice) { candidate in
+                Button("Write \"\(candidate.title)\" by \(candidate.artist)") {
+                    Task { await store.apply(candidate, to: item.id) }
+                    dismiss()
+                }
+                Button("Cancel", role: .cancel) {}
             }
             .navigationTitle(item.song.title)
             .navigationBarTitleDisplayMode(.inline)

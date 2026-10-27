@@ -100,6 +100,7 @@ struct AlbumDetailView: View {
         .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .task(id: library.songs) { songs = (try? library.database.songsOfAlbum(albumId)) ?? [] }
         .artworkFocus(library.albumCoverSong[albumId]?.url)
+        .background(alignment: .top) { CoverGlow(url: library.albumCoverSong[albumId]?.url) }
     }
 }
 
@@ -325,5 +326,26 @@ struct SmartPlaylistDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { mixes.start() }
         .id(library.songs.count)
+    }
+}
+
+/// The top of a collection page washed in its cover's colour, fading into the background (as in
+/// Now Playing), so each album feels like its own.
+struct CoverGlow: View {
+    let url: URL?
+    @Environment(\.palette) private var palette
+    @State private var tint: Color?
+
+    var body: some View {
+        LinearGradient(colors: [tint ?? .clear, (tint ?? .clear).opacity(0.35), palette.background.opacity(0)],
+                       startPoint: .top, endPoint: .bottom)
+            .frame(height: 560)
+            .ignoresSafeArea(edges: .top)
+            .allowsHitTesting(false)
+            .task(id: url) {
+                guard let url else { return }
+                let colors = LyricsColors(await LyricsPaletteCache.shared.palette(for: url))
+                withAnimation(.easeInOut(duration: 0.5)) { tint = colors.gradient.first ?? colors.surface }
+            }
     }
 }

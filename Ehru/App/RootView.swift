@@ -26,6 +26,7 @@ struct RootView: View {
                     .allowsHitTesting(router.section == section)
                     .accessibilityHidden(router.section != section)
             }
+            if router.paths[router.section]?.isEmpty ?? true { drawerEdge }
             bottomChrome
             if let message = actions.message, !router.showsNowPlaying {
                 Toast(text: message)
@@ -40,7 +41,10 @@ struct RootView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .sheet(isPresented: $router.showsSearch) { SearchView() }
-        .fullScreenCover(isPresented: $router.showsNowPlaying) { NowPlayingView() }
+        .sheet(isPresented: $router.showsNowPlaying) {
+            // A sheet, so pulling it down closes it (from the top of its page).
+            NowPlayingView().presentationDragIndicator(.visible)
+        }
         .routerSheets(active: !router.showsNowPlaying)
         .alert("New playlist", isPresented: $router.showsNewPlaylist) { NewPlaylistAlert() }
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
@@ -149,6 +153,22 @@ struct RootView: View {
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: player.state.currentSong == nil)
     }
 
+    /// A swipe in from the left edge opens the side menu (on a section's first page; deeper pages
+    /// keep the edge for going back).
+    private var drawerEdge: some View {
+        HStack(spacing: 0) {
+            Color.clear
+                .frame(width: 22)
+                .contentShape(Rectangle())
+                .gesture(DragGesture(minimumDistance: 12).onEnded { value in
+                    if value.translation.width > 50, abs(value.translation.height) < value.translation.width { router.showsDrawer = true }
+                })
+            Spacer(minLength: 0)
+        }
+        .frame(maxHeight: .infinity)
+        .ignoresSafeArea(edges: .vertical)
+    }
+
     private var drawer: some View {
         ZStack(alignment: .leading) {
             Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { router.showsDrawer = false }
@@ -166,6 +186,9 @@ struct RootView: View {
             .frame(width: 300)
             .frame(maxHeight: .infinity)
             .background(palette.surface.ignoresSafeArea())
+            .gesture(DragGesture(minimumDistance: 12).onEnded { value in
+                if value.translation.width < -50 { router.showsDrawer = false }
+            })
             .transition(.move(edge: .leading))
         }
         .transition(.opacity)

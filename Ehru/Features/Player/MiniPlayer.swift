@@ -27,19 +27,21 @@ struct MiniPlayer: View {
             }
             .buttonStyle(.plain)
             .accessibilityHint("Opens Now Playing")
-            Button { player.skipPrevious() } label: { Image(systemName: "backward.fill").frame(width: 36, height: 44) }
+            Button { player.skipPrevious() } label: { Image(systemName: "backward.fill").frame(width: 44, height: 48).contentShape(Rectangle()) }
                 .accessibilityLabel("Previous track")
             Button { player.togglePlayPause() } label: {
-                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").font(.title2).frame(width: 40, height: 44)
+                Image(systemName: state.isPlaying ? "pause.fill" : "play.fill").font(.title2).frame(width: 44, height: 48).contentShape(Rectangle())
             }
             .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
-            Button { player.skipNext() } label: { Image(systemName: "forward.fill").frame(width: 36, height: 44) }
+            Button { player.skipNext() } label: { Image(systemName: "forward.fill").frame(width: 44, height: 48).contentShape(Rectangle()) }
                 .accessibilityLabel("Next track")
         }
         .foregroundStyle(palette.onSurface)
         .buttonStyle(.plain)
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs + 2)
+        // The whole bar takes touches, so nothing behind it can be pressed through its gaps.
+        .contentShape(Rectangle())
         .overlay(alignment: .bottom) {
             ProgressLine(durationMs: state.durationMs)
                 .frame(height: 3)

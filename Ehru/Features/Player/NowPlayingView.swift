@@ -9,8 +9,10 @@ struct NowPlayingView: View {
     @Environment(LibraryActions.self) private var actions
     @Environment(MixStore.self) private var mixes
     @Environment(AppRouter.self) private var router
+    @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
+    @State private var artworkTarget: ArtworkTarget?
     @State private var showsQueue = false
     @State private var showsLyrics = false
     @State private var showsMarks = false
@@ -66,6 +68,7 @@ struct NowPlayingView: View {
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .routerSheets(active: true)
         .sheet(isPresented: $showsQueue) { QueueSheet() }
+        .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .sheet(isPresented: $showsMarks) { MarksSheet() }
         .sheet(isPresented: $showsAudioDetails) { AudioDetailsView() }
         .fullScreenCover(isPresented: $showsVisualizer) { VisualizerView() }
@@ -130,6 +133,9 @@ struct NowPlayingView: View {
             Section("Track") {
                 Button { router.songForDetails = song } label: { Label("Music information", systemImage: "info.circle") }
                 Button { showsAudioDetails = true } label: { Label("Audio details", systemImage: "waveform.badge.magnifyingglass") }
+                if let album = song.flatMap({ library.album($0.albumId) }) {
+                    Button { artworkTarget = .album(album) } label: { Label("Find a better cover", systemImage: "photo.badge.magnifyingglass") }
+                }
             }
             Section("Library") {
                 Button { addBookmark() } label: { Label("Bookmark this moment", systemImage: "bookmark") }
