@@ -57,6 +57,14 @@ final class AudioEngine {
     private var configurationObserver: NSObjectProtocol?
 
     var active: Deck { decks[activeIndex] }
+
+    /// What the app hands to iOS after its processing (nil before the graph is built).
+    var outputFormat: AVAudioFormat? { isReady ? engine.mainMixerNode.outputFormat(forBus: 0) : nil }
+    /// The PCM format the playing file is decoded to, before the app's processing.
+    var decodedFormat: AVAudioFormat? { currentSegment(active)?.file.processingFormat }
+    var isRunning: Bool { engine.isRunning }
+    /// Whether the equaliser and transition stages are in the graph (they are unless the audio units failed to load).
+    var hasProcessing: Bool { eqUnit != nil }
     var other: Deck { decks[1 - activeIndex] }
 
     /// Builds the graph (the custom audio units are made asynchronously).

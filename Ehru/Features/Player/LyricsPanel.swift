@@ -2,8 +2,48 @@ import SwiftUI
 
 /// The playing song's lyrics: synced lines follow the music (the current line bright, its words lit
 /// as they are sung when the lyrics time them), a tap on a line seeks to it; plain lyrics scroll.
-/// Without lyrics it shows what the online lookup is doing, never invented text.
+/// Without lyrics it shows what the online lookup is doing, never invented text. It sits on a
+/// surface in the artwork's colours, with text colours checked for contrast against it.
 struct LyricsPanel: View {
+    let song: Song
+    @Environment(AppSettings.self) private var settings
+    @Environment(\.palette) private var palette
+    @State private var colors = LyricsColors(.fallback)
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Radius.large, style: .continuous)
+        LyricsPanelContent(song: song)
+            .padding(.vertical, Spacing.md)
+            .environment(\.palette, palette.lyrics(colors))
+            .environment(\.lyricsColors, colors)
+            .background {
+                if settings.glassEnabled {
+                    shape.fill(colors.surface.opacity(0.74)).background(.ultraThinMaterial, in: shape)
+                } else {
+                    shape.fill(LinearGradient(colors: colors.gradient, startPoint: .top, endPoint: .bottom))
+                }
+            }
+            .clipShape(shape)
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, Spacing.sm)
+            .task(id: song.url) {
+                // The previous colours stay while the next artwork is sampled, then cross-fade.
+                let next = LyricsColors(await LyricsPaletteCache.shared.palette(for: song.url))
+                withAnimation(.easeInOut(duration: 0.6)) { colors = next }
+            }
+    }
+}
+
+extension AppPalette {
+    /// This palette with the lyrics colours for text: current line, other lines, the timed word.
+    func lyrics(_ colors: LyricsColors) -> AppPalette {
+        AppPalette(primary: colors.accent, onPrimary: colors.surface, background: background, surface: colors.surface,
+                   surfaceVariant: colors.content.opacity(0.12), onSurface: colors.content,
+                   onSurfaceVariant: colors.secondary, outline: colors.secondary.opacity(0.4))
+    }
+}
+
+private struct LyricsPanelContent: View {
     let song: Song
     @Environment(LyricsStore.self) private var store
     @Environment(PlayerController.self) private var player
@@ -207,17 +247,27 @@ private struct SyncedLyricsView: View {
         }
     }
 
+    private func wordColor(_ index: Int, sung: Int) -> Color {
+        if index < sung { return palette.onSurface }
+        return index == sung ? palette.primary : palette.onSurfaceVariant
+    }
+
     private func lineText(_ line: LyricLine, index: Int, current: Int, position: Int64) -> some View {
         let isCurrent = index == current
         let base = Text(line.text.isEmpty ? "♪" : line.text)
         let styled: Text
         if isCurrent, let words = line.words {
             let sung = lyrics.wordAt(line: index, position)
+            // Sung words in the line colour, the active word in the accent, upcoming words dimmed.
             styled = words.enumerated().reduce(Text("")) { text, item in
-                text + Text(item.element.text).foregroundColor(item.offset <= sung ? palette.onSurface : palette.onSurface.opacity(0.45))
+                text + Text(item.element.text).foregroundColor(wordColor(item.offset, sung: sung))
             }
+        } else if isCurrent {
+            styled = base.foregroundColor(palette.onSurface)
         } else {
-            styled = base.foregroundColor(isCurrent ? palette.onSurface : palette.onSurface.opacity(index < current ? 0.35 : 0.5))
+            // Other lines fade with their distance from the current one.
+            let fade = max(1 - Double(abs(index - current)) * 0.15, 0.45)
+            styled = base.foregroundColor(palette.onSurfaceVariant.opacity(fade))
         }
         return styled
             .font(.title2.weight(.bold))

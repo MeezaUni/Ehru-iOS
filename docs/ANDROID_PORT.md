@@ -31,7 +31,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Lock screen / headphone controls, audio focus, resume after restart | ✅ | MPRemoteCommandCenter, AVAudioSession |
 | Visualizer | ✅ | Analysis engine and the full-screen visualizer |
 | Waveform seek bar | ✅ | Decoded with AVAudioFile into 480 bins, cached in the database |
-| Audio details / DSP diagnostics screen | ⏳ | Diagnostics model ported |
+| Audio details / DSP diagnostics screen | ✅ | Source file read by Core Audio (with provenance), engine formats, processing chain, iOS route, headroom and peak meter, copy/share report without paths or device names |
 | Home screen widget | ⏳ | Would be a WidgetKit extension |
 
 ## Discovery
@@ -50,7 +50,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 |---|---|---|
 | Embedded lyrics, LRC / enhanced LRC (word timing) | ✅ | |
 | LRCLIB lookups with the matcher, cache, manual search and choice | ✅ | Word-synced Lyricsfiles read with a small YAML reader |
-| Lyrics colour palette from artwork | ⏳ | |
+| Lyrics colour palette from artwork | ✅ | Same algorithm and contrast checks; follows the Glass setting |
 
 ## Tools
 

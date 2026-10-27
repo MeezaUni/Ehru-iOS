@@ -17,6 +17,7 @@ struct NowPlayingView: View {
     @State private var showsMarks = false
     @State private var showsVisualizer = false
     @State private var showsEqualizer = false
+    @State private var showsAudioDetails = false
 
     var body: some View {
         let state = player.state
@@ -54,6 +55,7 @@ struct NowPlayingView: View {
         .background(backdrop(state.currentSong).ignoresSafeArea())
         .sheet(isPresented: $showsQueue) { QueueSheet() }
         .sheet(isPresented: $showsMarks) { MarksSheet() }
+        .sheet(isPresented: $showsAudioDetails) { AudioDetailsView() }
         .fullScreenCover(isPresented: $showsVisualizer) { VisualizerView() }
         .sheet(isPresented: $showsEqualizer) {
             NavigationStack {
@@ -106,6 +108,7 @@ struct NowPlayingView: View {
                 Button { showsQueue = true } label: { Label("Queue", systemImage: "list.bullet") }
                 Button { showsVisualizer = true } label: { Label("Visualizer", systemImage: "waveform") }
                 Button { showsEqualizer = true } label: { Label("Equalizer", systemImage: "slider.vertical.3") }
+                Button { showsAudioDetails = true } label: { Label("Audio details", systemImage: "info.circle") }
             }
         } label: {
             Image(systemName: "ellipsis").font(.title3.weight(.semibold)).frame(width: 44, height: 44)
