@@ -63,12 +63,12 @@ final class AnimatedArtworkStore {
         downloading = album.id
         status[album.id] = .downloading
         pending = Task {
+            defer { downloading = nil; pending = nil }
             var destination: URL?
             do {
                 let country = Locale.current.region?.identifier ?? "us"
                 guard let match = try await service.find(album: album.title, artist: album.artist, country: country) else {
                     status[album.id] = .notFound
-                    downloading = nil
                     return
                 }
                 try Task.checkCancellation()
@@ -89,8 +89,6 @@ final class AnimatedArtworkStore {
                 if error is CancellationError || Task.isCancelled { status[album.id] = nil }
                 else { status[album.id] = .failed(error.localizedDescription) }
             }
-            downloading = nil
-            pending = nil
         }
     }
 

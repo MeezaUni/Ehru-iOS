@@ -69,9 +69,9 @@ private struct LoopingMotionVideo: UIViewRepresentable {
             item.preferredForwardBufferDuration = 3
             looper = AVPlayerLooper(player: player, templateItem: item)
             // Keep the still visible until the first decoded frame is ready (also on failure).
-            surface.videoLayer.opacity = 0
+            surface.videoLayer.opacity = 0.02
             observation = surface.videoLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
-                DispatchQueue.main.async { surface.videoLayer.opacity = layer.isReadyForDisplay ? 1 : 0 }
+                DispatchQueue.main.async { surface.videoLayer.opacity = layer.isReadyForDisplay ? 1 : 0.02 }
             }
             player.play()
         }
