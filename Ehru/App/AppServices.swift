@@ -19,6 +19,7 @@ final class AppServices {
     let lyrics: LyricsStore
     let transfer: WifiTransferStore
     let fixTags: FixTagsStore
+    let artwork: ArtworkFetcherStore
     let waveforms: WaveformStore
 
     private init() {
@@ -38,6 +39,7 @@ final class AppServices {
         router = AppRouter()
         transfer = WifiTransferStore(library: library)
         fixTags = FixTagsStore(library: library)
+        artwork = ArtworkFetcherStore(library: library, service: fixTags.service)
         waveforms = WaveformStore(database: database)
         router.section = settings.startSection
     }

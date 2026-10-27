@@ -169,6 +169,12 @@ enum LibraryPaths {
     /// The music folder: the app's Documents folder, shown as "empee3" under On My iPhone.
     static var musicFolder: URL { URL.documentsDirectory }
 
+    /// A stored image path: relative ones ("artist-art/x.jpg") live in [supportFolder], so they
+    /// survive the app's container moving; absolute ones are used as they are.
+    static func resolveImage(_ path: String) -> String {
+        path.hasPrefix("/") ? path : supportFolder.appendingPathComponent(path).path
+    }
+
     /// App data that is not music (database, caches, covers), hidden from the Files app.
     static var supportFolder: URL {
         let url = URL.applicationSupportDirectory.appendingPathComponent("Ehru", isDirectory: true)

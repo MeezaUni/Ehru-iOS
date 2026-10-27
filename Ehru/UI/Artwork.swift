@@ -63,7 +63,7 @@ struct FileImageView<Fallback: View>: View {
                 image = nil
                 return
             }
-            image = await ArtworkLoader.shared.image(atPath: path, maxPixels: maxPixels)
+            image = await ArtworkLoader.shared.image(atPath: LibraryPaths.resolveImage(path), maxPixels: maxPixels)
         }
     }
 }

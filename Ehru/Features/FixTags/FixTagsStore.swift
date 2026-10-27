@@ -345,7 +345,7 @@ final class FixTagsStore {
     }
 
     /// If a provider couldn't be reached, the track is not "no match"; nil when every queried provider answered.
-    static func networkVerdict(_ outcomes: [ProviderOutcome]) -> NetworkVerdict? {
+    nonisolated static func networkVerdict(_ outcomes: [ProviderOutcome]) -> NetworkVerdict? {
         let unreachable = outcomes.filter { $0.status.isTransient }
         guard !unreachable.isEmpty else { return nil }
         let reason = unreachable.map { "\($0.providerName): \($0.errorMessage ?? $0.status.label)" }.joined(separator: "; ")
@@ -353,7 +353,7 @@ final class FixTagsStore {
     }
 
     /// When every provider that was asked failed rather than answered, the failures.
-    static func providerFailureSummary(_ outcomes: [ProviderOutcome]) -> String? {
+    nonisolated static func providerFailureSummary(_ outcomes: [ProviderOutcome]) -> String? {
         let considered = outcomes.filter { $0.status != .skipped }
         let failed = considered.filter { !$0.status.answered }
         if considered.isEmpty { return "No provider could be queried for this source" }

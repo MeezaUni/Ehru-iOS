@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// The shared top of a collection page: big cover, title, subtitle, facts, Play / Shuffle.
@@ -62,6 +63,7 @@ struct AlbumDetailView: View {
     @Environment(LibraryActions.self) private var actions
     @Environment(AppRouter.self) private var router
     @State private var songs: [Song] = []
+    @State private var artworkTarget: ArtworkTarget?
 
     var body: some View {
         let origin = CollectionRef.album(albumId)
@@ -86,9 +88,16 @@ struct AlbumDetailView: View {
                 Button { songs.forEach { actions.addToQueue($0) } } label: { Label("Add to queue", systemImage: "text.badge.plus") }
                 Button { actions.startRadio(.album(albumId)) } label: { Label("Start radio", systemImage: "dot.radiowaves.left.and.right") }
                 Button { router.songsForPlaylist = songs } label: { Label("Add to playlist", systemImage: "music.note.list") }
+                Button { AppServices.shared.fixTags.enqueue(songs); router.open(.autoFixTags) } label: {
+                    Label("Fix tags online", systemImage: "wand.and.stars")
+                }
+                if let album = library.album(albumId) {
+                    Button { artworkTarget = .album(album) } label: { Label("Find a cover", systemImage: "photo") }
+                }
             } label: { Image(systemName: "ellipsis.circle") }
             .accessibilityLabel("Album options")
         }
+        .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .task(id: library.songs) { songs = (try? library.database.songsOfAlbum(albumId)) ?? [] }
     }
 }
@@ -104,6 +113,7 @@ struct ArtistDetailView: View {
     @State private var primary: [Song] = []
     @State private var featured: [Song] = []
     @State private var unverified: [Song] = []
+    @State private var artworkTarget: ArtworkTarget?
 
     var body: some View {
         ScrollView {
@@ -136,9 +146,18 @@ struct ArtistDetailView: View {
                 Button { primary.reversed().forEach { actions.playNext($0) } } label: { Label("Play next", systemImage: "text.line.first.and.arrowtriangle.forward") }
                 Button { primary.forEach { actions.addToQueue($0) } } label: { Label("Add to queue", systemImage: "text.badge.plus") }
                 Button { actions.startRadio(.artist(artistId)) } label: { Label("Start radio", systemImage: "dot.radiowaves.left.and.right") }
+                if let artist = library.artist(artistId) {
+                    Button { artworkTarget = .artist(artist) } label: { Label("Find a photo", systemImage: "person.crop.square") }
+                    if artist.artworkPath != nil {
+                        Button(role: .destructive) { AppServices.shared.artwork.removePhoto(artist) } label: {
+                            Label("Remove chosen photo", systemImage: "trash")
+                        }
+                    }
+                }
             } label: { Image(systemName: "ellipsis.circle") }
             .accessibilityLabel("Artist options")
         }
+        .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .task(id: library.songs) { load() }
     }
 
@@ -185,6 +204,8 @@ struct PlaylistDetailView: View {
     @State private var renaming = false
     @State private var newName = ""
     @State private var confirmingDelete = false
+    @State private var coverItem: PhotosPickerItem?
+    @State private var choosingCover = false
 
     var body: some View {
         let origin = CollectionRef.playlist(playlistId)
@@ -220,9 +241,27 @@ struct PlaylistDetailView: View {
                     newName = library.playlist(playlistId)?.name ?? ""
                     renaming = true
                 } label: { Label("Rename", systemImage: "pencil") }
+                Button { choosingCover = true } label: { Label("Choose cover", systemImage: "photo") }
+                if let playlist = library.playlist(playlistId), playlist.artworkPath != nil {
+                    Button { AppServices.shared.artwork.removePlaylistCover(playlist) } label: { Label("Remove cover", systemImage: "photo.badge.minus") }
+                }
                 Button(role: .destructive) { confirmingDelete = true } label: { Label("Delete playlist", systemImage: "trash") }
             } label: { Image(systemName: "ellipsis.circle") }
             .accessibilityLabel("Playlist options")
+        }
+        .photosPicker(isPresented: $choosingCover, selection: $coverItem, matching: .images)
+        .onChange(of: coverItem) { _, item in
+            guard let item, let playlist = library.playlist(playlistId) else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    do {
+                        try AppServices.shared.artwork.setPlaylistCover(data, playlist: playlist)
+                    } catch {
+                        actions.show("Couldn't save the cover: \(error.localizedDescription)")
+                    }
+                }
+                coverItem = nil
+            }
         }
         .alert("Rename playlist", isPresented: $renaming) {
             TextField("Name", text: $newName)
