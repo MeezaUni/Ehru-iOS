@@ -1,4 +1,5 @@
 @testable import Ehru
+import SwiftUI
 import XCTest
 
 final class ArtworkColorsTests: XCTestCase {
