@@ -37,6 +37,7 @@ struct MiniPlayer: View {
                 .accessibilityLabel("Next track")
         }
         .foregroundStyle(palette.onSurface)
+        .buttonStyle(.plain)
         .padding(.horizontal, Spacing.sm)
         .padding(.vertical, Spacing.xs + 2)
         .overlay(alignment: .bottom) {

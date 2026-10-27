@@ -75,6 +75,7 @@ struct VisualizerView: View {
             .padding(.vertical, Spacing.lg)
         }
         .padding(.horizontal, Spacing.lg)
+        .buttonStyle(.plain)
         .background(palette.background.ignoresSafeArea())
         .onAppear {
             let made = VisualizerEngine(tap: player.engine.tap)
@@ -104,7 +105,8 @@ struct VisualizerView: View {
                 Text("Smooth").tag(VisualizerSmoothing.smooth)
             }
             Toggle("Reduce motion", isOn: Binding(get: { options.reduceMotion }, set: { settings.visualizer.reduceMotion = $0 }))
-        } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44) }
+        } label: { Image(systemName: "slider.horizontal.3").frame(width: 44, height: 44).contentShape(Rectangle()) }
+        .menuStyle(.button)
         .accessibilityLabel("Visualizer options")
     }
 

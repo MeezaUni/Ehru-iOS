@@ -32,11 +32,9 @@ final class TransferServer: @unchecked Sendable {
     }
 
     private func listen(on port: UInt16) async throws -> UInt16 {
-        // Bound to the Wi-Fi interface rather than to its address: NWListener can't reliably
-        // listen on one local address, and the interface restriction keeps cellular and VPN out.
+        // Plain TCP: iOS refuses (EINVAL) a listener restricted to one address or interface.
+        // Each connection is checked to arrive over Wi-Fi instead (see [accept]).
         let parameters = NWParameters.tcp
-        parameters.requiredInterfaceType = .wifi
-        parameters.allowLocalEndpointReuse = true
         let listener = try NWListener(using: parameters, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port) ?? .any)
         let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
             let resumed = OnceFlag()
@@ -81,11 +79,33 @@ final class TransferServer: @unchecked Sendable {
             connections[ObjectIdentifier(connection)] = connection
             return true
         }
-        connection.start(queue: queue)
         guard admitted else {
+            connection.start(queue: queue)
             sendAndClose(HttpResponse.error(HttpStatus.serviceUnavailable, "Too many connections, try again"), on: connection)
             return
         }
+        let started = OnceFlag()
+        connection.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready:
+                // Only the Wi-Fi network: nothing over cellular, VPN or another interface.
+                guard started.claim() else { return }
+                if connection.currentPath?.usesInterfaceType(.wifi) == false {
+                    connection.cancel()
+                    self?.lock.withLock { _ = self?.connections.removeValue(forKey: ObjectIdentifier(connection)) }
+                    return
+                }
+                self?.serve(connection, router)
+            case .failed, .cancelled:
+                self?.lock.withLock { _ = self?.connections.removeValue(forKey: ObjectIdentifier(connection)) }
+            default:
+                break
+            }
+        }
+        connection.start(queue: queue)
+    }
+
+    private func serve(_ connection: NWConnection, _ router: TransferRouter) {
         let reader = ConnectionReader(connection: connection, timeout: limits.readTimeoutSeconds)
         Task {
             let response: HttpResponse?
