@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Observation
 
 /// The listener's app preferences (Android's ThemeRepository and friends), saved as JSON.
@@ -11,6 +12,9 @@ final class AppSettings {
         var glassEnabled = true
         var startSection: String = LibrarySection.home.rawValue
         var visualizer = VisualizerSettings()
+        /// An imported theme in use instead of [theme], by id.
+        var customThemeId: String?
+        var importedThemes: [ImportedTheme] = []
 
         init() {}
 
@@ -21,6 +25,8 @@ final class AppSettings {
             glassEnabled = try c.decodeIfPresent(Bool.self, forKey: .glassEnabled) ?? true
             startSection = try c.decodeIfPresent(String.self, forKey: .startSection) ?? LibrarySection.home.rawValue
             visualizer = (try? c.decodeIfPresent(VisualizerSettings.self, forKey: .visualizer)) ?? VisualizerSettings()
+            customThemeId = try? c.decodeIfPresent(String.self, forKey: .customThemeId)
+            importedThemes = (try? c.decodeIfPresent([ImportedTheme].self, forKey: .importedThemes)) ?? []
         }
     }
 
@@ -47,6 +53,39 @@ final class AppSettings {
     var visualizer: VisualizerSettings {
         get { stored.visualizer }
         set { update { $0.visualizer = newValue } }
+    }
+
+    /// The imported theme in use, if any.
+    var customTheme: ImportedTheme? {
+        stored.customThemeId.flatMap { id in stored.importedThemes.first { $0.id == id } }
+    }
+
+    var importedThemes: [ImportedTheme] { stored.importedThemes }
+
+    /// The appearance the app asks for: an imported theme's own, else the chosen one.
+    var colorScheme: ColorScheme? {
+        if let customTheme { return customTheme.isDark ? .dark : .light }
+        return theme.colorScheme
+    }
+
+    /// Adds (or replaces) a theme and switches to it.
+    func importTheme(_ theme: ImportedTheme) {
+        update { stored in
+            stored.importedThemes.removeAll { $0.id == theme.id }
+            stored.importedThemes.append(theme)
+            stored.customThemeId = theme.id
+        }
+    }
+
+    func useCustomTheme(_ id: String?) {
+        update { $0.customThemeId = id }
+    }
+
+    func deleteTheme(_ id: String) {
+        update { stored in
+            stored.importedThemes.removeAll { $0.id == id }
+            if stored.customThemeId == id { stored.customThemeId = nil }
+        }
     }
 
     private func update(_ change: (inout Stored) -> Void) {

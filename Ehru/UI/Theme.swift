@@ -88,12 +88,14 @@ extension EnvironmentValues {
 /// Supplies the palette that matches the effective colour scheme.
 struct ThemedRoot<Content: View>: View {
     @Environment(\.colorScheme) private var scheme
+    @Environment(AppSettings.self) private var settings
     @ViewBuilder let content: Content
 
     var body: some View {
+        let palette = settings.customTheme?.palette ?? (scheme == .dark ? .dark : .light)
         content
-            .environment(\.palette, scheme == .dark ? .dark : .light)
-            .tint(scheme == .dark ? AppPalette.dark.primary : AppPalette.light.primary)
+            .environment(\.palette, palette)
+            .tint(palette.primary)
     }
 }
 

@@ -21,7 +21,7 @@ struct EhruApp: App {
                 .environment(services.fixTags)
                 .environment(services.artwork)
                 .environment(services.transitions)
-                .preferredColorScheme(services.settings.theme.colorScheme)
+                .preferredColorScheme(services.settings.colorScheme)
         }
     }
 }

@@ -16,7 +16,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Favorites, playlists, recently played, listening months, Sound Capsule stats | ✅ | |
 | Search (accent- and case-insensitive) with recent items | ✅ | |
 | Import music | ✅ | Files app (UIFileSharing), document picker, Wi-Fi Transfer |
-| Library Builder (move files into Artist/Album folders through SAF) | ⏳ | Will work on the Documents folder |
+| Library Builder (move files into Artist/Album folders through SAF) | ⏳ | Held back on purpose: on iOS a song's identity is its file path, so moving files would detach favourites, playlists, play history, bookmarks and transitions. Needs a path-to-id migration first. The Files app can organise the folder meanwhile |
 | Custom scan location | ➖ | iOS apps only read their own folder (plus picked files) |
 
 ## Playback and sound
@@ -32,7 +32,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Visualizer | ✅ | Analysis engine and the full-screen visualizer |
 | Waveform seek bar | ✅ | Decoded with AVAudioFile into 480 bins, cached in the database |
 | Audio details / DSP diagnostics screen | ✅ | Source file read by Core Audio (with provenance), engine formats, processing chain, iOS route, headroom and peak meter, copy/share report without paths or device names |
-| Home screen widget | ⏳ | Would be a WidgetKit extension |
+| Home screen widget | ⏳ | Needs a WidgetKit extension sharing an App Group, which unsigned / free-account sideloading can't sign reliably. Lock Screen and Control Center controls work (Now Playing) |
 
 ## Discovery
 
@@ -58,10 +58,10 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 |---|---|---|
 | Wi-Fi Transfer | ✅ | Same page, routes, pairing and checks. Runs only while empee3 is open (iOS suspends apps in the background). Ogg and Opus are refused because iOS cannot play them. |
 | Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz and Deezer searched; native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Last.fm (needs a key), renaming files (song identity is the path on iOS) |
-| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ⏳ | |
-| Animated album artwork (Apple Music motion covers) | ⏳ | |
+| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer and Wikimedia; automatic artist photos with the Deezer matcher; covers embedded with the verified writer; playlist covers from Photos. Not yet: Fanart.tv (needs a personal key), Genius / DuckDuckGo scraping |
+| Animated album artwork (Apple Music motion covers) | ➖ | Not ported: Android gets these by pulling a private token out of Apple Music's web player to call Apple's internal API. That isn't a public or permitted API |
 | BPM finder | ✅ | AcousticBrainz, then the on-device tempo estimate; only fills a missing BPM |
-| Themes, skins, theme import and rollback | 🟡 | Light / dark / system and the glass effect are ported; imported themes and skins are not |
+| Themes, skins, theme import and rollback | 🟡 | Light / dark / system, the glass effect and imported theme packages (colours) are ported; fonts and widget skins aren't used on iOS |
 | Update checker (GitHub releases) | ➖ | Sideloaded builds are updated by reinstalling |
 
 ## Building and installing
