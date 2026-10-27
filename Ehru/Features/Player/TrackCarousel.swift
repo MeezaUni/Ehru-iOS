@@ -217,9 +217,8 @@ private struct CarouselCard: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
         VStack(spacing: 0) {
-            SongArtworkView(song: song, maxPixels: 1200)
+            MotionCoverView(song: song, playing: isCurrent && isPlaying, animateStill: true)
                 .frame(width: metrics.artSide, height: metrics.artSide)
-                .modifier(MovingArtwork(isPlaying: isPlaying))
                 .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 1) {

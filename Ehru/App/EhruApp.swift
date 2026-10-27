@@ -20,6 +20,7 @@ struct EhruApp: App {
                 .environment(services.transfer)
                 .environment(services.fixTags)
                 .environment(services.artwork)
+                .environment(services.animatedArtwork)
                 .environment(services.transitions)
                 .preferredColorScheme(services.settings.colorScheme)
         }

@@ -21,6 +21,7 @@ final class AppServices {
     let fixTags: FixTagsStore
     let artwork: ArtworkFetcherStore
     let waveforms: WaveformStore
+    let animatedArtwork: AnimatedArtworkStore
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
@@ -41,6 +42,7 @@ final class AppServices {
         fixTags = FixTagsStore(library: library)
         artwork = ArtworkFetcherStore(library: library, service: fixTags.service)
         waveforms = WaveformStore(database: database)
+        animatedArtwork = AnimatedArtworkStore()
         router.section = settings.startSection
     }
 }

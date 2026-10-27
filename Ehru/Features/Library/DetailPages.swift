@@ -73,7 +73,7 @@ struct AlbumDetailView: View {
                 VStack(spacing: 0) {
                     CollectionHeader(title: album.title, subtitle: album.artist, facts: songs.contains(where: \.isLossless) ? "\(facts) · Lossless" : facts,
                                      canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
-                                     onShuffle: { actions.playShuffled(songs, origin: origin) }) { AlbumArtworkView(albumId: albumId, maxPixels: 900) }
+                                     onShuffle: { actions.playShuffled(songs, origin: origin) }) { MotionCoverView(song: library.albumCoverSong[albumId], playing: !router.showsNowPlaying, maxPixels: 900) }
                     TransitionStudioRow(collection: origin).padding(.bottom, Spacing.sm)
                     SongList(songs: songs, origin: origin, showTrackNumbers: true)
                 }

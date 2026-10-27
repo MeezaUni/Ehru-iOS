@@ -1,0 +1,101 @@
+import AVFoundation
+import SwiftUI
+import UIKit
+
+private struct MotionCoverVisibilityKey: EnvironmentKey { static let defaultValue = true }
+extension EnvironmentValues {
+    var motionCoverVisible: Bool {
+        get { self[MotionCoverVisibilityKey.self] }
+        set { self[MotionCoverVisibilityKey.self] = newValue }
+    }
+}
+
+/// Only the visible current cover instantiates a decoder. Grid tiles and carousel neighbours
+/// remain still; no network request is made by this view.
+struct MotionCoverView: View {
+    let song: Song?
+    var playing = false
+    var maxPixels = 1200
+    var animateStill = false
+    @Environment(AnimatedArtworkStore.self) private var store
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.motionCoverVisible) private var sectionVisible
+    @State private var visible = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+
+    var body: some View {
+        let url = song.flatMap { store.url(for: $0) }
+        ZStack {
+            SongArtworkView(song: song, maxPixels: maxPixels)
+                .modifier(MovingArtwork(isPlaying: animateStill && playing && url == nil))
+            if playing, visible, sectionVisible, scenePhase == .active, !reduceMotion, !lowPower, let url {
+                LoopingMotionVideo(url: url)
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+            }
+        }
+        .clipped()
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
+            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
+        }
+    }
+}
+
+private struct LoopingMotionVideo: UIViewRepresentable {
+    let url: URL
+    final class Surface: UIView {
+        override class var layerClass: AnyClass { AVPlayerLayer.self }
+        var videoLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    }
+    final class Coordinator {
+        let player = AVQueuePlayer()
+        var looper: AVPlayerLooper?
+        var url: URL?
+        var observation: NSKeyValueObservation?
+        init() {
+            player.isMuted = true
+            player.volume = 0
+            player.preventsDisplaySleepDuringVideoPlayback = false
+            player.audiovisualBackgroundPlaybackPolicy = .pauses
+        }
+        func load(_ url: URL, surface: Surface) {
+            guard self.url != url else { return }
+            stop()
+            self.url = url
+            let item = AVPlayerItem(url: url)
+            item.preferredForwardBufferDuration = 3
+            looper = AVPlayerLooper(player: player, templateItem: item)
+            // Keep the still visible until the first decoded frame is ready (also on failure).
+            surface.videoLayer.opacity = 0
+            observation = surface.videoLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
+                DispatchQueue.main.async { surface.videoLayer.opacity = layer.isReadyForDisplay ? 1 : 0 }
+            }
+            player.play()
+        }
+        func stop() {
+            player.pause()
+            observation = nil
+            looper?.disableLooping()
+            looper = nil
+            player.removeAllItems()
+            url = nil
+        }
+    }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+    func makeUIView(context: Context) -> Surface {
+        let surface = Surface()
+        surface.backgroundColor = .clear
+        surface.videoLayer.videoGravity = .resizeAspectFill
+        surface.videoLayer.player = context.coordinator.player
+        context.coordinator.load(url, surface: surface)
+        return surface
+    }
+    func updateUIView(_ surface: Surface, context: Context) { context.coordinator.load(url, surface: surface) }
+    static func dismantleUIView(_ surface: Surface, coordinator: Coordinator) {
+        coordinator.stop()
+        surface.videoLayer.player = nil
+    }
+}

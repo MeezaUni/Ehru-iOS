@@ -25,6 +25,7 @@ struct RootView: View {
             palette.background.ignoresSafeArea()
             ForEach(LibrarySection.allCases) { section in
                 sectionStack(section)
+                    .environment(\.motionCoverVisible, router.section == section)
                     .opacity(router.section == section ? 1 : 0)
                     .allowsHitTesting(router.section == section)
                     .accessibilityHidden(router.section != section)
