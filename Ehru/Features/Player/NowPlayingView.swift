@@ -66,7 +66,6 @@ struct NowPlayingView: View {
         }
         .buttonStyle(.plain)
         .background(backdrop(state.currentSong).ignoresSafeArea())
-        .clipShape(RoundedRectangle(cornerRadius: pull > 0 ? 36 : 0, style: .continuous))
         .offset(y: pull)
         .overlay(alignment: .bottom) { toast }
         .animation(.easeInOut(duration: 0.2), value: actions.message)
