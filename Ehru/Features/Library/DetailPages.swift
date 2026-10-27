@@ -333,19 +333,24 @@ struct SmartPlaylistDetailView: View {
 /// Now Playing), so each album feels like its own.
 struct CoverGlow: View {
     let url: URL?
-    @Environment(\.palette) private var palette
-    @State private var tint: Color?
+    @State private var colors: LyricsColors?
+    @State private var artworkRevision = 0
 
     var body: some View {
-        LinearGradient(colors: [tint ?? .clear, (tint ?? .clear).opacity(0.35), palette.background.opacity(0)],
-                       startPoint: .top, endPoint: .bottom)
-            .frame(height: 560)
+        LinearGradient(colors: colors?.cardGradient ?? [.clear], startPoint: .topLeading, endPoint: .bottomTrailing)
+            .mask(LinearGradient(stops: [.init(color: .white, location: 0), .init(color: .white, location: 0.55),
+                                        .init(color: .clear, location: 1)], startPoint: .top, endPoint: .bottom))
+            .frame(height: 700)
             .ignoresSafeArea(edges: .top)
             .allowsHitTesting(false)
-            .task(id: url) {
-                guard let url else { return }
-                let colors = LyricsColors(await LyricsPaletteCache.shared.palette(for: url))
-                withAnimation(.easeInOut(duration: 0.5)) { tint = colors.gradient.first ?? colors.surface }
+            .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
+                if note.object as? String == url?.path { artworkRevision += 1 }
+            }
+            .task(id: "\(url?.path ?? "")|\(artworkRevision)") {
+                guard let url else { colors = nil; return }
+                let sampled = LyricsColors(await LyricsPaletteCache.shared.palette(for: url))
+                guard !Task.isCancelled else { return }
+                withAnimation(.easeInOut(duration: 0.5)) { colors = sampled }
             }
     }
 }

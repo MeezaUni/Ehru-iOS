@@ -55,21 +55,22 @@ struct LineSeekBar: View {
     }
 
     private func position(at x: CGFloat, width: CGFloat) -> Int64 {
-        width <= 0 ? 0 : WaveformTimeline.positionAt(Float(min(max(x / width, 0), 1)), durationMs)
+        WaveformTimeline.positionAt(SeekTrackGeometry(width: width).fraction(at: x), durationMs)
     }
 
     private func draw(in context: inout GraphicsContext, size: CGSize, position: Int64) {
         let scrubbing = previewMs != nil
         let y = size.height / 2
         let thickness = scrubbing ? Self.thick : Self.thin
-        let headX = CGFloat(WaveformTimeline.fractionOf(position, durationMs)) * size.width
+        let trackGeometry = SeekTrackGeometry(width: size.width)
+        let headX = trackGeometry.x(at: WaveformTimeline.fractionOf(position, durationMs))
         let glow = isPlaying || scrubbing ? 1.0 : 0.5
         let body = accent.lifted(0.18)
         let head = accent.lifted(0.28)
 
         if let loop {
-            let start = loop.startMs.map { CGFloat(WaveformTimeline.fractionOf($0, durationMs)) * size.width }
-            let end = loop.endMs.map { CGFloat(WaveformTimeline.fractionOf($0, durationMs)) * size.width }
+            let start = loop.startMs.map { trackGeometry.x(at: WaveformTimeline.fractionOf($0, durationMs)) }
+            let end = loop.endMs.map { trackGeometry.x(at: WaveformTimeline.fractionOf($0, durationMs)) }
             if let start, let end, end > start {
                 context.fill(Path(CGRect(x: start, y: y - 8, width: end - start, height: 16)),
                              with: .color(accent.opacity(loop.enabled ? 0.28 : 0.12)))
@@ -79,15 +80,15 @@ struct LineSeekBar: View {
             }
         }
         // The track, then the played part over it.
-        let track = CGRect(x: 0, y: y - thickness / 2, width: size.width, height: thickness)
+        let track = CGRect(x: trackGeometry.start, y: y - thickness / 2, width: trackGeometry.length, height: thickness)
         context.fill(Path(roundedRect: track, cornerRadius: thickness / 2), with: .color(palette.onSurface.opacity(0.22)))
-        if headX > 0 {
-            let played = CGRect(x: 0, y: y - thickness / 2, width: headX, height: thickness)
+        if headX > trackGeometry.start {
+            let played = CGRect(x: trackGeometry.start, y: y - thickness / 2, width: headX - trackGeometry.start, height: thickness)
             context.fill(Path(roundedRect: played, cornerRadius: thickness / 2),
-                         with: .linearGradient(Gradient(colors: [body.opacity(0.55), body]), startPoint: .zero, endPoint: CGPoint(x: headX, y: 0)))
+                         with: .linearGradient(Gradient(colors: [body.opacity(0.55), body]), startPoint: CGPoint(x: trackGeometry.start, y: 0), endPoint: CGPoint(x: headX, y: 0)))
         }
         for ms in bookmarks {
-            let x = CGFloat(WaveformTimeline.fractionOf(ms, durationMs)) * size.width
+            let x = trackGeometry.x(at: WaveformTimeline.fractionOf(ms, durationMs))
             context.fill(Path(ellipseIn: CGRect(x: x - 2, y: y + 7 - 2, width: 4, height: 4)), with: .color(palette.onSurface.opacity(0.8)))
         }
         // The head: a soft glow, a faint dark rim, the knob with a lighter contour and a bright centre.
@@ -115,4 +116,18 @@ extension Color {
         let t = CGFloat(amount)
         return Color(red: r + (1 - r) * t, green: g + (1 - g) * t, blue: b + (1 - b) * t, opacity: a)
     }
+}
+
+/// Leave enough room for the complete thumb and glow at both endpoints. Drawing and touch
+/// mapping share this geometry, so the inset never changes which time a tap selects.
+struct SeekTrackGeometry {
+    let start: CGFloat
+    let length: CGFloat
+    init(width: CGFloat) {
+        let width = max(width, 0)
+        start = min(12, width / 2)
+        length = max(width - start * 2, 0)
+    }
+    func x(at fraction: Float) -> CGFloat { start + CGFloat(fraction.clamped(0, 1)) * length }
+    func fraction(at x: CGFloat) -> Float { length > 0 ? Float(((x - start) / length).clamped(0, 1)) : 0 }
 }

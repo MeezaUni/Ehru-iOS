@@ -65,7 +65,9 @@ struct NowPlayingView: View {
             }
         }
         .buttonStyle(.plain)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backdrop(state.currentSong).ignoresSafeArea())
+        .contentShape(Rectangle())
         .offset(y: pull)
         .overlay(alignment: .bottom) { toast }
         .animation(.easeInOut(duration: 0.2), value: actions.message)
@@ -85,13 +87,15 @@ struct NowPlayingView: View {
 
     /// The header and the cover carousel pull the player down (Android's collapse drag).
     private var pullGesture: some Gesture {
-        DragGesture(minimumDistance: 8)
+        DragGesture(minimumDistance: 8, coordinateSpace: .global)
             .onChanged { pulled($0.translation.height) }
             .onEnded { pullEnded($0.translation.height, $0.predictedEndTranslation.height) }
     }
 
     private func pulled(_ distance: CGFloat) {
-        pull = max(distance, 0)
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) { pull = max(distance, 0) }
     }
 
     private func pullEnded(_ distance: CGFloat, _ predicted: CGFloat) {

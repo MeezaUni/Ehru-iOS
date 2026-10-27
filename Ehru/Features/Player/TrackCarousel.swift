@@ -90,7 +90,7 @@ struct TrackCarousel: View {
     }
 
     private func swipe(page: CGFloat) -> some Gesture {
-        DragGesture(minimumDistance: 12)
+        DragGesture(minimumDistance: 12, coordinateSpace: .global)
             .onChanged { value in
                 if horizontal == nil { horizontal = abs(value.translation.width) > abs(value.translation.height) }
                 guard horizontal == true else {

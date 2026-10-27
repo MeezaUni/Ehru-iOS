@@ -30,7 +30,7 @@ struct RootView: View {
                     .accessibilityHidden(router.section != section)
             }
             if router.paths[router.section]?.isEmpty ?? true { drawerEdge }
-            bottomChrome
+            bottomChrome.zIndex(2)
             if let message = actions.message, !router.showsNowPlaying {
                 Toast(text: message)
                     .padding(.bottom, player.state.currentSong == nil ? 96 : 160)
@@ -39,19 +39,29 @@ struct RootView: View {
                         withAnimation { if actions.message == message { actions.message = nil } }
                     }
             }
-            drawer
-            if router.showsNowPlaying {
-                // Full screen over everything; pulled down, it follows the finger (see NowPlayingView).
-                NowPlayingView()
-                    .transition(.move(edge: .bottom))
-                    .zIndex(10)
+            drawer.zIndex(3)
+        }
+        .overlay {
+            GeometryReader { geometry in
+                ZStack {
+                    if router.showsNowPlaying {
+                        NowPlayingView()
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            // Move beyond both unsafe edges too, so the outgoing header cannot
+                            // remain visible over the home indicator at the end of dismissal.
+                            .transition(.offset(y: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom + 1))
+                            .zIndex(1)
+                    }
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height)
             }
+            .allowsHitTesting(router.showsNowPlaying)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
         .animation(.spring(response: 0.42, dampingFraction: 0.9), value: router.showsNowPlaying)
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .sheet(isPresented: $router.showsSearch) { SearchView() }
-                .routerSheets(active: !router.showsNowPlaying)
+        .routerSheets(active: !router.showsNowPlaying)
         .alert("New playlist", isPresented: $router.showsNewPlaylist) { NewPlaylistAlert() }
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { library.importFiles(urls) }
@@ -88,6 +98,7 @@ struct RootView: View {
                 .navigationDestination(for: Route.self) { route in destination(route) }
                 .safeAreaInset(edge: .bottom) { Color.clear.frame(height: chromeHeight) }
         }
+        .environment(\.artworkSection, section)
     }
 
     @ViewBuilder
@@ -148,9 +159,10 @@ struct RootView: View {
                     Image(systemName: "magnifyingglass").font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(palette.onSurface)
                         .frame(width: 56, height: 56)
+                        .glassSurface(cornerRadius: 28, enabled: settings.glassEnabled)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(.plain)
-                .glassSurface(cornerRadius: 28, enabled: settings.glassEnabled)
                 .accessibilityLabel("Search")
             }
         }
