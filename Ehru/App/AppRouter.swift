@@ -86,6 +86,7 @@ enum Route: Hashable {
     case shelf(LibraryShelf)
     case allSongs
     case tool(Tool)
+    case transitionStudio(CollectionRef)
 }
 
 /// Where the app is: the section, each section's own back stack, and what is presented on top.

@@ -25,12 +25,12 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 |---|---|---|
 | Media3 queue, shuffle, repeat, play next, add to queue, undo removal, history | ✅ | |
 | Gapless playback | ✅ | Back-to-back scheduling on AVAudioEngine |
-| Transitions (crossfades with curves, EQ moves, bass swap, filters; per album, playlist, pair) | ✅ | Engine and settings; the Transition Studio editor UI is ⏳ |
+| Transitions (crossfades with curves, EQ moves, bass swap, filters; per album, playlist, pair) | ✅ | Engine, settings and the Transition Studio (per album/playlist and per pair: presets, duration, volume curves with draggable points, bass swap, filters, undo). Not yet: preview playback and the waveform lanes for dragging cue points |
 | 8-band parametric EQ with presets and the curve editor | ✅ | Custom audio unit, same filter math |
 | A–B loop, bookmarks | ✅ | |
 | Lock screen / headphone controls, audio focus, resume after restart | ✅ | MPRemoteCommandCenter, AVAudioSession |
-| Visualizer | 🟡 | Analysis engine ported and tested; the screen is ⏳ |
-| Waveform seek bar | ⏳ | Cache table exists; decoder not yet |
+| Visualizer | ✅ | Analysis engine and the full-screen visualizer |
+| Waveform seek bar | ✅ | Decoded with AVAudioFile into 480 bins, cached in the database |
 | Audio details / DSP diagnostics screen | ⏳ | Diagnostics model ported |
 | Home screen widget | ⏳ | Would be a WidgetKit extension |
 

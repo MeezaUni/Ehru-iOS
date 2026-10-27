@@ -72,6 +72,7 @@ struct AlbumDetailView: View {
                     CollectionHeader(title: album.title, subtitle: album.artist, facts: songs.contains(where: \.isLossless) ? "\(facts) · Lossless" : facts,
                                      canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
                                      onShuffle: { actions.playShuffled(songs, origin: origin) }) { AlbumArtworkView(albumId: albumId, maxPixels: 900) }
+                    TransitionStudioRow(collection: origin).padding(.bottom, Spacing.sm)
                     SongList(songs: songs, origin: origin, showTrackNumbers: true)
                 }
             } else {
@@ -196,6 +197,7 @@ struct PlaylistDetailView: View {
                     CollectionHeader(title: playlist.name, subtitle: nil, facts: collectionFacts(songs: songs), canPlay: !songs.isEmpty,
                                      onPlay: { actions.playInOrder(songs, origin: origin, slots: slots) },
                                      onShuffle: { actions.playShuffled(songs, origin: origin, slots: slots) }) { PlaylistCoverView(playlist: playlist) }
+                    if songs.count > 1 { TransitionStudioRow(collection: origin).padding(.bottom, Spacing.sm) }
                     if songs.isEmpty {
                         EmptyState(message: "This playlist is empty. Add songs from any song's menu.", systemImage: "music.note.list")
                     }

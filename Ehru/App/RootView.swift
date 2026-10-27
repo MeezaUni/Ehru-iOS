@@ -104,6 +104,7 @@ struct RootView: View {
             case .shelf(let shelf): LibraryShelfView(shelf: shelf)
             case .allSongs: AllSongsView()
             case .tool(let tool): ToolView(tool: tool)
+            case .transitionStudio(let collection): TransitionStudioView(collection: collection)
             }
         }
         .safeAreaInset(edge: .bottom) { Color.clear.frame(height: chromeHeight) }
