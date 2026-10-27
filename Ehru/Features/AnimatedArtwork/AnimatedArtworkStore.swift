@@ -45,15 +45,9 @@ final class AnimatedArtworkStore {
 
     private static var folder: URL { LibraryPaths.supportFolder.appendingPathComponent("motion-covers", isDirectory: true) }
 
-    func url(for albumId: Int64, album: String, artist: String) -> URL? {
-        guard enabled, let cover = saved.covers[String(albumId)], cover.album == album, cover.artist == artist else { return nil }
-        let url = Self.folder.appendingPathComponent(cover.fileName)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
-    }
-
     func url(for song: Song) -> URL? {
         // Album artist can differ from individual track credits; the album id is authoritative.
-        guard enabled, let cover = saved.covers[String(song.albumId)], cover.album == song.album else { return nil }
+        guard enabled, let cover = saved.covers[String(song.albumId)] else { return nil }
         let url = Self.folder.appendingPathComponent(cover.fileName)
         return FileManager.default.fileExists(atPath: url.path) ? url : nil
     }
