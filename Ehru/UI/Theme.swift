@@ -97,6 +97,7 @@ struct ThemedRoot<Content: View>: View {
     @Environment(AppRouter.self) private var router
     @ViewBuilder let content: Content
     @State private var artworkPalette: AppPalette?
+    @State private var artworkRevision = 0
 
     var body: some View {
         let followsArtwork = settings.customTheme == nil && settings.theme == .artwork
@@ -107,7 +108,10 @@ struct ThemedRoot<Content: View>: View {
             .environment(\.palette, palette)
             .tint(palette.primary)
             .animation(.easeInOut(duration: 0.6), value: palette)
-            .task(id: artworkURL) {
+            .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
+                if note.object as? String == artworkURL?.path { artworkRevision += 1 }
+            }
+            .task(id: "\(artworkURL?.path ?? "")|\(artworkRevision)") {
                 guard let artworkURL else {
                     artworkPalette = nil
                     return

@@ -212,6 +212,7 @@ private struct CarouselCard: View {
     @Environment(LibraryActions.self) private var actions
     @Environment(\.palette) private var palette
     @State private var colors = LyricsColors(.fallback)
+    @State private var artworkRevision = 0
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
@@ -252,8 +253,12 @@ private struct CarouselCard: View {
         .shadow(color: .black.opacity(0.28), radius: 20, y: 12)
         .accessibilityElement(children: isCurrent ? .contain : .combine)
         .accessibilityHint(isCurrent ? "" : "Plays this track")
-        .task(id: song.url) {
+        .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
+            if note.object as? String == song.url.path { artworkRevision += 1 }
+        }
+        .task(id: "\(song.url.path)|\(artworkRevision)") {
             let next = LyricsColors(await LyricsPaletteCache.shared.palette(for: song.url))
+            guard !Task.isCancelled else { return }
             withAnimation(.easeInOut(duration: 0.5)) { colors = next }
         }
     }

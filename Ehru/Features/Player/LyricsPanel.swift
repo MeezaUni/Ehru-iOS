@@ -12,6 +12,7 @@ struct LyricsPanel: View {
     var onExpand: (() -> Void)?
     @Environment(\.palette) private var palette
     @State private var colors = LyricsColors(.fallback)
+    @State private var artworkRevision = 0
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: Radius.large, style: .continuous)
@@ -21,9 +22,13 @@ struct LyricsPanel: View {
             .environment(\.lyricsCompact, onExpand != nil)
             .background { if onExpand != nil { CardSurface(colors: colors, shape: shape) } }
             .clipShape(shape)
-            .task(id: song.url) {
+            .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
+                if note.object as? String == song.url.path { artworkRevision += 1 }
+            }
+            .task(id: "\(song.url.path)|\(artworkRevision)") {
                 // The previous colours stay while the next artwork is sampled, then cross-fade.
                 let next = LyricsColors(await LyricsPaletteCache.shared.palette(for: song.url))
+                guard !Task.isCancelled else { return }
                 withAnimation(.easeInOut(duration: 0.6)) { colors = next }
             }
     }
