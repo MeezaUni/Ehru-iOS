@@ -11,8 +11,9 @@ struct NowPlayingView: View {
     @Environment(AppRouter.self) private var router
     @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
-    @Environment(\.dismiss) private var dismiss
     @State private var artworkTarget: ArtworkTarget?
+    /// How far the player has been pulled down (it follows the finger, then closes or springs back).
+    @State private var pull: CGFloat = 0
     @State private var showsQueue = false
     @State private var showsLyrics = false
     @State private var showsMarks = false
@@ -37,7 +38,8 @@ struct NowPlayingView: View {
                             VStack(spacing: Spacing.md) {
                                 TrackCarousel(stacked: stacked, previous: previousEntry(state), current: state.currentEntry,
                                               next: nextEntry(state), currentSong: song, isPlaying: state.isPlaying,
-                                              skip: { $0 > 0 ? player.skipNext() : player.skipToPreviousItem() })
+                                              skip: { $0 > 0 ? player.skipNext() : player.skipToPreviousItem() },
+                                              onPull: pulled, onPullEnd: pullEnded)
                                     .frame(maxHeight: .infinity)
                                 VStack(spacing: Spacing.sm) {
                                     ProgressSection(song: song)
@@ -64,6 +66,8 @@ struct NowPlayingView: View {
         }
         .buttonStyle(.plain)
         .background(backdrop(state.currentSong).ignoresSafeArea())
+        .clipShape(RoundedRectangle(cornerRadius: pull > 0 ? 36 : 0, style: .continuous))
+        .offset(y: pull)
         .overlay(alignment: .bottom) { toast }
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .routerSheets(active: true)
@@ -78,6 +82,29 @@ struct NowPlayingView: View {
                 EqualizerView().toolbar { Button("Done") { showsEqualizer = false } }
             }
         }
+    }
+
+    /// The header and the cover carousel pull the player down (Android's collapse drag).
+    private var pullGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onChanged { pulled($0.translation.height) }
+            .onEnded { pullEnded($0.translation.height, $0.predictedEndTranslation.height) }
+    }
+
+    private func pulled(_ distance: CGFloat) {
+        pull = max(distance, 0)
+    }
+
+    private func pullEnded(_ distance: CGFloat, _ predicted: CGFloat) {
+        if distance > 140 || predicted > 420 {
+            close()
+        } else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) { pull = 0 }
+        }
+    }
+
+    private func close() {
+        withAnimation(.spring(response: 0.42, dampingFraction: 0.9)) { router.showsNowPlaying = false }
     }
 
     private func previousEntry(_ state: PlaybackState) -> QueueEntry? {
@@ -114,7 +141,7 @@ struct NowPlayingView: View {
 
     private var header: some View {
         HStack(spacing: Spacing.xs) {
-            Button { dismiss() } label: {
+            Button(action: close) {
                 Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 48, height: 48).contentShape(Rectangle())
             }
             .accessibilityLabel("Close")
@@ -124,6 +151,8 @@ struct NowPlayingView: View {
         }
         .padding(.horizontal, Spacing.xs)
         .foregroundStyle(palette.onSurface)
+        .contentShape(Rectangle())
+        .gesture(pullGesture)
     }
 
     private var menu: some View {

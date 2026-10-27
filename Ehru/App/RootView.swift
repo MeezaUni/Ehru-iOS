@@ -14,6 +14,9 @@ struct RootView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.palette) private var palette
     @State private var showsImporter = false
+    /// While a finger moves the side menu: how far it has pulled (positive opening, negative closing).
+    @State private var drawerDrag: CGFloat?
+    private static let drawerWidth: CGFloat = 300
 
     var body: some View {
         @Bindable var router = router
@@ -36,16 +39,19 @@ struct RootView: View {
                         withAnimation { if actions.message == message { actions.message = nil } }
                     }
             }
-            if router.showsDrawer { drawer }
+            drawer
+            if router.showsNowPlaying {
+                // Full screen over everything; pulled down, it follows the finger (see NowPlayingView).
+                NowPlayingView()
+                    .transition(.move(edge: .bottom))
+                    .zIndex(10)
+            }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
+        .animation(.spring(response: 0.42, dampingFraction: 0.9), value: router.showsNowPlaying)
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .sheet(isPresented: $router.showsSearch) { SearchView() }
-        .sheet(isPresented: $router.showsNowPlaying) {
-            // A sheet, so pulling it down closes it (from the top of its page).
-            NowPlayingView().presentationDragIndicator(.visible)
-        }
-        .routerSheets(active: !router.showsNowPlaying)
+                .routerSheets(active: !router.showsNowPlaying)
         .alert("New playlist", isPresented: $router.showsNewPlaylist) { NewPlaylistAlert() }
         .fileImporter(isPresented: $showsImporter, allowedContentTypes: [.audio], allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { library.importFiles(urls) }
@@ -160,18 +166,33 @@ struct RootView: View {
             Color.clear
                 .frame(width: 22)
                 .contentShape(Rectangle())
-                .gesture(DragGesture(minimumDistance: 12).onEnded { value in
-                    if value.translation.width > 50, abs(value.translation.height) < value.translation.width { router.showsDrawer = true }
-                })
+                .gesture(DragGesture(minimumDistance: 8)
+                    .onChanged { value in drawerDrag = max(value.translation.width, 0) }
+                    .onEnded { value in settleDrawer(open: value.translation.width > 100 || value.predictedEndTranslation.width > 220) })
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity)
         .ignoresSafeArea(edges: .vertical)
     }
 
+    /// How much of the side menu shows (0 closed … its width open): it follows the finger, then settles.
+    private var drawerShown: CGFloat {
+        if router.showsDrawer { return Self.drawerWidth + min(drawerDrag ?? 0, 0) }
+        return min(max(drawerDrag ?? 0, 0), Self.drawerWidth)
+    }
+
+    private func settleDrawer(open: Bool) {
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            router.showsDrawer = open
+            drawerDrag = nil
+        }
+    }
+
     private var drawer: some View {
-        ZStack(alignment: .leading) {
-            Color.black.opacity(0.35).ignoresSafeArea().onTapGesture { router.showsDrawer = false }
+        let shown = max(drawerShown, 0)
+        return ZStack(alignment: .leading) {
+            Color.black.opacity(0.35 * Double(shown / Self.drawerWidth)).ignoresSafeArea()
+                .onTapGesture { settleDrawer(open: false) }
             VStack(alignment: .leading, spacing: Spacing.xs) {
                 Text("empee3").font(.largeTitle.weight(.bold)).padding(.horizontal, Spacing.lg).padding(.vertical, Spacing.lg)
                 drawerItem("Library", icon: "books.vertical") {
@@ -183,15 +204,16 @@ struct RootView: View {
                 }
                 Spacer()
             }
-            .frame(width: 300)
+            .frame(width: Self.drawerWidth)
             .frame(maxHeight: .infinity)
             .background(palette.surface.ignoresSafeArea())
-            .gesture(DragGesture(minimumDistance: 12).onEnded { value in
-                if value.translation.width < -50 { router.showsDrawer = false }
-            })
-            .transition(.move(edge: .leading))
+            .offset(x: shown - Self.drawerWidth)
+            .gesture(DragGesture(minimumDistance: 8)
+                .onChanged { value in drawerDrag = min(value.translation.width, 0) }
+                .onEnded { value in settleDrawer(open: !(value.translation.width < -100 || value.predictedEndTranslation.width < -220)) })
         }
-        .transition(.opacity)
+        .allowsHitTesting(shown > 0)
+        .accessibilityHidden(shown == 0)
     }
 
     private func drawerItem(_ label: String, icon: String, action: @escaping () -> Void) -> some View {

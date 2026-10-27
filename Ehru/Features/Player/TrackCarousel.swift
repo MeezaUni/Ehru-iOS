@@ -5,7 +5,7 @@ import SwiftUI
 /// A sideways swipe moves the strip with the finger; released past a quarter of a page (or flung)
 /// it changes the song, otherwise it springs back. Any track change (swipe, buttons, end of song)
 /// slides the strip the same way. [stacked] gathers the neighbours into one card behind the current
-/// one instead. Vertical drags are left to the page's scroll.
+/// one instead. A vertical drag on the cards pulls the player down ([onPull]).
 struct TrackCarousel: View {
     let stacked: Bool
     let previous: QueueEntry?
@@ -16,6 +16,10 @@ struct TrackCarousel: View {
     let isPlaying: Bool
     /// +1 next, -1 previous: always a change of song, never a restart.
     let skip: (Int) -> Void
+    /// A downward drag on the cards pulls the player down: the distance while dragging, then the
+    /// distance and the predicted end on release.
+    var onPull: (CGFloat) -> Void = { _ in }
+    var onPullEnd: (CGFloat, CGFloat) -> Void = { _, _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Where the strip is, in points from the current card at rest.
     @State private var position: CGFloat = 0
@@ -57,7 +61,7 @@ struct TrackCarousel: View {
             }
             .frame(width: geometry.size.width, height: geometry.size.height)
             .contentShape(Rectangle())
-            .simultaneousGesture(swipe(page: page))
+            .highPriorityGesture(swipe(page: page))
             .onChange(of: current?.id) { _, id in trackChanged(to: id, page: page) }
         }
         .onAppear { shown = Neighbours(current: current?.id, previous: previous?.id, next: next?.id) }
@@ -89,7 +93,10 @@ struct TrackCarousel: View {
         DragGesture(minimumDistance: 12)
             .onChanged { value in
                 if horizontal == nil { horizontal = abs(value.translation.width) > abs(value.translation.height) }
-                guard horizontal == true else { return }
+                guard horizontal == true else {
+                    onPull(value.translation.height)
+                    return
+                }
                 if dragStart == nil { dragStart = position }
                 let target = (dragStart ?? 0) + value.translation.width
                 let towardsMissing = (target < 0 && next == nil) || (target > 0 && previous == nil)
@@ -100,7 +107,10 @@ struct TrackCarousel: View {
                     horizontal = nil
                     dragStart = nil
                 }
-                guard horizontal == true else { return }
+                guard horizontal == true else {
+                    onPullEnd(value.translation.height, value.predictedEndTranslation.height)
+                    return
+                }
                 let speed = value.predictedEndTranslation.width - value.translation.width
                 let wanted: Int = if abs(speed) > Self.flingSpeed {
                     speed < 0 ? 1 : -1
