@@ -71,8 +71,8 @@ struct FixTagsView: View {
             Text("What to fix")
         } footer: {
             Text(FieldSelection(store.selectedFields).fillOnly
-                ? "All fields: the title is corrected; artist, album, year and genre are only filled in where the file has none, so your library's grouping never changes. BPM only fills a missing tempo."
-                : "Selected fields are replaced with the match's values. A found BPM only fills a missing tempo.")
+                ? "All fields: the title is corrected; existing album, artist and other valid tags stay. Missing track and disc numbers come from the matched album's tracklist. Album pages sort by disc, then track."
+                : "Selected fields replace the file's tags. Track and disc numbers must belong to the same album edition; unknown positions are left alone. BPM estimates never replace a tagged tempo.")
         }
     }
 
@@ -168,7 +168,7 @@ private struct RepairRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.song.title).lineLimit(1)
                 Text(item.song.subtitle).font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
-                if let reason = item.reason ?? item.changes.first.map({ "\($0.field.rawValue.capitalized): \($0.newValue)" }) {
+                if let reason = item.reason ?? item.changes.first.map({ "\($0.field.displayName): \($0.newValue)" }) {
                     Text(reason).font(.caption2).foregroundStyle(palette.onSurfaceVariant).lineLimit(2)
                 }
             }
@@ -236,7 +236,7 @@ private struct RepairItemDetail: View {
                     Section("Changes") {
                         ForEach(Array(item.changes.enumerated()), id: \.offset) { _, change in
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(change.field.rawValue.capitalized).font(.caption.weight(.semibold))
+                                Text(change.field.displayName).font(.caption.weight(.semibold))
                                 Text("\(change.oldValue ?? "—") → \(change.newValue)").font(.footnote)
                             }
                         }

@@ -14,6 +14,8 @@ struct EditTagsSheet: View {
     @State private var year = ""
     @State private var genre = ""
     @State private var bpm = ""
+    @State private var trackNumber = ""
+    @State private var discNumber = ""
     @State private var candidates: [MetadataCandidate] = []
     @State private var searching = false
     @State private var searchNote: String?
@@ -27,6 +29,8 @@ struct EditTagsSheet: View {
                     TextField("Title", text: $title)
                     TextField("Artist", text: $artist)
                     TextField("Album", text: $album)
+                    TextField("Track number", text: $trackNumber).keyboardType(.numberPad)
+                    TextField("Disc number", text: $discNumber).keyboardType(.numberPad)
                     TextField("Year or date (2019 or 2019-05-17)", text: $year).keyboardType(.numbersAndPunctuation)
                     TextField("Genre (separate several with ;)", text: $genre)
                     TextField("BPM", text: $bpm).keyboardType(.numberPad)
@@ -84,6 +88,8 @@ struct EditTagsSheet: View {
         year = tags.dateText ?? ""
         genre = Genres.join(tags.genres) ?? ""
         bpm = tags.bpmText ?? ""
+        trackNumber = tags.trackNumber.map(String.init) ?? ""
+        discNumber = tags.discNumber.map(String.init) ?? ""
     }
 
     /// Only real changes: unchanged or blank text keeps what the file has.
@@ -96,6 +102,14 @@ struct EditTagsSheet: View {
         request.title = changed(title, original.title)
         request.artist = changed(artist, original.artist)
         request.album = changed(album, original.album)
+        if let value = changed(trackNumber, original.trackNumber.map(String.init)) {
+            guard let number = Int(value), (1...65535).contains(number) else { return nil }
+            request.trackNumber = number
+        }
+        if let value = changed(discNumber, original.discNumber.map(String.init)) {
+            guard let number = Int(value), (1...65535).contains(number) else { return nil }
+            request.discNumber = number
+        }
         if let date = changed(year, original.dateText) {
             guard let parsed = ReleaseDate.parse(date) else { return nil }
             request.releaseDate = parsed.tagValue
@@ -129,6 +143,8 @@ struct EditTagsSheet: View {
         if isUsableTag(candidate.album) { album = candidate.album }
         if let date = candidate.releaseDate { year = date }
         if let tempo = candidate.bpm { bpm = String(tempo) }
+        if candidate.trackNumber > 0 { trackNumber = String(candidate.trackNumber) }
+        if candidate.discNumber > 0 { discNumber = String(candidate.discNumber) }
         Task {
             if case .found(let genres, _) = await fixTags.service.lookupGenre(candidate), let joined = Genres.join(genres) { genre = joined }
         }

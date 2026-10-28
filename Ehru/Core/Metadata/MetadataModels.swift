@@ -24,6 +24,9 @@ struct MetadataCandidate: Equatable, Hashable, Sendable, Identifiable {
     /// or "2010"); nil when the source has none it can vouch for, with the reason in [releaseDateIssue].
     var releaseDate: String?
     var releaseDateIssue: String?
+    /// Positions belong to this exact release, never a recording's search rank.
+    var discNumber = 0
+    var releaseId: String?
 }
 
 /// What happened when a provider was (or was not) asked about a track. Skipped and not configured

@@ -25,7 +25,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 |---|---|---|
 | Media3 queue, shuffle, repeat, play next, add to queue, undo removal, history | ✅ | |
 | Gapless playback | ✅ | Back-to-back scheduling on AVAudioEngine |
-| Transitions (crossfades with curves, EQ moves, bass swap, filters; per album, playlist, pair) | ✅ | Engine, settings and the Transition Studio (per album/playlist and per pair: presets, duration, volume curves with draggable points, bass swap, filters, undo). Not yet: preview playback and the waveform lanes for dragging cue points |
+| Transitions (crossfades with curves, EQ moves, bass swap, filters; per album, playlist, pair) | ✅ | Engine, settings and the Transition Studio (per album/playlist and per pair: presets, duration, volume curves with draggable points, bass swap, filters, undo). Individual pairs also show decoded source waveforms, peak/RMS measurements, exact automation inspection, cue sliders and a preview using the real transition DSP. Not yet: dragging the waveform itself or automatic beat/key analysis |
 | 8-band parametric EQ with presets and the curve editor | ✅ | Custom audio unit, same filter math |
 | A–B loop, bookmarks | ✅ | |
 | Lock screen / headphone controls, audio focus, resume after restart | ✅ | MPRemoteCommandCenter, AVAudioSession |

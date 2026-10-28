@@ -2,7 +2,15 @@ import Foundation
 
 /// A tag a metadata fix can change.
 enum FixField: String, CaseIterable, Sendable {
-    case title, artist, album, year, genre, artwork, bpm
+    case title, artist, album, year, genre, artwork, bpm, trackNumber, discNumber
+
+    var displayName: String {
+        switch self {
+        case .trackNumber: "Track number"
+        case .discNumber: "Disc number"
+        default: rawValue.capitalized
+        }
+    }
 }
 
 /// The fields offered in Fix Tags. Artwork is managed by the Artwork Fetcher, as on Android.
@@ -13,6 +21,8 @@ enum MetadataField: String, CaseIterable, Identifiable, Sendable {
     case year = "YEAR"
     case genre = "GENRE"
     case bpm = "BPM"
+    case trackNumber = "TRACK_NUMBER"
+    case discNumber = "DISC_NUMBER"
     case filename = "FILENAME"
 
     var id: String { rawValue }
@@ -25,6 +35,8 @@ enum MetadataField: String, CaseIterable, Identifiable, Sendable {
         case .year: "Year"
         case .genre: "Genre"
         case .bpm: "BPM"
+        case .trackNumber: "Track number"
+        case .discNumber: "Disc number"
         case .filename: "Filename"
         }
     }
@@ -52,6 +64,8 @@ struct FieldSelection: Equatable, Sendable {
             case .year: fields.insert(.year)
             case .genre: fields.insert(.genre)
             case .bpm: fields.insert(.bpm)
+            case .trackNumber: fields.insert(.trackNumber)
+            case .discNumber: fields.insert(.discNumber)
             case .filename: break
             }
         }
@@ -75,6 +89,8 @@ struct LocalTrackTags: Equatable, Sendable {
     var canStoreYearMonth = true
     /// The file's BPM tag as stored ("128"), if any.
     var bpm: String?
+    var trackNumber: Int?
+    var discNumber: Int?
 }
 
 /// A tempo found for a track: [estimated] values never replace a BPM the file already has.
@@ -177,6 +193,35 @@ enum FieldFixPlanner {
         request.genre = newGenre
         request.bpm = newBpm
         request.artwork = newArtwork
+        let destinationAlbum = album ?? local.album
+        let sameReleaseTitle = isUsableTag(destinationAlbum) && albumPositionTitle(destinationAlbum) == albumPositionTitle(match.album)
+        for field in [FixField.trackNumber, .discNumber] where fields.contains(field) {
+            let existing = field == .trackNumber ? local.trackNumber : local.discNumber
+            let found = field == .trackNumber ? match.trackNumber : match.discNumber
+            let label = field == .trackNumber ? "track number" : "disc number"
+            if fillOnly && (existing ?? 0) > 0 { continue }
+            guard local.tagsReadable, sameReleaseTitle else {
+                notes.append("Kept \(label): the matched album differs from this file's album")
+                continue
+            }
+            guard (1...65535).contains(found) else {
+                notes.append("No verified \(label) for this album")
+                continue
+            }
+            if field == .trackNumber {
+                let writingDisc = fields.contains(.discNumber) && (!fillOnly || (local.discNumber ?? 0) <= 0)
+                    && (1...65535).contains(match.discNumber)
+                let destinationDisc = writingDisc ? match.discNumber : max(local.discNumber ?? 1, 1)
+                guard match.discNumber == destinationDisc else {
+                    notes.append("Kept track number: the matched disc does not match the file's disc")
+                    continue
+                }
+            }
+            if existing == found { continue }
+            changes.append(.init(field: field, oldValue: existing.map(String.init), newValue: String(found)))
+            if field == .trackNumber { request.trackNumber = found }
+            else { request.discNumber = found }
+        }
         return FieldFixPlan(request: request.hasChanges ? request : nil, changes: changes, notes: notes)
     }
 

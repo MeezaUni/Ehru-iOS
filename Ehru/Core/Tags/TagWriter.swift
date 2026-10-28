@@ -15,6 +15,7 @@ struct TagWriteRequest: Equatable {
     /// One or more genres ("Electronic; Synth-pop"), kept as separate values where the format allows it.
     var genre: String?
     var trackNumber: Int?
+    var discNumber: Int?
     var bpm: Int?
     var lyrics: String?
     var artwork: Data?
@@ -27,7 +28,7 @@ struct TagWriteRequest: Equatable {
 
     var hasChanges: Bool {
         title != nil || artist != nil || album != nil || year != nil || releaseDate != nil || genre != nil
-            || trackNumber != nil || bpm != nil || lyrics != nil || artwork != nil
+            || trackNumber != nil || discNumber != nil || bpm != nil || lyrics != nil || artwork != nil
             || clearTitle || clearArtist || clearAlbum || clearYear || clearGenre || clearArtwork
     }
 
@@ -157,6 +158,9 @@ enum TagWriter {
         }
         if let track = request.trackNumber, tags.trackNumber != track {
             throw TagWriteError.verificationFailed("wrote track \(track), the file reads \(tags.trackNumber.map(String.init) ?? "none")")
+        }
+        if let disc = request.discNumber, tags.discNumber != disc {
+            throw TagWriteError.verificationFailed("wrote disc \(disc), the file reads \(tags.discNumber.map(String.init) ?? "none")")
         }
         if let lyrics = request.lyrics, !lyrics.trimmed.isEmpty, tags.lyrics?.trimmed != lyrics.trimmed {
             throw TagWriteError.verificationFailed("the lyrics didn't read back")
@@ -366,6 +370,10 @@ enum ID3Writer {
             replace("TRCK", with: text("TRCK", total.map { "\(track)/\($0)" } ?? String(track)))
         }
         if let bpm = request.bpm { replace("TBPM", with: text("TBPM", String(bpm))) }
+        if let disc = request.discNumber {
+            let total = frames.first { $0.id == "TPOS" }.flatMap { ID3.text($0.data) }?.split(separator: "/").dropFirst().first
+            replace("TPOS", with: text("TPOS", total.map { "\(disc)/\($0)" } ?? String(disc)))
+        }
         if let lyrics = request.lyrics, !lyrics.trimmed.isEmpty {
             frames.removeAll { $0.id == "USLT" }
             frames.append(Frame(id: "USLT", data: Data([3]) + Data("eng".utf8) + Data([0]) + Data(lyrics.utf8)))
@@ -541,6 +549,12 @@ enum MP4Writer {
             set("trkn", item("trkn", type: 0, payload))
         }
         if let bpm = request.bpm { set("tmpo", item("tmpo", type: 21, Data([UInt8(bpm >> 8 & 0xFF), UInt8(bpm & 0xFF)]))) }
+        if let disc = request.discNumber {
+            let old = items.first { $0.name == "disk" }.map { body($0.box) }
+            let total = old.flatMap { $0.count >= 22 ? $0.uint16BE(20) : nil } ?? 0
+            let payload = Data([0, 0, UInt8(disc >> 8 & 0xFF), UInt8(disc & 0xFF), UInt8(total >> 8), UInt8(total & 0xFF)])
+            set("disk", item("disk", type: 0, payload))
+        }
         if let lyrics = request.lyrics, !lyrics.trimmed.isEmpty { set("@lyr", item("@lyr", type: 1, Data(lyrics.utf8))) }
         if request.clearArtwork {
             set("covr", nil)
@@ -690,6 +704,10 @@ enum FLACWriter {
         if let track = request.trackNumber {
             removed.insert("TRACKNUMBER")
             added.append("TRACKNUMBER=\(track)")
+        }
+        if let disc = request.discNumber {
+            removed.insert("DISCNUMBER")
+            added.append("DISCNUMBER=\(disc)")
         }
         if let bpm = request.bpm {
             removed.formUnion(["BPM", "TEMPO"])

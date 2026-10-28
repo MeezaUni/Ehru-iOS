@@ -232,6 +232,37 @@ final class AudioEngine {
         activeIndex = 1 - activeIndex
     }
 
+    /// Auditions a bounded pair on a separate engine, with the same DSP stages as normal playback.
+    /// Both nodes are scheduled on the render clock; no UI timer starts the incoming track.
+    func previewTransition(outgoing: URL, incoming: URL, timing: PairTransitionTiming) throws {
+        guard isReady, decks.allSatisfy({ $0.stageUnit != nil }), hasProcessing else { throw EngineError.notReady }
+        let outFile = try AVAudioFile(forReading: outgoing)
+        let inFile = try AVAudioFile(forReading: incoming)
+        func frame(_ ms: Int64, _ file: AVAudioFile) -> AVAudioFramePosition {
+            AVAudioFramePosition((Double(ms) * file.processingFormat.sampleRate / 1000).rounded())
+        }
+        guard frame(timing.outgoingRange.upperBound, outFile) <= outFile.length + 1,
+              frame(timing.incomingRange.upperBound, inFile) <= inFile.length + 1 else { throw EngineError.unreadable(outgoing) }
+        stopAll()
+        let out = decks[0], inc = decks[1]
+        ensureFormat(out, outFile.processingFormat)
+        ensureFormat(inc, inFile.processingFormat)
+        schedule(out, entryId: UUID(), file: outFile, from: frame(timing.outgoingRange.lowerBound, outFile),
+                 to: frame(timing.outgoingRange.upperBound, outFile))
+        schedule(inc, entryId: UUID(), file: inFile, from: frame(timing.incomingRange.lowerBound, inFile),
+                 to: frame(timing.incomingRange.upperBound, inFile))
+        let host = mach_absolute_time() + TransitionStageKernel.hostTicks(forSeconds: 0.12)
+        let incomingHost = host + TransitionStageKernel.hostTicks(forSeconds: Double(timing.leadMs) / 1000)
+        var outgoingAutomation = timing.automation(.outgoing)
+        outgoingAutomation.leadInMs = Int(timing.leadMs)
+        out.stage.arm(outgoingAutomation, startHostTime: host)
+        inc.stage.arm(timing.automation(.incoming), startHostTime: incomingHost)
+        activeIndex = 1
+        try startEngineIfNeeded()
+        out.player.play(at: AVAudioTime(hostTime: host))
+        inc.player.play(at: AVAudioTime(hostTime: incomingHost))
+    }
+
     /// The outgoing deck of a crossfade, once its fade is over (or it ended), is stopped.
     func releaseFinishedOutgoing() {
         let deck = other
@@ -297,9 +328,10 @@ final class AudioEngine {
         }
     }
 
-    private func schedule(_ deck: Deck, entryId: UUID, file: AVAudioFile, from startFrame: AVAudioFramePosition) {
+    private func schedule(_ deck: Deck, entryId: UUID, file: AVAudioFile, from startFrame: AVAudioFramePosition,
+                          to endFrame: AVAudioFramePosition? = nil) {
         let start = startFrame.clamped(0, max(file.length - 1, 0))
-        let count = AVAudioFrameCount(max(file.length - start, 1))
+        let count = AVAudioFrameCount(max(min(endFrame ?? file.length, file.length) - start, 1))
         let deckStart = deck.segments.last.map { $0.deckStartFrame + AVAudioFramePosition($0.frameCount) } ?? 0
         deck.segments.append(Segment(entryId: entryId, file: file, fileStartFrame: start, frameCount: count, deckStartFrame: deckStart))
         let generation = deck.generation

@@ -131,6 +131,8 @@ struct ITunesProvider: MetadataProvider {
         var artworkUrl100: String?
         var artworkUrl60: String?
         var releaseDate: String?
+        var trackNumber: Int?
+        var discNumber: Int?
     }
 
     func searchTrack(title: String, artist: String?, album: String?) async throws -> [MetadataCandidate] {
@@ -148,9 +150,10 @@ struct ITunesProvider: MetadataProvider {
             let id = result.trackId ?? result.collectionId ?? Int64(javaHashCode(name))
             return MetadataCandidate(
                 id: "itunes_\(id)", title: name, artist: result.artistName ?? "", album: result.collectionName ?? "",
-                year: date?.year ?? 0, durationMs: result.trackTimeMillis,
+                year: date?.year ?? 0, trackNumber: result.trackNumber ?? 0, durationMs: result.trackTimeMillis,
                 coverArtUrl: (result.artworkUrl100 ?? result.artworkUrl60).map(upgradeArtwork), sourceName: "iTunes",
-                releaseDate: date?.tagValue
+                releaseDate: date?.tagValue, discNumber: result.discNumber ?? 0,
+                releaseId: result.collectionId.map(String.init)
             )
         }
     }
@@ -263,10 +266,29 @@ actor MusicBrainzProvider: MetadataProvider {
     private let client: HTTPClient
     private var lastRequest: Date = .distantPast
     private var genresByReleaseGroup: [String: [MusicBrainzGenre]] = [:]
+    private var tracklists: [String: ReleaseTracklist] = [:]
     private static let minInterval: TimeInterval = 1.1
 
     init(client: HTTPClient) {
         self.client = client
+    }
+
+    func albumPosition(_ match: MetadataCandidate) async throws -> AlbumTrackPosition? {
+        guard let release = match.releaseId, UUID(uuidString: release) != nil,
+              match.id.hasPrefix("mb_"), UUID(uuidString: String(match.id.dropFirst(3))) != nil else { return nil }
+        let tracklist: ReleaseTracklist
+        if let cached = tracklists[release] { tracklist = cached }
+        else {
+            tracklist = try await throttled {
+                try await fetchJSON(ReleaseTracklist.self,
+                                    requestURL("https://musicbrainz.org/ws/2/release/\(release)", [("inc", "recordings"), ("fmt", "json")]),
+                                    client: self.client)
+            }
+            if tracklists.count >= 12 { tracklists.removeAll() }
+            tracklists[release] = tracklist
+        }
+        guard tracklist.id == release, albumPositionTitle(tracklist.title) == albumPositionTitle(match.album) else { return nil }
+        return tracklist.position(recordingID: String(match.id.dropFirst(3)))
     }
 
     func searchTrack(title: String, artist: String?, album: String?) async throws -> [MetadataCandidate] {
@@ -413,7 +435,8 @@ actor MusicBrainzProvider: MetadataProvider {
         return MetadataCandidate(
             id: "mb_\(recording.id)", title: recording.title, artist: artist, album: release?.title ?? "",
             durationMs: recording.length, coverArtUrl: groupId.map(coverArtArchiveUrl), sourceName: "MusicBrainz",
-            releaseGroupId: groupId, versionNote: recording.disambiguation?.trimmed.nonBlank
+            releaseGroupId: groupId, versionNote: recording.disambiguation?.trimmed.nonBlank,
+            releaseId: release?.id
         )
     }
 }
@@ -459,10 +482,14 @@ struct DeezerProvider: MetadataProvider {
         var bpm: Double?
         var artist: Named?
         var album: Album?
+        var trackPosition: Int? = nil
+        var diskNumber: Int? = nil
 
         enum CodingKeys: String, CodingKey {
             case id, title, duration, bpm, artist, album
             case titleVersion = "title_version"
+            case trackPosition = "track_position"
+            case diskNumber = "disk_number"
         }
     }
 
@@ -514,12 +541,14 @@ struct DeezerProvider: MetadataProvider {
         return response.data.map { track in
             MetadataCandidate(
                 id: "deezer_\(track.id)", title: track.title, artist: track.artist?.name ?? "", album: track.album?.title ?? "",
+                trackNumber: track.trackPosition ?? 0,
                 // Search results rarely carry a BPM; only a real value is kept.
                 bpm: track.bpm.map { Int($0) }.flatMap { $0 > 0 ? $0 : nil },
                 durationMs: track.duration.map { $0 * 1000 },
                 coverArtUrl: track.album.flatMap { $0.coverXl ?? $0.coverBig ?? $0.coverMedium }, sourceName: "Deezer",
                 deezerAlbumId: track.album?.id,
-                versionNote: track.titleVersion?.trimmed.nonBlank.flatMap { track.title.lowercased().contains($0.lowercased()) ? nil : $0 }
+                versionNote: track.titleVersion?.trimmed.nonBlank.flatMap { track.title.lowercased().contains($0.lowercased()) ? nil : $0 },
+                discNumber: track.diskNumber ?? 0, releaseId: track.album.map { String($0.id) }
             )
         }
     }

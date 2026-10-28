@@ -61,6 +61,26 @@ final class TagWriterTests: XCTestCase {
         XCTAssertNotNil(header.range(of: Data("7/12".utf8)))
     }
 
+    func testTrackAndDiscRepairsRoundTripInEveryWritableFormat() throws {
+        let fixtures: [(String, Data)] = [("mp3", TagFixtures.mp3(v4: true) + audio),
+                                          ("m4a", TagFixtures.m4a()), ("flac", TagFixtures.flac() + audio)]
+        for (ext, data) in fixtures {
+            let url = TagFixtures.write(data, name: "ordering.\(ext)")
+            let before = TagReader.read(url)
+            var request = TagWriteRequest()
+            request.trackNumber = 7
+            request.discNumber = 2
+            try TagWriter.write(request, to: url)
+            let after = TagReader.read(url)
+            XCTAssertEqual(after.trackNumber, 7, ext)
+            XCTAssertEqual(after.discNumber, 2, ext)
+            XCTAssertEqual(after.title, before.title, ext)
+            XCTAssertEqual(after.artist, before.artist, ext)
+            XCTAssertEqual(after.album, before.album, ext)
+            if ext != "m4a" { XCTAssertEqual(try Data(contentsOf: url).suffix(audio.count), audio, ext) }
+        }
+    }
+
     func testMp3ArtworkIsScaledToJpegAndCanBeRemoved() throws {
         let url = TagFixtures.write(TagFixtures.mp3(v4: true) + audio, name: "song.mp3")
         var request = TagWriteRequest()

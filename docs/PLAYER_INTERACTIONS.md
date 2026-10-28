@@ -32,8 +32,9 @@ glass panels for duration, curves and settings; plain menu rows; and a clear ina
 Duration reads the transition currently displayed, including inherited settings. Graph legends
 sit outside the curves. Dragging a curve requires starting near a control point; dragging blank
 graph space can scroll. The bass-swap lane only accepts horizontal movement. Draft, undo, Save,
-Cancel and transition audio semantics remain the same. Preview playback and waveform cue lanes
-are still separate unfinished features.
+Cancel and transition audio semantics remain the same. Individual pairs additionally show real
+source waveforms, measured levels, an engine-backed audition and precise cue/automation inspection;
+see [album ordering and transitions](ALBUM_ORDER_AND_TRANSITIONS.md).
 
 ## Checks
 

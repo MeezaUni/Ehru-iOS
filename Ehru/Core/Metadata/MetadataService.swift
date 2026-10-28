@@ -72,6 +72,29 @@ actor MetadataService {
         unusable = [:]
     }
 
+    /// Only the chosen provider/release supplies ordering. No filename rank or unrelated album is used.
+    func withAlbumPosition(_ match: MetadataCandidate) async -> (MetadataCandidate, String?) {
+        if AlbumTrackPosition(disc: match.discNumber, track: match.trackNumber).isValid { return (match, nil) }
+        var result = match
+        do {
+            if match.sourceName == "MusicBrainz", let position = try await musicBrainz.albumPosition(match) {
+                result.trackNumber = position.track
+                result.discNumber = position.disc
+            } else if match.sourceName == "Deezer", match.id.hasPrefix("deezer_"),
+                      let id = Int64(match.id.dropFirst(7)), id > 0 {
+                let detail = try await fetchJSON(DeezerProvider.Track.self, URL(string: "https://api.deezer.com/track/\(id)")!, client: client)
+                if detail.id == id, detail.album?.id == match.deezerAlbumId,
+                   albumPositionTitle(detail.album?.title ?? "") == albumPositionTitle(match.album) {
+                    result.trackNumber = detail.trackPosition ?? 0
+                    result.discNumber = detail.diskNumber ?? 0
+                }
+            }
+            return (result, nil)
+        } catch {
+            return (result, "Album order lookup failed: \(error.localizedDescription)")
+        }
+    }
+
     /// Every provider's scored candidates and outcome for one query.
     func search(title: String, artist: String?, album: String?, durationMs: Int64?, selection: String) async -> SearchResponse {
         let list = providers

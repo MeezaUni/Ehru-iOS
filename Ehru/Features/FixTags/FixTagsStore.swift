@@ -58,6 +58,20 @@ final class FixTagsStore {
         var fields: [String] = MetadataField.allCases.filter { $0 != .filename }.map(\.rawValue)
         var source = MetadataSources.all
         var acceptAt: Float = highConfidenceThreshold
+        var orderingFieldsVersion = 1
+
+        enum CodingKeys: String, CodingKey { case fields, source, acceptAt, orderingFieldsVersion }
+        init() {}
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            fields = try values.decodeIfPresent([String].self, forKey: .fields) ?? fields
+            source = try values.decodeIfPresent(String.self, forKey: .source) ?? source
+            acceptAt = try values.decodeIfPresent(Float.self, forKey: .acceptAt) ?? acceptAt
+            // Add ordering to an existing "all fields" setup once, preserving custom selections.
+            if !values.contains(.orderingFieldsVersion), Set(fields).isSuperset(of: MetadataField.fillOnlyTags.map(\.rawValue)) {
+                for field in [MetadataField.trackNumber, .discNumber] where !fields.contains(field.rawValue) { fields.append(field.rawValue) }
+            }
+        }
     }
 
     private(set) var queue: [RepairItem] = []
@@ -85,6 +99,7 @@ final class FixTagsStore {
         self.bpmFinder = bpmFinder
         settings = Settings()
         settings = settingsStore.load() ?? Settings()
+        settingsStore.save(settings)
         // Backups of an earlier session belong to a queue that no longer exists.
         try? FileManager.default.removeItem(at: Self.backupFolder)
     }
@@ -115,6 +130,7 @@ final class FixTagsStore {
     nonisolated static func incomplete(_ songs: [Song]) -> [Song] {
         songs.filter { song in
             song.title.isBlank || song.artist.isBlank || song.artist == unknownArtist || song.album.isBlank
+                || song.trackNumber <= 0
                 || song.album.caseInsensitiveCompare("Unknown Album") == .orderedSame
                 || song.title.localizedCaseInsensitiveContains("mp3") || song.title.localizedCaseInsensitiveContains(".com")
         }
@@ -266,7 +282,8 @@ final class FixTagsStore {
         let local = LocalTrackTags(
             title: embedded.title ?? song.title, artist: embedded.artist ?? song.artist, album: embedded.album ?? song.album,
             genre: Genres.join(embedded.genres), hasArtwork: embedded.hasArtwork, tagsReadable: true,
-            year: embedded.dateText, bpm: embedded.bpmText
+            year: embedded.dateText, bpm: embedded.bpmText,
+            trackNumber: embedded.trackNumber, discNumber: embedded.discNumber
         )
         var reasons: [String: String] = [:]
         var genre: String?
@@ -292,10 +309,29 @@ final class FixTagsStore {
             case .failed(let reason): reasons["No BPM found"] = "BPM lookup failed: \(reason)"
             }
         }
-        var plan = FieldFixPlanner.plan(fields: fields, fillOnly: fillOnly, local: local, match: match, genre: genre,
+        var positioned = match
+        var positionNote: String?
+        if (fields.contains(.trackNumber) && (!fillOnly || (local.trackNumber ?? 0) <= 0))
+            || (fields.contains(.discNumber) && (!fillOnly || (local.discNumber ?? 0) <= 0)) {
+            (positioned, positionNote) = await service.withAlbumPosition(match)
+            let tied = candidates.filter {
+                $0.id != match.id && $0.confidenceScore >= acceptAt
+                    && match.confidenceScore - $0.confidenceScore <= tieMargin
+                    && albumPositionTitle($0.album) == albumPositionTitle(match.album)
+                    && AlbumTrackPosition(disc: $0.discNumber, track: $0.trackNumber).isValid
+            }
+            if tied.contains(where: { $0.trackNumber != positioned.trackNumber || $0.discNumber != positioned.discNumber }) {
+                positioned.trackNumber = 0
+                positioned.discNumber = 0
+                positionNote = "Equally good matches disagree on album order; track and disc numbers were left unchanged."
+            }
+        }
+        var plan = FieldFixPlanner.plan(fields: fields, fillOnly: fillOnly, local: local, match: positioned, genre: genre,
                                         artwork: nil, releaseDate: releaseDate, bpm: bpm)
         plan.notes = plan.notes.map { reasons[$0] ?? $0 }
         plan.unfilled = Array(reasons.values)
+        if let positionNote { plan.notes.append(positionNote) }
+        plan.unfilled += plan.notes.filter { $0.hasPrefix("No verified ") || $0.hasPrefix("Kept track number:") || $0.hasPrefix("Kept disc number:") }
         return plan
     }
 

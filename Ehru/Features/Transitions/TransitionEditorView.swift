@@ -31,10 +31,11 @@ struct TransitionEditorView: View {
         let pair = current.pair
         return ScrollView {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                if let pair {
+                if let pair, let shown = current.shown {
+                    PairTransitionWorkspace(pair: pair, spec: shown, masterEnabled: transitions.config.global.masterEnabled,
+                                            beginDrag: { draft?.beginDrag() }, drag: { draft?.drag($0) }, edit: { draft?.edit($0) })
+                } else if let pair {
                     EditorTrackLine(role: "Outgoing", song: pair.from.song, cue: outgoingCue(base, pair))
-                }
-                if let pair {
                     EditorTrackLine(role: "Incoming", song: pair.to.song, cue: incomingCue(base))
                 }
                 PresetCards(current: current) { draft?.choose($0) }
@@ -47,10 +48,12 @@ struct TransitionEditorView: View {
                                       choose: { ms in draft?.edit { TransitionEditing.setDuration($0, ms) } })
                     }
                     StudioPanel {
-                        TransitionLanes(spec: base, active: true,
-                                        beginDrag: { draft?.beginDrag() },
-                                        drag: { transform in draft?.drag(transform) },
-                                        edit: { transform in draft?.edit(transform) })
+                        if pair != nil {
+                            DisclosureGroup("Edit volume, EQ and filter automation") {
+                                automationLanes(base).padding(.top, Spacing.md)
+                            }
+                            .font(.subheadline.weight(.semibold))
+                        } else { automationLanes(base) }
                     }
                     sections(current)
                 } else {
@@ -66,6 +69,13 @@ struct TransitionEditorView: View {
             .padding(.bottom, Spacing.lg)
         }
         .buttonStyle(.plain)
+    }
+
+    private func automationLanes(_ spec: TransitionSpec) -> some View {
+        TransitionLanes(spec: spec, active: true,
+                                        beginDrag: { draft?.beginDrag() },
+                                        drag: { transform in draft?.drag(transform) },
+                                        edit: { transform in draft?.edit(transform) })
     }
 
     private func editorHeader(_ current: EditorDraft) -> some View {
@@ -443,8 +453,9 @@ private struct TransitionLanes: View {
                 for role in [TransitionRole.outgoing, .incoming] {
                     let points = TransitionEditing.curveOf(spec, role).points
                     var path = Path()
-                    for (i, point) in points.enumerated() {
-                        let p = position(point, size)
+                    for i in 0...128 {
+                        let t = Float(i) / 128
+                        let p = position(CurvePoint(t: t, gain: spec.gain(role, t)), size)
                         if i == 0 { path.move(to: p) } else { path.addLine(to: p) }
                     }
                     let style = role == .outgoing

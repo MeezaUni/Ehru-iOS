@@ -63,6 +63,15 @@ final class DatabaseTests: XCTestCase {
         XCTAssertTrue(try db.song(id: 1)!.isFavorite)
         XCTAssertEqual([1], try db.smartPlaylistSongs(.favorites).map(\.id))
     }
+
+    func testAlbumTrackOrderUsesDiscThenTrackWithUnknownTracksLast() throws {
+        let db = try LibraryDatabase.inMemory()
+        for id in Int64(1)...6 { try insertSong(db, id, title: "\(7 - id)") }
+        for (id, disc, track) in [(1, 2, 1), (2, 1, 10), (3, 1, 2), (4, 1, 0), (5, 2, 2), (6, 0, 1)] {
+            try db.db.execute("UPDATE songs SET disc_number = ?, track_number = ? WHERE id = ?", [disc, track, id])
+        }
+        XCTAssertEqual(try db.songsOfAlbum(1).map(\.id), [6, 3, 2, 4, 1, 5])
+    }
 }
 
 final class ScannerTests: XCTestCase {

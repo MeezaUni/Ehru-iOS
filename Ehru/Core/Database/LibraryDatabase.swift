@@ -185,7 +185,12 @@ extension LibraryDatabase {
 
     func songsOfAlbum(_ albumId: Int64) throws -> [Song] {
         try db.query(
-            "SELECT * FROM songs WHERE album_id = ? ORDER BY disc_number ASC, track_number ASC, title COLLATE NOCASE ASC",
+            """
+            SELECT * FROM songs WHERE album_id = ?
+            ORDER BY CASE WHEN disc_number > 0 THEN disc_number ELSE 1 END ASC,
+                     CASE WHEN track_number > 0 THEN 0 ELSE 1 END ASC, track_number ASC,
+                     title COLLATE NOCASE ASC, file_path COLLATE NOCASE ASC, id ASC
+            """,
             [albumId], Self.song
         )
     }
