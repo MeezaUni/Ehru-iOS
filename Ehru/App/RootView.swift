@@ -65,8 +65,8 @@ struct RootView: View {
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .environment(chrome)
         .environment(\.visualWorkBudget, visualBudget)
-        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in visualBudget = .current }
-        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in visualBudget = .current }
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in visualBudget = .current }
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification).receive(on: RunLoop.main)) { _ in visualBudget = .current }
         .onChange(of: router.section) { _, _ in chrome.expand(reduceMotion: reduceMotion) }
         .onChange(of: router.showsSearch) { _, _ in chrome.expand(reduceMotion: reduceMotion) }
         .onChange(of: router.paths[router.section]?.count) { _, _ in chrome.expand(reduceMotion: reduceMotion) }
