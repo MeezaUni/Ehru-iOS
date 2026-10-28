@@ -80,7 +80,6 @@ struct PanInteraction: UIViewRepresentable {
         pan.maximumNumberOfTouches = 1
         pan.delegate = context.coordinator
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
-        tap.allowableMovement = 8
         tap.require(toFail: pan)
         view.addGestureRecognizer(pan)
         view.addGestureRecognizer(tap)
