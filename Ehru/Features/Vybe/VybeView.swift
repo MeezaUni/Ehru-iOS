@@ -21,7 +21,7 @@ struct VybeView: View {
                     .font(.subheadline)
                     .foregroundStyle(palette.onSurfaceVariant)
                 field
-                status
+                if router.section == .vybe { status }
                 switch vybe.query {
                 case .idle:
                     suggestionChips

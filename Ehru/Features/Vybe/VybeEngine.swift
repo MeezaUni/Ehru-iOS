@@ -93,8 +93,9 @@ actor VybeEngine {
     func tasteNeighbours(_ seeds: [Int64: Float], limit: Int) -> [Int64: Float]? {
         guard FileManager.default.fileExists(atPath: indexURL.path) else { return nil }
         let modelId = embedder?.modelId ?? tasteModelId ?? (try? makeEmbedder().modelId)
-        guard let modelId, let dimension = VybeIndexFile.storedDimension(indexURL, modelId: modelId) else { return nil }
+        guard let modelId else { return nil }
         tasteModelId = modelId
+        guard let dimension = VybeIndexFile.storedDimension(indexURL, modelId: modelId) else { return nil }
         let songs = library.isEmpty ? ((try? database.songTags().map(VybeText.fromTags)) ?? []) : library
         let live = Dictionary(songs.map { ($0.songId, Self.documentHash($0)) }, uniquingKeysWith: { a, _ in a })
         let attributes = try? FileManager.default.attributesOfItem(atPath: indexURL.path)

@@ -55,6 +55,23 @@ final class VybeStartupTests: XCTestCase {
         _ = await engine.tasteNeighbours([1: 1], limit: 5)
         XCTAssertEqual(calls.withLock { $0 }, 1)
     }
+
+    func testIncompatibleSavedIndexDoesNotRepeatedlyLoadTheModel() async throws {
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let index = VybeIndexFile(url: url, modelId: "older-model", dimension: 3)
+        try index.append([IndexedSong(songId: 1, textHash: 1, vector: [1, 0, 0])])
+        let engine = VybeEngine(database: try LibraryDatabase.inMemory(), indexURL: url, makeEmbedder: {
+            calls.withLock { $0 += 1 }
+            return KeywordEmbedder()
+        }, publish: { _, _ in })
+        let first = await engine.tasteNeighbours([1: 1], limit: 5)
+        let second = await engine.tasteNeighbours([1: 1], limit: 5)
+        XCTAssertNil(first)
+        XCTAssertNil(second)
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+    }
 }
 
 final class VybeDiscoveryTests: XCTestCase {
