@@ -690,6 +690,19 @@ enum FLACWriter {
             removed.formUnion(keys)
             if case .set(let value) = change { added.append("\(keys[0])=\(value.trimmed)") }
         }
+        func setNumber(_ key: String, _ number: Int, totalKeys: Set<String>) {
+            removed.insert(key)
+            var suffix = ""
+            for comment in comments {
+                let pair = comment.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard pair.count == 2 else { continue }
+                let name = pair[0].uppercased()
+                if name == key, let raw = pair[1].split(separator: "/").dropFirst().first,
+                   let total = Int(raw), total >= number { suffix = "/\(total)" }
+                if totalKeys.contains(name), let total = Int(pair[1]), total < number { removed.insert(name) }
+            }
+            added.append("\(key)=\(number)\(suffix)")
+        }
         setText(["TITLE"], request.change(request.title, cleared: request.clearTitle))
         setText(["ARTIST"], request.change(request.artist, cleared: request.clearArtist))
         setText(["ALBUM"], request.change(request.album, cleared: request.clearAlbum))
@@ -706,12 +719,10 @@ enum FLACWriter {
             added += genres.map { "GENRE=\($0)" }
         }
         if let track = request.trackNumber {
-            removed.insert("TRACKNUMBER")
-            added.append("TRACKNUMBER=\(track)")
+            setNumber("TRACKNUMBER", track, totalKeys: ["TRACKTOTAL", "TOTALTRACKS"])
         }
         if let disc = request.discNumber {
-            removed.insert("DISCNUMBER")
-            added.append("DISCNUMBER=\(disc)")
+            setNumber("DISCNUMBER", disc, totalKeys: ["DISCTOTAL", "TOTALDISCS"])
         }
         if let bpm = request.bpm {
             removed.formUnion(["BPM", "TEMPO"])

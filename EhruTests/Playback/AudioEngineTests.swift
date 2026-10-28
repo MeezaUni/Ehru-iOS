@@ -6,7 +6,11 @@ final class AudioEngineTests: XCTestCase {
     @MainActor
     func testPairPreviewSchedulesOnlyTheRealCueWindowsAndStopsBothDecks() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
-        defer { try? FileManager.default.removeItem(at: url) }
+        let incomingURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: incomingURL)
+        }
         let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
         let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 132_300)!
         buffer.frameLength = buffer.frameCapacity
@@ -17,6 +21,14 @@ final class AudioEngineTests: XCTestCase {
             let file = try AVAudioFile(forWriting: url, settings: format.settings)
             try file.write(from: buffer)
         }
+        let incomingFormat = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let incomingBuffer = AVAudioPCMBuffer(pcmFormat: incomingFormat, frameCapacity: 144_000)!
+        incomingBuffer.frameLength = incomingBuffer.frameCapacity
+        for frame in 0..<Int(incomingBuffer.frameLength) { incomingBuffer.floatChannelData![0][frame] = 0 }
+        do {
+            let file = try AVAudioFile(forWriting: incomingURL, settings: incomingFormat.settings)
+            try file.write(from: incomingBuffer)
+        }
         var spec = TransitionSpec.preset(.bassSwap)
         spec.durationMs = 500
         spec.outgoingCutMs = 500
@@ -25,13 +37,13 @@ final class AudioEngineTests: XCTestCase {
         let engine = AudioEngine()
         await engine.setUp()
         defer { engine.stopAll() }
-        try engine.previewTransition(outgoing: url, incoming: url, timing: timing)
+        try engine.previewTransition(outgoing: url, incoming: incomingURL, timing: timing)
         let out = try XCTUnwrap(engine.other.segments.first)
         let inc = try XCTUnwrap(engine.active.segments.first)
         XCTAssertEqual(out.fileStartFrame, 22_050)
         XCTAssertEqual(out.frameCount, 88_200)
-        XCTAssertEqual(inc.fileStartFrame, 22_050)
-        XCTAssertEqual(inc.frameCount, 88_200)
+        XCTAssertEqual(inc.fileStartFrame, 24_000)
+        XCTAssertEqual(inc.frameCount, 96_000)
         XCTAssertTrue(engine.isRunning)
         engine.stopAll()
         XCTAssertFalse(engine.isRunning)

@@ -81,6 +81,18 @@ final class TagWriterTests: XCTestCase {
         }
     }
 
+    func testFlacPositionRepairsKeepValidTotalsAndRemoveImpossibleTotals() {
+        var request = TagWriteRequest()
+        request.trackNumber = 7
+        request.discNumber = 2
+        let comments = FLACWriter.apply(request, to: ["TRACKNUMBER=1/12", "DISCNUMBER=1/1", "TRACKTOTAL=12", "DISCTOTAL=1", "TITLE=Song"])
+        XCTAssertTrue(comments.contains("TRACKNUMBER=7/12"))
+        XCTAssertTrue(comments.contains("TRACKTOTAL=12"))
+        XCTAssertTrue(comments.contains("DISCNUMBER=2"))
+        XCTAssertFalse(comments.contains("DISCTOTAL=1"))
+        XCTAssertTrue(comments.contains("TITLE=Song"))
+    }
+
     func testMp3ArtworkIsScaledToJpegAndCanBeRemoved() throws {
         let url = TagFixtures.write(TagFixtures.mp3(v4: true) + audio, name: "song.mp3")
         var request = TagWriteRequest()
