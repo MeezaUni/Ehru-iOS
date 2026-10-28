@@ -15,7 +15,8 @@ iTunes search supplies real track/disc fields; MusicBrainz supplies the chosen r
 media/tracklist (cached and rate limited); Deezer track detail supplies positions only if its
 track and album identities match. Search rank and filename order are never used as track numbers.
 Selected repairs write verified TRCK/TPOS, trkn/disk, or TRACKNUMBER/DISCNUMBER tags for MP3, MP4/M4A
-and FLAC. Existing total counts and unrelated metadata/audio are preserved; backups and Revert
+and FLAC. Valid existing total counts and unrelated metadata/audio are preserved (a total smaller
+than the repaired position is cleared rather than inventing a total); backups and Revert
 still apply. A scan after successful repairs updates album ordering and adjacent transition pairs.
 
 The pair editor displays short decoded PCM windows around the outgoing/incoming cues, with

@@ -2,6 +2,16 @@ import XCTest
 @testable import Ehru
 
 final class AlbumPositionTests: XCTestCase {
+    private actor FixtureHTTP: HTTPClient {
+        let body: String
+        private(set) var requests = 0
+        init(_ body: String) { self.body = body }
+        func request(_ url: URL, headers: [String: String]) async throws -> (Data, HTTPURLResponse) {
+            requests += 1
+            return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+    }
+
     private func plan(local: LocalTrackTags, match: MetadataCandidate, fillOnly: Bool = true) -> FieldFixPlan {
         FieldFixPlanner.plan(fields: [.trackNumber, .discNumber], fillOnly: fillOnly, local: local, match: match,
                              genre: nil, artwork: nil, releaseDate: nil, bpm: nil)
@@ -50,6 +60,37 @@ final class AlbumPositionTests: XCTestCase {
         XCTAssertEqual(match.trackNumber, 8)
         XCTAssertEqual(match.discNumber, 2)
         XCTAssertEqual(match.releaseId, "9")
+    }
+
+    func testMusicBrainzLooksUpTheChosenReleaseAndCachesItsTracklist() async throws {
+        let recording = "3ca61e12-f1c6-4c88-9c10-d2b4ab504c5e"
+        let release = "b30d7940-2a3c-4b37-9a45-2456816fb558"
+        let http = FixtureHTTP("""
+        {"id":"\(release)","title":"Album","media":[{"position":2,"tracks":[{"position":6,"recording":{"id":"\(recording)"}}]}]}
+        """)
+        let provider = MusicBrainzProvider(client: http)
+        var match = MetadataCandidate(id: "mb_" + recording, title: "Song", artist: "Artist", album: "Album")
+        match.releaseId = release
+        let first = try await provider.albumPosition(match)
+        let second = try await provider.albumPosition(match)
+        XCTAssertEqual(first, AlbumTrackPosition(disc: 2, track: 6))
+        XCTAssertEqual(second, first)
+        let requests = await http.requests
+        XCTAssertEqual(requests, 1)
+    }
+
+    func testDeezerDetailMustBelongToTheSelectedAlbum() async {
+        let http = FixtureHTTP(#"{"id":12,"title":"Song","track_position":7,"disk_number":2,"album":{"id":9,"title":"Album"}}"#)
+        let service = MetadataService(client: http)
+        var match = MetadataCandidate(id: "deezer_12", title: "Song", artist: "Artist", album: "Album", sourceName: "Deezer")
+        match.deezerAlbumId = 9
+        let (found, _) = await service.withAlbumPosition(match)
+        XCTAssertEqual(found.trackNumber, 7)
+        XCTAssertEqual(found.discNumber, 2)
+        match.deezerAlbumId = 10
+        let (mismatch, _) = await service.withAlbumPosition(match)
+        XCTAssertEqual(mismatch.trackNumber, 0)
+        XCTAssertEqual(mismatch.discNumber, 0)
     }
 
     func testOldAllFieldsSettingsGainOrderingWithoutResettingPreferences() throws {

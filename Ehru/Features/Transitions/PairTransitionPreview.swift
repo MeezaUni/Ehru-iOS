@@ -38,6 +38,7 @@ final class PairTransitionPreview {
             engine.onEntryFinished = { [weak self] _ in self?.stop() }
             engine.onConfigurationChange = { [weak self] in self?.stop(resume: false) }
             do {
+                try AVAudioSession.sharedInstance().setActive(true)
                 try engine.previewTransition(outgoing: pair.from.song.url, incoming: pair.to.song.url, timing: timing)
                 isPreparing = false
                 isPlaying = true

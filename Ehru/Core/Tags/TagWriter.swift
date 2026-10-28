@@ -367,11 +367,13 @@ enum ID3Writer {
         if let track = request.trackNumber {
             // Keeps a "/total" the file already has.
             let total = frames.first { $0.id == "TRCK" }.flatMap { ID3.text($0.data) }?.split(separator: "/").dropFirst().first
+                .flatMap { Int($0).flatMap { $0 >= track ? String($0) : nil } }
             replace("TRCK", with: text("TRCK", total.map { "\(track)/\($0)" } ?? String(track)))
         }
         if let bpm = request.bpm { replace("TBPM", with: text("TBPM", String(bpm))) }
         if let disc = request.discNumber {
             let total = frames.first { $0.id == "TPOS" }.flatMap { ID3.text($0.data) }?.split(separator: "/").dropFirst().first
+                .flatMap { Int($0).flatMap { $0 >= disc ? String($0) : nil } }
             replace("TPOS", with: text("TPOS", total.map { "\(disc)/\($0)" } ?? String(disc)))
         }
         if let lyrics = request.lyrics, !lyrics.trimmed.isEmpty {
@@ -544,14 +546,16 @@ enum MP4Writer {
             // Keeps the total the file already has.
             // The item's data atom: size, "data", type, locale, then [0, 0, track, total, 0, 0].
             let old = items.first { $0.name == "trkn" }.map { body($0.box) }
-            let total = old.flatMap { $0.count >= 22 ? $0.uint16BE(20) : nil } ?? 0
+            let storedTotal = old.flatMap { $0.count >= 22 ? $0.uint16BE(20) : nil } ?? 0
+            let total = Int(storedTotal) >= track ? storedTotal : 0
             let payload = Data([0, 0, UInt8(track >> 8 & 0xFF), UInt8(track & 0xFF), UInt8(total >> 8), UInt8(total & 0xFF), 0, 0])
             set("trkn", item("trkn", type: 0, payload))
         }
         if let bpm = request.bpm { set("tmpo", item("tmpo", type: 21, Data([UInt8(bpm >> 8 & 0xFF), UInt8(bpm & 0xFF)]))) }
         if let disc = request.discNumber {
             let old = items.first { $0.name == "disk" }.map { body($0.box) }
-            let total = old.flatMap { $0.count >= 22 ? $0.uint16BE(20) : nil } ?? 0
+            let storedTotal = old.flatMap { $0.count >= 22 ? $0.uint16BE(20) : nil } ?? 0
+            let total = Int(storedTotal) >= disc ? storedTotal : 0
             let payload = Data([0, 0, UInt8(disc >> 8 & 0xFF), UInt8(disc & 0xFF), UInt8(total >> 8), UInt8(total & 0xFF)])
             set("disk", item("disk", type: 0, payload))
         }
