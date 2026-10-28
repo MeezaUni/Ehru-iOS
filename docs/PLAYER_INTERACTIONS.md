@@ -20,6 +20,7 @@ shuffle/removal and persist across launches. Older snapshots recover album/playl
 their existing transition origins and use Library for otherwise unattributed entries.
 
 The Transition editor has a separate header with Cancel, More and Save; a wrapping preset grid;
+the Custom slot stays present so editing a curve cannot move the graph under the finger;
 glass panels for duration, curves and settings; plain menu rows; and a clear inactive state.
 Duration reads the transition currently displayed, including inherited settings. Graph legends
 sit outside the curves. Dragging a curve requires starting near a control point; dragging blank

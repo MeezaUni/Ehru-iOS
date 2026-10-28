@@ -330,7 +330,7 @@ private struct PresetCards: View {
                 ForEach(cards) { card in
                     let isSelected = card.choice == selected
                     Button {
-                        if card.choice != .preset(.custom) { onChoose(card.choice) }
+                        if card.choice != .preset(.custom) || !isSelected { onChoose(card.choice) }
                     } label: {
                         HStack(spacing: Spacing.xs) {
                             if card.choice == .auto { Image(systemName: "sparkles").font(.footnote) }
@@ -368,9 +368,8 @@ private struct PresetCards: View {
         for preset in TransitionPreset.allCases where preset != .custom {
             cards.append(Card(choice: .preset(preset), label: preset.label))
         }
-        if current.mode == .custom && current.spec.preset == .custom {
-            cards.append(Card(choice: .preset(.custom), label: "Custom"))
-        }
+        // Keep the grid's height stable when a curve edit turns its preset into Custom.
+        cards.append(Card(choice: .preset(.custom), label: "Custom"))
         return cards
     }
 }

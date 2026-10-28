@@ -60,6 +60,7 @@ struct TrackRow: View {
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @GestureState private var swipe: CGFloat = 0
+    @GestureState private var gestureActive = false
     @State private var horizontal: Bool?
 
     var body: some View {
@@ -115,7 +116,8 @@ struct TrackRow: View {
                     .clipped()
             }
         }
-        .simultaneousGesture(DragGesture(minimumDistance: 16)
+        .simultaneousGesture(DragGesture(minimumDistance: 16, coordinateSpace: .global)
+            .updating($gestureActive) { _, active, _ in active = true }
             .updating($swipe) { value, offset, transaction in
                 guard horizontal ?? HorizontalGestureIntent.accepts(value.translation) else { return }
                 transaction.disablesAnimations = true
@@ -135,7 +137,7 @@ struct TrackRow: View {
                 }
             })
         .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: swipe == 0)
-        .onChange(of: swipe == 0) { _, resting in if resting { horizontal = nil } }
+        .onChange(of: gestureActive) { _, active in if !active { horizontal = nil } }
         .accessibilityAction(named: "Add to queue") { actions.addToQueue(song) }
         .accessibilityAction(named: "Like song") {
             if let like = actions.like { like(song) }
