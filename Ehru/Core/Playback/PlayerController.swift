@@ -115,7 +115,7 @@ final class PlayerController {
 
     /// Plays [songs] as album or playlist [origin] (its transition settings apply); [slots] are the
     /// playlist positions (parallel), so duplicates stay distinct.
-    func playCollection(_ songs: [Song], startIndex: Int, origin: CollectionRef?, slots: [Int]? = nil) {
+    func playCollection(_ songs: [Song], startIndex: Int, origin: CollectionRef?, slots: [Int]? = nil, source: PlaybackSource? = nil) {
         guard !songs.isEmpty else { return }
         let index = songs.indices.contains(startIndex) ? startIndex : 0
         consecutiveErrors = 0
@@ -128,7 +128,7 @@ final class PlayerController {
         let entries = order.map { i in
             QueueEntry(song: songs[i], origin: origin.map {
                 QueueOrigin(collection: $0, occurrence: TrackOccurrence(songs[i].id, slots.flatMap { $0.indices.contains(i) ? $0[i] : nil }))
-            })
+            }, source: source)
         }
         setQueue(entries, startIndex: playIndex)
         if case .playlist(let id)? = origin.map({ CollectionKindRef($0) }) { try? database.markPlaylistPlayed(id) }
@@ -206,17 +206,17 @@ final class PlayerController {
 
     // MARK: Queue edits
 
-    func playNext(_ song: Song) {
+    func playNext(_ song: Song, source: PlaybackSource? = nil) {
         let wasEmpty = state.queue.isEmpty
         let insertAt = wasEmpty ? 0 : min(state.currentIndex + 1, state.queue.count)
-        state.queue.insert(QueueEntry(song: song), at: insertAt)
+        state.queue.insert(QueueEntry(song: song, source: source), at: insertAt)
         if wasEmpty { state.currentIndex = 0 }
         queueChanged()
     }
 
-    func addToQueue(_ song: Song) {
+    func addToQueue(_ song: Song, source: PlaybackSource? = nil) {
         let wasEmpty = state.queue.isEmpty
-        state.queue.append(QueueEntry(song: song))
+        state.queue.append(QueueEntry(song: song, source: source))
         if wasEmpty { state.currentIndex = 0 }
         queueChanged()
     }
@@ -564,7 +564,7 @@ final class PlayerController {
             positionMs: currentPositionMs(),
             shuffleModeEnabled: state.shuffleModeEnabled,
             repeatMode: state.repeatMode,
-            queueCollectionKeys: state.queue.map { $0.origin?.key ?? "" }
+            queueCollectionKeys: state.queue.map { $0.origin?.key ?? "" }, queueSources: state.queue.map(\.source)
         ))
     }
 
@@ -574,7 +574,7 @@ final class PlayerController {
         persistence.saveNow(PersistedPlaybackState(
             queueSongIds: state.queue.map(\.song.id), currentIndex: state.currentIndex, positionMs: currentPositionMs(),
             shuffleModeEnabled: state.shuffleModeEnabled, repeatMode: state.repeatMode,
-            queueCollectionKeys: state.queue.map { $0.origin?.key ?? "" }
+            queueCollectionKeys: state.queue.map { $0.origin?.key ?? "" }, queueSources: state.queue.map(\.source)
         ))
     }
 
@@ -585,7 +585,8 @@ final class PlayerController {
               state.queue.isEmpty
         else { return }
         let entries = restored.songs.enumerated().map { i, song in
-            QueueEntry(song: song, origin: restored.origins.indices.contains(i) ? restored.origins[i] : nil)
+            QueueEntry(song: song, origin: restored.origins.indices.contains(i) ? restored.origins[i] : nil,
+                       source: restored.sources.indices.contains(i) ? restored.sources[i] : nil)
         }
         state.queue = entries
         state.currentIndex = restored.startIndex

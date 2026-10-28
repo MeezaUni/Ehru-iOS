@@ -14,6 +14,7 @@ struct SongActions {
     var hideFromMixes: ((Song) -> Void)?
     /// Playlist pages only.
     var removeFromPlaylist: ((Song) -> Void)?
+    var like: ((Song) -> Void)?
 }
 
 /// The song actions as menu items (a row's "…" button and its long-press menu).
@@ -57,6 +58,9 @@ struct TrackRow: View {
     let actions: SongActions
     let onTap: () -> Void
     @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @GestureState private var swipe: CGFloat = 0
+    @State private var horizontal: Bool?
 
     var body: some View {
         HStack(spacing: Spacing.md) {
@@ -88,12 +92,55 @@ struct TrackRow: View {
             Menu {
                 SongActionItems(song: song, actions: actions)
             } label: {
-                Image(systemName: "ellipsis").foregroundStyle(palette.onSurfaceVariant).frame(width: 32, height: 44)
+                Image(systemName: "ellipsis").foregroundStyle(palette.onSurfaceVariant)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
             }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .accessibilityLabel("More actions")
         }
         .padding(.horizontal, Spacing.gutter)
         .padding(.vertical, Spacing.xs)
+        .offset(x: swipe)
+        .background(alignment: swipe >= 0 ? .leading : .trailing) {
+            if swipe != 0 {
+                Label(swipe > 0 ? "Queue" : "Like", systemImage: swipe > 0 ? "text.badge.plus" : "heart.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.primary)
+                    .padding(.horizontal, Spacing.xl)
+                    .frame(maxHeight: .infinity)
+                    .background(palette.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                    .opacity(min(Double(abs(swipe) / 60), 1))
+                    .frame(width: abs(swipe), alignment: swipe > 0 ? .leading : .trailing)
+                    .clipped()
+            }
+        }
+        .simultaneousGesture(DragGesture(minimumDistance: 16)
+            .updating($swipe) { value, offset, transaction in
+                guard horizontal ?? HorizontalGestureIntent.accepts(value.translation) else { return }
+                transaction.disablesAnimations = true
+                offset = value.translation.width.clamped(-112, 112)
+            }
+            .onChanged { value in
+                if horizontal == nil { horizontal = HorizontalGestureIntent.accepts(value.translation) }
+            }
+            .onEnded { value in
+                defer { horizontal = nil }
+                switch SongSwipeAction.committed(translation: value.translation, startedHorizontally: horizontal == true) {
+                case .queue: actions.addToQueue(song)
+                case .like:
+                    if let like = actions.like { like(song) }
+                    else if !song.isFavorite { actions.toggleFavorite(song) }
+                case nil: break
+                }
+            })
+        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: swipe == 0)
+        .onChange(of: swipe == 0) { _, resting in if resting { horizontal = nil } }
+        .accessibilityAction(named: "Add to queue") { actions.addToQueue(song) }
+        .accessibilityAction(named: "Like song") {
+            if let like = actions.like { like(song) }
+            else if !song.isFavorite { actions.toggleFavorite(song) }
+        }
         .contextMenu { SongActionItems(song: song, actions: actions) }
     }
 

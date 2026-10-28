@@ -29,11 +29,13 @@ struct QueueEntry: Identifiable, Hashable, Sendable {
     let song: Song
     /// The album or playlist this entry was started from, and which occurrence it is.
     let origin: QueueOrigin?
+    let source: PlaybackSource
 
-    init(song: Song, origin: QueueOrigin? = nil, id: UUID = UUID()) {
+    init(song: Song, origin: QueueOrigin? = nil, source: PlaybackSource? = nil, id: UUID = UUID()) {
         self.id = id
         self.song = song
         self.origin = origin
+        self.source = source ?? origin.map { PlaybackSource($0.collection) } ?? .library
     }
 }
 
@@ -171,6 +173,8 @@ struct PersistedPlaybackState: Codable, Equatable {
     var repeatMode: RepeatMode = .off
     /// Where each entry was started from ([QueueOrigin.key]), parallel to [queueSongIds]; "" for none.
     var queueCollectionKeys: [String] = []
+    /// Optional so snapshots from older builds still decode.
+    var queueSources: [PlaybackSource]? = nil
 }
 
 struct RestoredQueue: Equatable {
@@ -179,6 +183,7 @@ struct RestoredQueue: Equatable {
     let startPositionMs: Int64
     /// Where each restored entry was started from (parallel to [songs]); nil = an ordinary entry.
     var origins: [QueueOrigin?] = []
+    var sources: [PlaybackSource] = []
 }
 
 /// Rebuilds a playable queue from a saved snapshot and the songs that still exist ([available], any
@@ -189,6 +194,7 @@ func buildRestoredQueue(_ state: PersistedPlaybackState, available: [Song]) -> R
     let byId = Dictionary(available.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
     var songs: [Song] = []
     var origins: [QueueOrigin?] = []
+    var sources: [PlaybackSource] = []
     var restoredCurrent = -1
     var nextSurviving = -1
     for (originalIndex, id) in state.queueSongIds.enumerated() {
@@ -200,13 +206,16 @@ func buildRestoredQueue(_ state: PersistedPlaybackState, available: [Song]) -> R
         }
         songs.append(song)
         let key = state.queueCollectionKeys.indices.contains(originalIndex) ? state.queueCollectionKeys[originalIndex] : nil
-        origins.append(QueueOrigin.fromKey(key, songId: id))
+        let origin = QueueOrigin.fromKey(key, songId: id)
+        origins.append(origin)
+        let source = state.queueSources.flatMap { $0.indices.contains(originalIndex) ? $0[originalIndex] : nil }
+        sources.append(source ?? origin.map { PlaybackSource($0.collection) } ?? .library)
     }
     guard !songs.isEmpty else { return nil }
     if restoredCurrent >= 0 {
-        return RestoredQueue(songs: songs, startIndex: restoredCurrent, startPositionMs: max(state.positionMs, 0), origins: origins)
+        return RestoredQueue(songs: songs, startIndex: restoredCurrent, startPositionMs: max(state.positionMs, 0), origins: origins, sources: sources)
     }
-    return RestoredQueue(songs: songs, startIndex: max(nextSurviving, 0), startPositionMs: 0, origins: origins)
+    return RestoredQueue(songs: songs, startIndex: max(nextSurviving, 0), startPositionMs: 0, origins: origins, sources: sources)
 }
 
 /// Tracks played during this session. A track is recorded once each time it becomes current AND

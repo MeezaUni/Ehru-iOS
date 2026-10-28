@@ -143,14 +143,38 @@ struct NowPlayingView: View {
                 Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 48, height: 48).contentShape(Rectangle())
             }
             .accessibilityLabel("Close")
-            Text("Now Playing").font(.title2)
-            Spacer()
+            Button {
+                guard let source = player.state.currentEntry?.source else { return }
+                drag.beginDismissal()
+                withAnimation(.smooth(duration: 0.32)) { router.reveal(source) }
+            } label: {
+                Text(playbackSourceTitle)
+                    .font(.subheadline.weight(.medium)).lineLimit(1)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens where this music was started")
+            .disabled(player.state.currentEntry == nil)
             menu
         }
         .padding(.horizontal, Spacing.xs)
         .foregroundStyle(palette.onSurface)
         .contentShape(Rectangle())
         .gesture(pullGesture)
+    }
+
+    private var playbackSourceTitle: String {
+        guard let source = player.state.currentEntry?.source else { return "Your music" }
+        switch source {
+        case .album(let id): return library.album(id)?.title ?? "Album unavailable"
+        case .playlist(let id): return library.playlist(id)?.name ?? "Playlist unavailable"
+        case .artist(let id): return library.artist(id)?.name ?? "Artist unavailable"
+        case .smartPlaylist(let key): return mixes.mix(key)?.title ?? MixKind.fromKey(key)?.title ?? "Smart playlist"
+        case .library: return "Library"
+        case .favorites: return "Liked Songs"
+        case .vybe: return "VYBE"
+        }
     }
 
     private var menu: some View {

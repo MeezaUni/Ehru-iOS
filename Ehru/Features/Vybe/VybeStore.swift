@@ -101,13 +101,13 @@ final class VybeStore {
     func play(_ results: [VybeResult], index: Int) {
         if results.isEmpty { return }
         player.setShuffleModeEnabled(false)
-        player.playCollection(results.map(\.song), startIndex: min(max(index, 0), results.count - 1), origin: nil)
+        player.playCollection(results.map(\.song), startIndex: min(max(index, 0), results.count - 1), origin: nil, source: .vybe)
     }
 
     func shuffle(_ results: [VybeResult]) {
         if results.isEmpty { return }
         player.setShuffleModeEnabled(true)
-        player.playCollection(results.map(\.song), startIndex: Int.random(in: 0..<results.count), origin: nil)
+        player.playCollection(results.map(\.song), startIndex: Int.random(in: 0..<results.count), origin: nil, source: .vybe)
     }
 
     func addAllToQueue(_ results: [VybeResult]) {

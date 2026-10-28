@@ -202,12 +202,13 @@ struct TransitionStudioView: View {
 struct StudioPanel<Content: View>: View {
     @ViewBuilder let content: () -> Content
     @Environment(\.palette) private var palette
+    @Environment(AppSettings.self) private var settings
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) { content() }
             .padding(Spacing.md)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(palette.surfaceVariant.opacity(0.45), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .glassSurface(cornerRadius: 20, enabled: settings.glassEnabled)
     }
 }
 
@@ -239,6 +240,7 @@ private struct StudioTrackRow: View {
                     Image(systemName: "ellipsis").frame(width: 36, height: 36).contentShape(Rectangle())
                 }
                 .foregroundStyle(palette.onSurfaceVariant)
+                .menuStyle(.button).buttonStyle(.plain)
                 .accessibilityLabel("More for \(track.song.title)")
             }
         }

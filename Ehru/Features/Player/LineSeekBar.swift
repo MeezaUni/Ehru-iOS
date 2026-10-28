@@ -30,15 +30,11 @@ struct LineSeekBar: View {
                 let position = previewMs ?? player.currentPositionMs()
                 Canvas { context, size in draw(in: &context, size: size, position: position) }
             }
-            .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in previewMs = position(at: value.location.x, width: geometry.size.width) }
-                    .onEnded { value in
-                        onSeek(position(at: value.location.x, width: geometry.size.width))
-                        previewMs = nil
-                    }
-            )
+            .allowsHitTesting(false)
+            .overlay {
+                SeekInteraction(preview: { x in previewMs = x.map { position(at: $0, width: geometry.size.width) } },
+                                commit: { onSeek(position(at: $0, width: geometry.size.width)) })
+            }
         }
         .frame(height: Self.touchHeight)
         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: previewMs != nil)

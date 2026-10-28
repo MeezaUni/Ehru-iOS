@@ -132,11 +132,28 @@ final class AppRouter {
         Binding(get: { self.paths[section] ?? NavigationPath() }, set: { self.paths[section] = $0 })
     }
 
-    func songActions(_ actions: LibraryActions, hideFromMixes: ((Song) -> Void)? = nil) -> SongActions {
+    func reveal(_ source: PlaybackSource) {
+        let destination: Route?
+        switch source {
+        case .album(let id): section = .albums; destination = .album(id)
+        case .playlist(let id): section = .library; destination = .playlist(id)
+        case .artist(let id): section = .library; destination = .artist(id)
+        case .smartPlaylist(let key): section = .home; destination = .smartPlaylist(key)
+        case .library: section = .library; destination = .allSongs
+        case .favorites: section = .library; destination = .shelf(.favorites)
+        case .vybe: section = .vybe; destination = nil
+        }
+        paths[section] = destination.map { NavigationPath([$0]) } ?? NavigationPath()
+        showsDrawer = false
+        showsSearch = false
+        showsNowPlaying = false
+    }
+
+    func songActions(_ actions: LibraryActions, hideFromMixes: ((Song) -> Void)? = nil, source: PlaybackSource? = nil) -> SongActions {
         SongActions(
             toggleFavorite: { actions.toggleFavorite($0) },
-            playNext: { actions.playNext($0) },
-            addToQueue: { actions.addToQueue($0) },
+            playNext: { actions.playNext($0, source: source) },
+            addToQueue: { actions.addToQueue($0, source: source) },
             startRadio: { actions.startRadio(.song($0.id)) },
             addToPlaylist: { [weak self] song in self?.songsForPlaylist = [song] },
             viewDetails: { [weak self] song in self?.songForDetails = song },
@@ -145,7 +162,8 @@ final class AppRouter {
                 AppServices.shared.fixTags.enqueue([song])
                 self?.open(.autoFixTags)
             },
-            hideFromMixes: hideFromMixes
+            hideFromMixes: hideFromMixes,
+            like: { actions.like($0) }
         )
     }
 }

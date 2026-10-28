@@ -7,17 +7,23 @@ struct TransitionEditorView: View {
     let noun: String
     @Environment(TransitionSettingsStore.self) private var transitions
     @Environment(\.palette) private var palette
+    @Environment(AppSettings.self) private var settings
 
     var body: some View {
         NavigationStack {
             if let current = draft {
-                content(current)
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { toolbar(current) }
+                VStack(spacing: 0) {
+                    editorHeader(current)
+                    content(current)
+                }
+                    .toolbar(.hidden, for: .navigationBar)
+                    .background(palette.background)
                     .interactiveDismissDisabled(current.isDirty)
             }
         }
         .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        .presentationCornerRadius(28)
     }
 
     private func content(_ current: EditorDraft) -> some View {
@@ -28,44 +34,55 @@ struct TransitionEditorView: View {
                 if let pair {
                     EditorTrackLine(role: "Outgoing", song: pair.from.song, cue: outgoingCue(base, pair))
                 }
-                TransitionLanes(spec: base, active: current.shown != nil,
-                                beginDrag: { draft?.beginDrag() },
-                                drag: { transform in draft?.drag(transform) },
-                                edit: { transform in draft?.edit(transform) })
-                DurationBlock(spec: current.shown, base: current.editBase, pair: pair,
-                              beginDrag: { draft?.beginDrag() },
-                              drag: { ms in draft?.drag { TransitionEditing.setDuration($0, ms) } },
-                              choose: { ms in draft?.edit { TransitionEditing.setDuration($0, ms) } })
                 if let pair {
                     EditorTrackLine(role: "Incoming", song: pair.to.song, cue: incomingCue(base))
                 }
                 PresetCards(current: current) { draft?.choose($0) }
                 Text(statusLine(current)).font(.caption).foregroundStyle(palette.onSurfaceVariant)
-                sections(current)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Effects, looping, beatmatching").font(.subheadline).foregroundStyle(palette.onSurfaceVariant)
-                    Text("Not available: the audio engine has no echo, reverb or loop stage, and your library has no BPM or beat data.")
-                        .font(.caption).foregroundStyle(palette.onSurfaceVariant)
+                if current.shown != nil {
+                    StudioPanel {
+                        DurationBlock(spec: current.shown, base: current.editBase, pair: pair,
+                                      beginDrag: { draft?.beginDrag() },
+                                      drag: { ms in draft?.drag { TransitionEditing.setDuration($0, ms) } },
+                                      choose: { ms in draft?.edit { TransitionEditing.setDuration($0, ms) } })
+                    }
+                    StudioPanel {
+                        TransitionLanes(spec: base, active: true,
+                                        beginDrag: { draft?.beginDrag() },
+                                        drag: { transform in draft?.drag(transform) },
+                                        edit: { transform in draft?.edit(transform) })
+                    }
+                    sections(current)
+                } else {
+                    StudioPanel {
+                        Label("No crossfade", systemImage: "waveform.path")
+                            .font(.headline).foregroundStyle(palette.onSurface)
+                        Text("Choose Fade or another preset above to blend these tracks.")
+                            .font(.subheadline).foregroundStyle(palette.onSurfaceVariant)
+                    }
                 }
-                .padding(.top, Spacing.xs)
             }
             .padding(Spacing.lg)
+            .padding(.bottom, Spacing.lg)
         }
+        .buttonStyle(.plain)
     }
 
-    @ToolbarContentBuilder
-    private func toolbar(_ current: EditorDraft) -> some ToolbarContent {
-        ToolbarItem(placement: .cancellationAction) {
-            Button { draft = nil } label: { Image(systemName: "xmark") }
-                .accessibilityLabel("Cancel and discard changes")
-        }
-        ToolbarItem(placement: .principal) {
-            VStack(spacing: 0) {
-                Text("Transition").font(.headline)
-                Text(targetLabel(current.target)).font(.caption).foregroundStyle(palette.onSurfaceVariant)
+    private func editorHeader(_ current: EditorDraft) -> some View {
+        ZStack {
+            VStack(spacing: 2) {
+                Text("Transition").font(.headline).lineLimit(1).minimumScaleFactor(0.8)
+                Text(targetLabel(current.target)).font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
             }
-        }
-        ToolbarItemGroup(placement: .confirmationAction) {
+            .padding(.horizontal, 112)
+            HStack(spacing: Spacing.sm) {
+            Button { draft = nil } label: {
+                Image(systemName: "xmark").frame(width: 44, height: 44)
+                    .glassSurface(cornerRadius: 22, enabled: settings.glassEnabled)
+                    .contentShape(Circle())
+            }
+                .accessibilityLabel("Cancel and discard changes")
+            Spacer()
             Menu {
                 Button { draft?.undoLast() } label: { Label("Undo", systemImage: "arrow.uturn.backward") }
                     .disabled(current.undo.isEmpty)
@@ -79,14 +96,27 @@ struct TransitionEditorView: View {
                 }
                 Button { draft?.resetToPreset() } label: { Label("Reset to preset", systemImage: "arrow.counterclockwise") }
                     .disabled(current.mode != .custom)
-            } label: { Image(systemName: "ellipsis.circle") }
+            } label: { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
+            .menuStyle(.button)
+            .buttonStyle(.plain)
             .accessibilityLabel("More options")
-            Button("Save") {
+            Button {
                 transitions.save(current)
                 draft = nil
+            } label: {
+                Text("Save").font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, Spacing.md)
+                    .frame(height: 44)
+                    .glassSurface(cornerRadius: 22, enabled: settings.glassEnabled)
+                    .contentShape(Capsule())
             }
             .disabled(!current.isDirty)
+            }
         }
+        .buttonStyle(.plain)
+        .foregroundStyle(palette.onSurface)
+        .padding(.horizontal, Spacing.lg)
+        .frame(minHeight: 68)
     }
 
     private func targetLabel(_ target: EditorTarget) -> String {
@@ -99,9 +129,9 @@ struct TransitionEditorView: View {
 
     private func statusLine(_ current: EditorDraft) -> String {
         switch current.mode {
-        case .inherit: "Follows the level above: \(specSummary(current.inherited)). Change anything below to make it its own."
-        case .off: "Off here, even if a more general setting has a crossfade: the tracks play back to back."
-        case .custom: "Its own transition: \(specSummary(current.spec))."
+        case .inherit: "Default · \(specSummary(current.inherited))"
+        case .off: "Off · tracks play back to back"
+        case .custom: specSummary(current.spec)
         }
     }
 
@@ -113,11 +143,10 @@ struct TransitionEditorView: View {
         spec.incomingStartMs > 0 ? "Starts at \(formatDuration(Int64(spec.incomingStartMs)))" : nil
     }
 
-    @ViewBuilder
     private func sections(_ current: EditorDraft) -> some View {
         let shown = current.shown
         let base = current.editBase
-        VStack(spacing: 0) {
+        return StudioPanel {
             Menu {
                 ForEach(VolumeShape.allCases, id: \.self) { shape in
                     Button { draft?.edit { TransitionEditing.setVolumeShape($0, shape) } } label: {
@@ -132,6 +161,7 @@ struct TransitionEditorView: View {
                 SectionRow(title: "Volume", color: AutomationColors.volume,
                            value: shown.map { VolumeShape.of($0)?.label ?? "Custom curve" } ?? "None")
             }
+            .menuStyle(.button).buttonStyle(.plain)
             Divider()
             Menu {
                 ForEach(EqMove.allCases, id: \.self) { move in
@@ -143,6 +173,7 @@ struct TransitionEditorView: View {
                 SectionRow(title: "EQ", color: AutomationColors.eq,
                            value: shown.map { EqMove.of($0)?.label ?? "Bass swap at \(percent($0.bassSwapAt)) %" } ?? "None")
             }
+            .menuStyle(.button).buttonStyle(.plain)
             if base.bassSwap && shown != nil {
                 BassSwapSlider(value: base.bassSwapAt,
                                begin: { draft?.beginDrag() },
@@ -159,9 +190,8 @@ struct TransitionEditorView: View {
             } label: {
                 SectionRow(title: "Filter", color: AutomationColors.filter, value: shown?.filter.label ?? "None")
             }
+            .menuStyle(.button).buttonStyle(.plain)
         }
-        .padding(.horizontal, Spacing.md)
-        .background(palette.surfaceVariant.opacity(0.45), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     @ViewBuilder
@@ -259,28 +289,27 @@ private struct DurationBlock: View {
                 Text("Shortened to \(TransitionSpec.durationLabel(max(effective, 0))) for these tracks")
                     .font(.caption).foregroundStyle(palette.onSurfaceVariant)
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Spacing.sm) {
-                    ForEach(TransitionSpec.durationPresetsMs, id: \.self) { ms in
-                        let selected = spec != nil && requested == ms
-                        Button { choose(ms) } label: {
-                            Text(TransitionSpec.durationLabel(ms))
-                                .font(.footnote.weight(.semibold))
-                                .padding(.horizontal, Spacing.md)
-                                .padding(.vertical, 6)
-                                .foregroundStyle(selected ? palette.onPrimary : palette.onSurface)
-                                .background(selected ? palette.primary : palette.surfaceVariant, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: Spacing.sm), count: 3), spacing: Spacing.sm) {
+                ForEach(TransitionSpec.durationPresetsMs, id: \.self) { ms in
+                    let selected = spec != nil && requested == ms
+                    Button { choose(ms) } label: {
+                        Text(TransitionSpec.durationLabel(ms))
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                            .foregroundStyle(selected ? palette.primary : palette.onSurface)
+                            .background(selected ? palette.primary.opacity(0.16) : palette.onSurface.opacity(0.05),
+                                        in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                     }
+                    .buttonStyle(.plain)
                 }
             }
-            Slider(value: Binding(get: { Double(base.durationMs) }, set: { drag(Int($0)) }),
+            Slider(value: Binding(get: { Double(requested) }, set: { drag(Int($0)) }),
                    in: Double(TransitionSpec.minDurationMs)...Double(TransitionSpec.maxDurationMs),
                    step: Double(TransitionSpec.durationStepMs)) { editing in
                 if editing { beginDrag() }
             }
             .accessibilityLabel("Duration")
+            .tint(palette.primary)
             Text("Choose how long the tracks overlap. A transition never takes more than half of either track.")
                 .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
         }
@@ -297,28 +326,26 @@ private struct PresetCards: View {
         let selected = current.selectedCard
         VStack(alignment: .leading, spacing: Spacing.sm) {
             Text("Presets").font(.subheadline.weight(.semibold)).foregroundStyle(palette.onSurfaceVariant)
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Spacing.sm) {
-                    ForEach(cards) { card in
-                        let choice = card.choice
-                        let label = card.label
-                        let isSelected = choice == selected
-                        Button {
-                            // Custom is where edits land; tapping it again changes nothing.
-                            if choice != .preset(.custom) { onChoose(choice) }
-                        } label: {
-                            HStack(spacing: Spacing.xs) {
-                                if choice == .auto { Image(systemName: "sparkles").font(.footnote) }
-                                Text(label).font(.subheadline.weight(.semibold)).lineLimit(1)
-                            }
-                            .frame(width: 104, height: 52)
-                            .foregroundStyle(isSelected ? palette.onPrimary : palette.onSurface)
-                            .background(isSelected ? palette.primary : palette.surfaceVariant,
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: Spacing.sm)], spacing: Spacing.sm) {
+                ForEach(cards) { card in
+                    let isSelected = card.choice == selected
+                    Button {
+                        if card.choice != .preset(.custom) { onChoose(card.choice) }
+                    } label: {
+                        HStack(spacing: Spacing.xs) {
+                            if card.choice == .auto { Image(systemName: "sparkles").font(.footnote) }
+                            Text(card.label).font(.subheadline.weight(.semibold)).lineLimit(2).minimumScaleFactor(0.85)
                         }
-                        .buttonStyle(PressScaleStyle())
-                        .accessibilityAddTraits(isSelected ? .isSelected : [])
+                        .padding(.horizontal, Spacing.sm)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(isSelected ? palette.primary : palette.onSurface)
+                        .background(isSelected ? palette.primary.opacity(0.16) : palette.onSurface.opacity(0.05),
+                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(isSelected ? palette.primary.opacity(0.6) : palette.outline.opacity(0.2), lineWidth: 1))
                     }
+                    .buttonStyle(PressScaleStyle())
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
         }
@@ -369,7 +396,12 @@ private struct TransitionLanes: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            laneTitle("Volume", AutomationColors.volume)
+            HStack {
+                laneTitle("Volume", AutomationColors.volume)
+                Spacer()
+                legend("Out", dashed: false)
+                legend("In", dashed: true)
+            }
             volumeLane
             if let selected, isRemovable(selected) {
                 Button(role: .destructive) {
@@ -431,17 +463,10 @@ private struct TransitionLanes: View {
                 }
             }
             .contentShape(Rectangle())
-            .gesture(volumeGesture(size))
+            .overlay { volumeInteraction(size) }
         }
         .frame(height: Self.volumeHeight)
         .background(palette.surfaceVariant.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))
-        .overlay(alignment: .topLeading) {
-            HStack(spacing: Spacing.sm) {
-                legend("Out", dashed: false)
-                legend("In", dashed: true)
-            }
-            .padding(6)
-        }
         .accessibilityElement()
         .accessibilityLabel("Volume curves")
         .accessibilityValue(VolumeShape.of(spec)?.label ?? "Custom curve")
@@ -494,38 +519,28 @@ private struct TransitionLanes: View {
         return best.map { ($0.role, $0.index) }
     }
 
-    private func volumeGesture(_ size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { gesture in
-                if dragging == nil, let hit = nearest(gesture.startLocation, size) {
-                    dragging = (hit.role, hit.index, false)
-                }
-                guard let current = dragging else { return }
-                let moved = hypot(gesture.translation.width, gesture.translation.height) > 4
-                guard moved else { return }
-                if !current.began {
-                    beginDrag()
-                    dragging = (current.role, current.index, true)
-                    selected = nil
-                }
-                let target = value(gesture.location, size)
-                drag { TransitionEditing.movePoint($0, current.role, index: current.index, t: target.t, gain: target.gain) }
-            }
-            .onEnded { gesture in
-                defer { dragging = nil }
-                if let current = dragging {
-                    if !current.began { selected = (current.role, current.index) }
-                    return
-                }
-                guard hypot(gesture.translation.width, gesture.translation.height) <= 4 else { return }
-                // A tap away from the points adds one to the curve nearest the tap.
-                let tap = value(gesture.location, size)
-                let outGap = abs(TransitionEditing.curveOf(spec, .outgoing).gainAt(tap.t) - tap.gain)
-                let inGap = abs(TransitionEditing.curveOf(spec, .incoming).gainAt(tap.t) - tap.gain)
-                let role: TransitionRole = outGap <= inGap ? .outgoing : .incoming
+    private func volumeInteraction(_ size: CGSize) -> some View {
+        PanInteraction(canBegin: { start, _ in nearest(start, size) != nil }, change: { gesture in
+            if dragging == nil, let hit = nearest(gesture.startLocation, size) {
+                beginDrag()
+                dragging = (hit.role, hit.index, true)
                 selected = nil
-                edit { TransitionEditing.addPoint($0, role, t: tap.t) }
             }
+            guard let current = dragging else { return }
+            let target = value(gesture.location, size)
+            drag { TransitionEditing.movePoint($0, current.role, index: current.index, t: target.t, gain: target.gain) }
+        }, end: { _ in dragging = nil }, cancel: { dragging = nil }, tap: { location in
+            if let hit = nearest(location, size) {
+                selected = hit
+                return
+            }
+            let point = value(location, size)
+            let outGap = abs(TransitionEditing.curveOf(spec, .outgoing).gainAt(point.t) - point.gain)
+            let inGap = abs(TransitionEditing.curveOf(spec, .incoming).gainAt(point.t) - point.gain)
+            let role: TransitionRole = outGap <= inGap ? .outgoing : .incoming
+            selected = nil
+            edit { TransitionEditing.addPoint($0, role, t: point.t) }
+        })
     }
 
     private var eqLane: some View {
@@ -553,19 +568,19 @@ private struct TransitionLanes: View {
             }
             .frame(width: width, height: Self.laneHeight)
             .contentShape(Rectangle())
-            .gesture(
-                DragGesture(minimumDistance: 2)
-                    .onChanged { gesture in
-                        guard spec.bassSwap else { return }
-                        if !swapDragging {
-                            beginDrag()
-                            swapDragging = true
-                        }
-                        let at = Float((gesture.location.x - box.minX) / max(box.width, 1))
-                        drag { TransitionEditing.setBassSwapAt($0, at) }
-                    }
-                    .onEnded { _ in swapDragging = false }
-            )
+            .overlay {
+                PanInteraction(canBegin: { _, translation in spec.bassSwap && HorizontalGestureIntent.accepts(translation) },
+                               change: { gesture in
+                    guard spec.bassSwap else { return }
+                    if !swapDragging { beginDrag(); swapDragging = true }
+                    let at = Float((gesture.location.x - box.minX) / max(box.width, 1))
+                    drag { TransitionEditing.setBassSwapAt($0, at) }
+                }, end: { _ in swapDragging = false }, cancel: { swapDragging = false }, tap: { location in
+                    guard spec.bassSwap else { return }
+                    let at = Float((location.x - box.minX) / max(box.width, 1))
+                    edit { TransitionEditing.setBassSwapAt($0, at) }
+                })
+            }
         }
         .frame(height: Self.laneHeight)
         .background(palette.surfaceVariant.opacity(0.35), in: RoundedRectangle(cornerRadius: 10))

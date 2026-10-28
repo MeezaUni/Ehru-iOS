@@ -29,42 +29,49 @@ final class LibraryActions {
     func show(_ text: String) { message = text }
 
     /// [slots]: each song's playlist position, when [origin] is a playlist (a song may be in it twice).
-    func play(_ songs: [Song], startIndex: Int, origin: CollectionRef? = nil, slots: [Int]? = nil) {
+    func play(_ songs: [Song], startIndex: Int, origin: CollectionRef? = nil, slots: [Int]? = nil, source: PlaybackSource? = nil) {
         if songs.isEmpty { return }
-        player.playCollection(songs, startIndex: min(max(startIndex, 0), songs.count - 1), origin: origin, slots: slots)
+        player.playCollection(songs, startIndex: min(max(startIndex, 0), songs.count - 1), origin: origin, slots: slots, source: source)
     }
 
-    func playInOrder(_ songs: [Song], origin: CollectionRef? = nil, slots: [Int]? = nil) {
+    func playInOrder(_ songs: [Song], origin: CollectionRef? = nil, slots: [Int]? = nil, source: PlaybackSource? = nil) {
         if songs.isEmpty { return }
         player.setShuffleModeEnabled(false)
-        player.playCollection(songs, startIndex: 0, origin: origin, slots: slots)
+        player.playCollection(songs, startIndex: 0, origin: origin, slots: slots, source: source)
     }
 
     /// Plays [songs] shuffled: the same shuffle mode the playlists use.
-    func playShuffled(_ songs: [Song], origin: CollectionRef? = nil, slots: [Int]? = nil) {
+    func playShuffled(_ songs: [Song], origin: CollectionRef? = nil, slots: [Int]? = nil, source: PlaybackSource? = nil) {
         if songs.isEmpty { return }
         player.setShuffleModeEnabled(true)
-        player.playCollection(songs, startIndex: Int.random(in: 0..<songs.count), origin: origin, slots: slots)
+        player.playCollection(songs, startIndex: Int.random(in: 0..<songs.count), origin: origin, slots: slots, source: source)
     }
 
     /// Plays the smart mix [key] in mix order, as its page's Play button does.
     func playMix(_ key: String) {
         guard let mix = mixes.mix(key) else { return }
-        playInOrder(songs(mix.songIds))
+        playInOrder(songs(mix.songIds), source: .smartPlaylist(key))
     }
 
-    func playNext(_ song: Song) {
-        player.playNext(song)
+    func playNext(_ song: Song, source: PlaybackSource? = nil) {
+        player.playNext(song, source: source)
         show("\"\(song.title)\" will play next")
     }
 
-    func addToQueue(_ song: Song) {
-        player.addToQueue(song)
+    func addToQueue(_ song: Song, source: PlaybackSource? = nil) {
+        player.addToQueue(song, source: source)
         show("Added \"\(song.title)\" to queue")
     }
 
     func toggleFavorite(_ song: Song) {
         do { try database.toggleFavorite(songId: song.id) } catch { show("Couldn't change the favourite: \(error.localizedDescription)") }
+    }
+
+    func like(_ song: Song) {
+        do {
+            try database.setFavorite(songId: song.id, true)
+            show("Added \"\(song.title)\" to Liked Songs")
+        } catch { show("Couldn't like the song: \(error.localizedDescription)") }
     }
 
     /// The library songs with [ids], in that order (missing ones left out).

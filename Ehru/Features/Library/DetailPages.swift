@@ -127,7 +127,8 @@ struct ArtistDetailView: View {
                     CollectionHeader(title: artist.name, subtitle: nil,
                                      facts: "\(countLabel(artist.songCount, "song")) · \(countLabel(artist.albumCount, "album"))",
                                      coverShape: AnyShape(Circle()), canPlay: !all.isEmpty,
-                                     onPlay: { actions.playInOrder(all) }, onShuffle: { actions.playShuffled(all) }) {
+                                     onPlay: { actions.playInOrder(all, source: .artist(artistId)) },
+                                     onShuffle: { actions.playShuffled(all, source: .artist(artistId)) }) {
                         ArtistArtworkView(artist: artist, fontSize: 96)
                     }
                     albumRow("Albums", albums.filter { $0.songCount >= 7 })
@@ -192,7 +193,7 @@ struct ArtistDetailView: View {
     private func songSection(_ title: String, _ songs: [Song], numbers: Bool = false) -> some View {
         if !songs.isEmpty {
             SectionHeading(title: title)
-            SongList(songs: songs, showTrackNumbers: numbers)
+            SongList(songs: songs, showTrackNumbers: numbers, source: .artist(artistId))
         }
     }
 }
@@ -286,7 +287,7 @@ struct PlaylistDetailView: View {
     }
 
     private func playlistSongActions() -> SongActions {
-        var songActions = router.songActions(actions)
+        var songActions = router.songActions(actions, source: .playlist(playlistId))
         songActions.removeFromPlaylist = { remove($0) }
         return songActions
     }
@@ -308,22 +309,25 @@ struct SmartPlaylistDetailView: View {
         let kind = MixKind.fromKey(mixKey)
         let mix = mixes.mix(mixKey)
         let songs = mix.map { actions.songs($0.songIds) } ?? []
-        let songActions = router.songActions(actions) { song in
+        let songActions = router.songActions(actions, hideFromMixes: { song in
             mixes.setHidden(song.id, true)
             actions.show("\"\(song.title)\" won't be suggested in Smart Playlists")
-        }
+        }, source: .smartPlaylist(mixKey))
         ScrollView {
             LazyVStack(spacing: 0) {
                 CollectionHeader(title: mix?.title ?? kind?.title ?? "Smart Playlist", subtitle: nil, facts: collectionFacts(songs: songs),
                                  note: mix?.description, canPlay: !songs.isEmpty,
-                                 onPlay: { actions.playInOrder(songs) }, onShuffle: { actions.playShuffled(songs) }) {
+                                 onPlay: { actions.playInOrder(songs, source: .smartPlaylist(mixKey)) },
+                                 onShuffle: { actions.playShuffled(songs, source: .smartPlaylist(mixKey)) }) {
                     if let kind { MixArtworkView(kind: kind) } else { Color.clear }
                 }
                 if mixes.mixes != nil && songs.isEmpty {
                     EmptyState(message: "This mix isn't available right now. It comes back as your listening and library grow.")
                 }
                 ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
-                    TrackRow(song: song, isCurrent: false, actions: songActions) { actions.play(songs, startIndex: index) }
+                    TrackRow(song: song, isCurrent: false, actions: songActions) {
+                        actions.play(songs, startIndex: index, source: .smartPlaylist(mixKey))
+                    }
                 }
             }
         }

@@ -47,7 +47,7 @@ struct LibraryOverviewView: View {
                 section(LibraryShelf.favorites.label, empty: library.favorites.isEmpty,
                         message: "No favorites yet. Tap the heart on any song to add it here.", more: { router.open(.shelf(.favorites)) }) {
                     ForEach(Array(library.favorites.prefix(Self.previewLimit).enumerated()), id: \.element.id) { index, song in
-                        SongTile(song: song) { actions.play(library.favorites, startIndex: index) }.frame(width: 136)
+                        SongTile(song: song) { actions.play(library.favorites, startIndex: index, source: .favorites) }.frame(width: 136)
                     }
                 }
                 section(LibraryShelf.artists.label, empty: library.artists.isEmpty,
@@ -105,7 +105,7 @@ struct LibraryShelfView: View {
                 .padding(.vertical, Spacing.sm)
             case .favorites:
                 SongList(songs: library.favorites, emptyMessage: "No favorites yet. Tap the heart on any song to add it here.",
-                         emptyIcon: "heart")
+                         emptyIcon: "heart", source: .favorites)
             case .artists:
                 LazyVGrid(columns: gridColumns, spacing: Spacing.xl) {
                     ForEach(library.artists) { artist in
@@ -140,12 +140,13 @@ struct SongList: View {
     var emptyIcon = "music.note"
     var origin: CollectionRef?
     var showTrackNumbers = false
+    var source: PlaybackSource?
     @Environment(LibraryActions.self) private var actions
     @Environment(PlayerController.self) private var player
     @Environment(AppRouter.self) private var router
 
     var body: some View {
-        let songActions = router.songActions(actions)
+        let songActions = router.songActions(actions, source: source ?? origin.map { PlaybackSource($0) })
         let currentId = player.state.currentSong?.id
         LazyVStack(spacing: 0) {
             if songs.isEmpty {
@@ -153,7 +154,7 @@ struct SongList: View {
             }
             ForEach(Array(songs.enumerated()), id: \.element.id) { index, song in
                 TrackRow(song: song, isCurrent: song.id == currentId, showTrackNumber: showTrackNumbers, actions: songActions) {
-                    actions.play(songs, startIndex: index, origin: origin)
+                    actions.play(songs, startIndex: index, origin: origin, source: source)
                 }
             }
         }
