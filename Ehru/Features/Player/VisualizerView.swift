@@ -8,8 +8,11 @@ struct VisualizerView: View {
     @Environment(AppSettings.self) private var settings
     @Environment(\.palette) private var palette
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.visualWorkBudget) private var budget
     @State private var engine: VisualizerEngine?
     @State private var status: VisualizerStatus = .waiting
+    @State private var holdsTap = false
 
     var body: some View {
         let song = player.state.currentSong
@@ -39,7 +42,8 @@ struct VisualizerView: View {
                     }
                 }
                 if let engine {
-                    TimelineView(.animation(minimumInterval: options.reduceMotion ? 1.0 / 20 : 1.0 / 60)) { context in
+                    TimelineView(.animation(minimumInterval: options.reduceMotion ? 1.0 / 20 : budget.visualizerInterval,
+                                            paused: scenePhase != .active)) { context in
                         Canvas { canvas, size in
                             engine.update(now: context.date.timeIntervalSince1970, isPlaying: player.state.isPlaying)
                             draw(engine, mode: options.mode, in: &canvas, size: size)
@@ -82,14 +86,22 @@ struct VisualizerView: View {
             made.apply(settings.visualizer)
             made.outputLatency = player.engine.outputLatency
             engine = made
-            player.engine.tap.acquire()
+            setTapActive(scenePhase == .active)
         }
         .onDisappear {
-            player.engine.tap.release()
+            setTapActive(false)
             engine?.reset()
             engine = nil
         }
         .onChange(of: settings.visualizer) { _, new in engine?.apply(new) }
+        .onChange(of: scenePhase) { _, phase in setTapActive(phase == .active && engine != nil) }
+    }
+
+    private func setTapActive(_ active: Bool) {
+        guard active != holdsTap else { return }
+        holdsTap = active
+        if active { player.engine.tap.acquire() }
+        else { player.engine.tap.release() }
     }
 
     private func optionsMenu(_ options: VisualizerSettings) -> some View {

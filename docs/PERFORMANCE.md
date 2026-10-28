@@ -35,3 +35,28 @@ thermal state. Check these scenarios separately:
 
 The regression suite exercises pause/resume with a real AVAudioEngine, cover replacement at an
 unchanged URL, and database notification filtering. It does not replace these device checks.
+
+## Scrolling and animation work
+
+The floating controls follow consumed vertical scrolling over 120 points, then settle into one
+row (current section, mini player, Search). The small chrome view owns the changing fraction;
+library pages do not read it. Their bottom inset stays fixed so collapsing the controls cannot
+change the scroll position and feed another collapse/expand cycle. Section changes, navigation
+and Search expand the controls again. Horizontal shelves do not drive the vertical chrome.
+The section capsule previews a drag locally and selects a section only on release.
+
+Synced lyrics use lazy rows and stop their refresh timeline while paused, backgrounded, hidden,
+or during player movement. Line-only lyrics update at 4 Hz; word-timed lyrics use 10 Hz when the
+device's energy budget allows. Motion covers release their decoder when scrolled out of view,
+backgrounded, in Low Power Mode, or at serious/critical thermal state. Pause/resume retains the
+visible decoder so it does not repeatedly reopen the file. The visualizer releases its audio-tap
+reader in the background and reduces its frame rate under power/thermal restrictions. Its tap
+uses a non-blocking lock on the audio callback; a diagnostic sample may be skipped under contention.
+Decorative still-cover animation also stops when backgrounded or power/thermal restricted.
+These changes preserve audio processing and the higher-resolution downloaded clips.
+
+Phone checks: scroll Home, Albums, Library and a long album in both directions; test the top/bottom
+rubber band, horizontal shelves, tab taps and drags, opening Search, expanding the compact section
+button, and opening the player from either layout. Check VoiceOver and Reduce Motion. For energy,
+compare ten minutes of library scrolling and ten minutes of Now Playing with lyrics, using the
+same animated cover on both builds. Unit/simulator checks cannot establish device heat reduction.

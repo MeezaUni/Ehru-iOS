@@ -49,7 +49,9 @@ final class AudioTap: @unchecked Sendable {
         let frames = Int(buffer.frameLength)
         let count = Int(buffer.format.channelCount)
         let rate = Int(buffer.format.sampleRate)
-        state.withLock { s in
+        // A diagnostic reader must never block the audio callback. Skipping a visualizer buffer
+        // under contention is preferable to stalling playback; music samples are untouched.
+        _ = state.withLockIfAvailable { s in
             s.sampleRate = rate
             let first = s.writtenFrames
             if s.users > 0 {

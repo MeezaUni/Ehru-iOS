@@ -302,14 +302,21 @@ private struct SyncedLyricsView: View {
     @Environment(PlayerController.self) private var player
     @Environment(\.palette) private var palette
     @Environment(\.lyricsCompact) private var compact
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.playerInMotion) private var playerInMotion
+    @Environment(\.visualWorkBudget) private var budget
+    @State private var visible = false
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.1)) { _ in
+        let wordTimed = lines.contains { !($0.words?.isEmpty ?? true) }
+        let interval = wordTimed && budget.allowsDecorativeMotion ? 0.1 : 0.25
+        TimelineView(.animation(minimumInterval: interval,
+                                paused: !player.state.isPlaying || !visible || scenePhase != .active || playerInMotion)) { _ in
             let position = player.currentPositionMs()
             let currentLine = lyrics.lineAt(position)
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(alignment: .leading, spacing: compact ? Spacing.md : Spacing.lg) {
+                    LazyVStack(alignment: .leading, spacing: compact ? Spacing.md : Spacing.lg) {
                         ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
                             Button { player.seek(to: line.timeMs) } label: {
                                 lineText(line, index: index, current: currentLine, position: position)
@@ -329,6 +336,9 @@ private struct SyncedLyricsView: View {
                 .onAppear { proxy.scrollTo(max(currentLine, 0), anchor: anchor) }
             }
         }
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .reportsScrollVisibility { visible = $0 }
     }
 
     /// In the card the current line sits nearer the top, leaving most of it for what comes next.

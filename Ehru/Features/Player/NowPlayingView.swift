@@ -523,12 +523,15 @@ struct MovingArtwork: ViewModifier {
     @Environment(AppSettings.self) private var settings
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.playerInMotion) private var playerInMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.visualWorkBudget) private var budget
     /// One full drift cycle.
     private static let period: Double = 24
 
     func body(content: Content) -> some View {
         if settings.movingArtwork && !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !isPlaying || playerInMotion)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 30,
+                                    paused: !isPlaying || playerInMotion || scenePhase != .active || !budget.allowsDecorativeMotion)) { context in
                 let phase = context.date.timeIntervalSinceReferenceDate / Self.period * 2 * .pi
                 GeometryReader { geometry in
                     let travel = geometry.size.width * 0.03

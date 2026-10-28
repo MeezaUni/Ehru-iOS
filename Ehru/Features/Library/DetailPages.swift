@@ -82,6 +82,7 @@ struct AlbumDetailView: View {
                 EmptyState(message: "This album is no longer in your library.", systemImage: "square.stack")
             }
         }
+        .tracksLibraryScrolling()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu {
@@ -143,6 +144,7 @@ struct ArtistDetailView: View {
                 EmptyState(message: "This artist is no longer in your library.", systemImage: "person")
             }
         }
+        .tracksLibraryScrolling()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu {
@@ -235,6 +237,7 @@ struct PlaylistDetailView: View {
                 EmptyState(message: "This playlist no longer exists.", systemImage: "music.note.list")
             }
         }
+        .tracksLibraryScrolling()
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu {
@@ -324,6 +327,7 @@ struct SmartPlaylistDetailView: View {
                 }
             }
         }
+        .tracksLibraryScrolling()
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { mixes.start() }
         .id(library.songs.count)

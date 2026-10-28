@@ -21,17 +21,18 @@ struct MotionCoverView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motionCoverVisible) private var sectionVisible
     @Environment(\.playerInMotion) private var playerInMotion
+    @Environment(\.visualWorkBudget) private var budget
     @State private var visible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
 
     var body: some View {
         let url = song.flatMap { store.url(for: $0) }
         ZStack {
             SongArtworkView(song: song, maxPixels: maxPixels)
                 .modifier(MovingArtwork(isPlaying: animateStill && playing && url == nil))
-            if playing, visible, sectionVisible, scenePhase == .active, !reduceMotion, !lowPower, let url {
-                LoopingMotionVideo(url: url, isPlaying: !playerInMotion)
+            if visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url {
+                // Pause the existing decoder instead of destroying/recreating it on every pause.
+                LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion)
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -39,9 +40,7 @@ struct MotionCoverView: View {
         .clipped()
         .onAppear { visible = true }
         .onDisappear { visible = false }
-        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in
-            lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled
-        }
+        .reportsScrollVisibility { visible = $0 }
     }
 }
 

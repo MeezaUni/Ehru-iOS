@@ -16,8 +16,9 @@ that target, it uses the smallest available resolution. The downloader limits sa
 fragment decode times are rebased to zero, preserving video bytes and relative timing.
 
 The current Now Playing card and the visible album header loop muted video. The library grid and
-carousel neighbours remain still. Video releases its player when the view is hidden, music is
-paused (Now Playing), the app backgrounds, Low Power Mode activates, or Reduce Motion is enabled.
+carousel neighbours remain still. Video pauses its existing player when music is paused (Now
+Playing). It releases its player when scrolled out of view, the view is hidden, the app backgrounds,
+Low Power Mode activates, the device reaches serious/critical thermal state, or Reduce Motion is enabled.
 The existing cover remains underneath until the first video frame is ready, and remains visible
 if video playback fails.
 

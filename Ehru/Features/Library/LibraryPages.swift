@@ -21,6 +21,7 @@ struct AlbumsView: View {
                 .padding(.vertical, Spacing.sm)
             }
         }
+        .tracksLibraryScrolling()
         .refreshable { library.scan() }
     }
 }
@@ -64,6 +65,7 @@ struct LibraryOverviewView: View {
             }
             .padding(.vertical, Spacing.sm)
         }
+        .tracksLibraryScrolling()
         .refreshable { library.scan() }
     }
 
@@ -114,6 +116,7 @@ struct LibraryShelfView: View {
                 .padding(.vertical, Spacing.sm)
             }
         }
+        .tracksLibraryScrolling()
         .navigationTitle(shelf.label)
     }
 }
@@ -124,6 +127,7 @@ struct AllSongsView: View {
 
     var body: some View {
         ScrollView { SongList(songs: library.songs, emptyMessage: "No songs found.", emptyIcon: "music.note") }
+            .tracksLibraryScrolling()
             .navigationTitle("Songs")
             .refreshable { library.scan() }
     }

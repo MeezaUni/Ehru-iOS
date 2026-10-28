@@ -41,6 +41,7 @@ struct HomeView: View {
             }
             .padding(.bottom, Spacing.lg)
         }
+        .tracksLibraryScrolling()
         .refreshable { library.scan() }
         .onAppear { mixes.start() }
     }

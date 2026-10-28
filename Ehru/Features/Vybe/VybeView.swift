@@ -38,6 +38,7 @@ struct VybeView: View {
             .padding(.horizontal, Spacing.gutter)
             .padding(.vertical, Spacing.sm)
         }
+        .tracksLibraryScrolling()
         .scrollDismissesKeyboard(.interactively)
         .onAppear { vybe.start() }
     }

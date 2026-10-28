@@ -9,11 +9,12 @@ struct RootView: View {
     @Environment(PlayerController.self) private var player
     @Environment(LibraryActions.self) private var actions
     @Environment(AppRouter.self) private var router
-    @Environment(AppSettings.self) private var settings
     @Environment(SoundStore.self) private var sound
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.palette) private var palette
     @State private var showsImporter = false
+    @State private var chrome = LibraryChromeState()
+    @State private var visualBudget = VisualWorkBudget.current
     /// While a finger moves the side menu: how far it has pulled (positive opening, negative closing).
     @State private var drawerDrag: CGFloat?
     private static let drawerWidth: CGFloat = 300
@@ -25,13 +26,13 @@ struct RootView: View {
             palette.background.ignoresSafeArea()
             ForEach(LibrarySection.allCases) { section in
                 sectionStack(section)
-                    .environment(\.motionCoverVisible, router.section == section)
+                    .environment(\.motionCoverVisible, router.section == section && !router.showsNowPlaying)
                     .opacity(router.section == section ? 1 : 0)
                     .allowsHitTesting(router.section == section)
                     .accessibilityHidden(router.section != section)
             }
             if router.paths[router.section]?.isEmpty ?? true { drawerEdge }
-            bottomChrome.zIndex(2)
+            LibraryBottomChrome(chrome: chrome).zIndex(2)
             if let message = actions.message, !router.showsNowPlaying {
                 Toast(text: message)
                     .padding(.bottom, player.state.currentSong == nil ? 96 : 160)
@@ -61,6 +62,13 @@ struct RootView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
         .animation(.smooth(duration: 0.32), value: router.showsNowPlaying)
         .animation(.easeInOut(duration: 0.2), value: actions.message)
+        .environment(chrome)
+        .environment(\.visualWorkBudget, visualBudget)
+        .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in visualBudget = .current }
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in visualBudget = .current }
+        .onChange(of: router.section) { _, _ in chrome.expand() }
+        .onChange(of: router.showsSearch) { _, _ in chrome.expand() }
+        .onChange(of: router.paths[router.section]?.count) { _, _ in chrome.expand() }
         .sheet(isPresented: $router.showsSearch) { SearchView() }
         .routerSheets(active: !router.showsNowPlaying)
         .alert("New playlist", isPresented: $router.showsNewPlaylist) { NewPlaylistAlert() }
@@ -130,47 +138,6 @@ struct RootView: View {
     }
 
     private var chromeHeight: CGFloat { player.state.currentSong == nil ? 72 : 136 }
-
-    private var bottomChrome: some View {
-        VStack(spacing: Spacing.sm) {
-            if let song = player.state.currentSong {
-                MiniPlayer(song: song) { router.showsNowPlaying = true }
-                    .glassSurface(cornerRadius: Radius.large, enabled: settings.glassEnabled)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-            HStack(spacing: Spacing.sm) {
-                HStack(spacing: 0) {
-                    ForEach(LibrarySection.allCases) { section in
-                        Button { router.select(section) } label: {
-                            VStack(spacing: 2) {
-                                Image(systemName: router.section == section ? section.selectedIcon : section.icon).font(.system(size: 19))
-                                Text(section.label).font(.caption2.weight(.medium))
-                            }
-                            .foregroundStyle(router.section == section ? palette.primary : palette.onSurfaceVariant)
-                            .frame(maxWidth: .infinity, minHeight: 52)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(router.section == section ? .isSelected : [])
-                    }
-                }
-                .padding(.horizontal, Spacing.xs)
-                .glassSurface(cornerRadius: 28, enabled: settings.glassEnabled)
-                Button { router.showsSearch = true } label: {
-                    Image(systemName: "magnifyingglass").font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(palette.onSurface)
-                        .frame(width: 56, height: 56)
-                        .glassSurface(cornerRadius: 28, enabled: settings.glassEnabled)
-                        .contentShape(Circle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Search")
-            }
-        }
-        .padding(.horizontal, Spacing.md)
-        .padding(.bottom, Spacing.xs)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: player.state.currentSong == nil)
-    }
 
     /// A swipe in from the left edge opens the side menu (on a section's first page; deeper pages
     /// keep the edge for going back).
