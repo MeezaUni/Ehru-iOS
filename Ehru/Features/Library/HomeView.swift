@@ -43,7 +43,8 @@ struct HomeView: View {
         }
         .tracksLibraryScrolling()
         .refreshable { library.scan() }
-        .onAppear { mixes.start() }
+        .onAppear { if router.section == .home { mixes.start() } }
+        .onChange(of: router.section) { _, section in if section == .home { mixes.start() } }
     }
 
     @ViewBuilder

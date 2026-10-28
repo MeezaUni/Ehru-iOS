@@ -41,6 +41,7 @@ actor VybeEngine {
     private var status: VybeStatus = .loadingModel
     private var timings = VybeTimings()
     private var tasteCache: (key: TasteKey, result: [Int64: Float])?
+    private var tasteModelId: String?
 
     init(database: LibraryDatabase, indexURL: URL = LibraryPaths.supportFolder.appending(path: "vybe/index.bin"),
          makeEmbedder: @escaping @Sendable () throws -> any TextEmbedder = { try SentenceEmbedder() },
@@ -87,11 +88,13 @@ actor VybeEngine {
     }
 
     /// Indexed songs nearest to a listening taste, for the smart mixes: [seeds] (song id -> weight)
-    /// averaged into one point and every other song scored against it. Never loads the model and
-    /// never starts indexing: it reads the index as it stands (nil when there is none yet).
+    /// averaged into one point and every other song scored against it. Never starts indexing.
+    /// A saved index's model identity is checked once; no model is requested without an index.
     func tasteNeighbours(_ seeds: [Int64: Float], limit: Int) -> [Int64: Float]? {
-        let modelId = embedder?.modelId ?? (try? makeEmbedder().modelId)
+        guard FileManager.default.fileExists(atPath: indexURL.path) else { return nil }
+        let modelId = embedder?.modelId ?? tasteModelId ?? (try? makeEmbedder().modelId)
         guard let modelId, let dimension = VybeIndexFile.storedDimension(indexURL, modelId: modelId) else { return nil }
+        tasteModelId = modelId
         let songs = library.isEmpty ? ((try? database.songTags().map(VybeText.fromTags)) ?? []) : library
         let live = Dictionary(songs.map { ($0.songId, Self.documentHash($0)) }, uniquingKeysWith: { a, _ in a })
         let attributes = try? FileManager.default.attributesOfItem(atPath: indexURL.path)
@@ -142,6 +145,7 @@ actor VybeEngine {
         do {
             let model = try makeEmbedder()
             embedder = model
+            tasteModelId = model.modelId
             index = VybeIndexFile(url: indexURL, modelId: model.modelId, dimension: model.dimension)
             timings.modelLoadMs = Int(Date().timeIntervalSince(start) * 1000)
             publish(status, timings)

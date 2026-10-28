@@ -57,6 +57,12 @@ uses a non-blocking lock on the audio callback; a diagnostic sample may be skipp
 Decorative still-cover animation also stops when backgrounded or power/thermal restricted.
 These changes preserve audio processing and the higher-resolution downloaded clips.
 
+Keeping all four tab stacks mounted must not start every tab's work. VYBE first starts its model
+and index when selected, and Home first starts its mix observer when shown. Mix/radio lookups
+return immediately when there is no saved VYBE index; they do not instantiate an embedding model
+just to discover that no vectors exist. A saved index's model identity is cached for later mix
+rebuilds. `VybeStartupTests` checks model-factory calls for both cases.
+
 Phone checks: scroll Home, Albums, Library and a long album in both directions; test the top/bottom
 rubber band, horizontal shelves, tab taps and drags, opening Search, expanding the compact section
 button, and opening the player from either layout. Check VoiceOver and Reduce Motion. For energy,

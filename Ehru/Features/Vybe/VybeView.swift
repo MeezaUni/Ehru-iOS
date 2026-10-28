@@ -4,6 +4,7 @@ import SwiftUI
 struct VybeView: View {
     @Environment(VybeStore.self) private var vybe
     @Environment(PlayerController.self) private var player
+    @Environment(AppRouter.self) private var router
     @Environment(\.palette) private var palette
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -40,7 +41,9 @@ struct VybeView: View {
         }
         .tracksLibraryScrolling()
         .scrollDismissesKeyboard(.interactively)
-        .onAppear { vybe.start() }
+        // All section stacks remain mounted. Appearance alone does not mean this tab is shown.
+        .onAppear { if router.section == .vybe { vybe.start() } }
+        .onChange(of: router.section) { _, section in if section == .vybe { vybe.start() } }
     }
 
     private var field: some View {

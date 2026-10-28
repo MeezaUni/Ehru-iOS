@@ -1,4 +1,5 @@
 import XCTest
+import os
 @testable import Ehru
 
 /// Embeds by keyword: axis 0 "dark", 1 "party", 2 "soul". Enough to check the hybrid logic.
@@ -25,6 +26,35 @@ private struct MapVectors: SongVectors {
     }
 
     func vectorOf(_ songId: Int64) -> [Float]? { map[songId] }
+}
+
+final class VybeStartupTests: XCTestCase {
+    func testSmartMixLookupDoesNotLoadAnEmbeddingModelWithoutASavedIndex() async throws {
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let engine = VybeEngine(database: try LibraryDatabase.inMemory(), indexURL: missing, makeEmbedder: {
+            calls.withLock { $0 += 1 }
+            return KeywordEmbedder()
+        }, publish: { _, _ in })
+        let result = await engine.tasteNeighbours([1: 1], limit: 5)
+        XCTAssertNil(result)
+        XCTAssertEqual(calls.withLock { $0 }, 0)
+    }
+
+    func testSavedIndexIdentityDoesNotRecreateTheModelForEachMixRebuild() async throws {
+        let calls = OSAllocatedUnfairLock(initialState: 0)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let index = VybeIndexFile(url: url, modelId: "keywords", dimension: 3)
+        try index.append([IndexedSong(songId: 1, textHash: 1, vector: [1, 0, 0])])
+        let engine = VybeEngine(database: try LibraryDatabase.inMemory(), indexURL: url, makeEmbedder: {
+            calls.withLock { $0 += 1 }
+            return KeywordEmbedder()
+        }, publish: { _, _ in })
+        _ = await engine.tasteNeighbours([1: 1], limit: 5)
+        _ = await engine.tasteNeighbours([1: 1], limit: 5)
+        XCTAssertEqual(calls.withLock { $0 }, 1)
+    }
 }
 
 final class VybeDiscoveryTests: XCTestCase {
