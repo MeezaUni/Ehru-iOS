@@ -30,7 +30,7 @@ struct MiniPlayer: View {
             .accessibilityHint("Opens Now Playing")
             Button { player.skipPrevious() } label: { Image(systemName: "backward.fill").frame(width: 44, height: 48).contentShape(Rectangle()) }
                 .frame(width: 44 * (1 - compactness)).clipped()
-                .opacity(1 - compactness)
+                .opacity(Double(CGFloat(1) - compactness))
                 .allowsHitTesting(compactness < 0.5)
                 .accessibilityHidden(compactness >= 0.5)
                 .accessibilityLabel("Previous track")
@@ -40,7 +40,7 @@ struct MiniPlayer: View {
             .accessibilityLabel(state.isPlaying ? "Pause" : "Play")
             Button { player.skipNext() } label: { Image(systemName: "forward.fill").frame(width: 44, height: 48).contentShape(Rectangle()) }
                 .frame(width: 44 * (1 - compactness)).clipped()
-                .opacity(1 - compactness)
+                .opacity(Double(CGFloat(1) - compactness))
                 .allowsHitTesting(compactness < 0.5)
                 .accessibilityHidden(compactness >= 0.5)
                 .accessibilityLabel("Next track")

@@ -38,6 +38,7 @@ struct LibraryBottomChrome: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Search")
         }
+        .modifier(ChromeGlassGrouping(enabled: settings.glassEnabled))
         .padding(.horizontal, Spacing.md)
         .padding(.bottom, Spacing.xs)
         .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: song == nil)
@@ -153,7 +154,7 @@ private struct SectionCapsule: View {
                     })
                 .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: router.section)
             }
-            .opacity(max(1 - compactness * 2, 0))
+            .opacity(Double(max(CGFloat(1) - compactness * 2, 0)))
             .allowsHitTesting(compactness < 0.5)
             .accessibilityHidden(compactness >= 0.5)
             Button { chrome.expand(reduceMotion: reduceMotion) } label: {
@@ -164,7 +165,7 @@ private struct SectionCapsule: View {
                     .contentShape(Circle())
             }
             .buttonStyle(.plain)
-            .opacity(max(compactness * 2 - 1, 0))
+            .opacity(Double(max(compactness * 2 - CGFloat(1), 0)))
             .allowsHitTesting(compactness >= 0.5)
             .accessibilityHidden(compactness < 0.5)
             .accessibilityLabel("Expand sections, \(router.section.label)")
@@ -176,6 +177,17 @@ private struct SectionCapsule: View {
     private func select(_ section: LibrarySection) {
         router.select(section)
         chrome.expand(reduceMotion: reduceMotion)
+    }
+}
+
+private struct ChromeGlassGrouping: ViewModifier {
+    let enabled: Bool
+
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), enabled {
+            GlassEffectContainer(spacing: 8) { content }
+        } else { content }
     }
 }
 

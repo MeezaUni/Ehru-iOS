@@ -44,6 +44,8 @@ library pages do not read it. Their bottom inset stays fixed so collapsing the c
 change the scroll position and feed another collapse/expand cycle. Section changes, navigation
 and Search expand the controls again. Horizontal shelves do not drive the vertical chrome.
 The section capsule previews a drag locally and selects a section only on release.
+On iOS 26+, the three glass surfaces share a `GlassEffectContainer` rather than rendering as
+independent glass groups.
 
 Synced lyrics use lazy rows and stop their refresh timeline while paused, backgrounded, hidden,
 or during player movement. Line-only lyrics update at 4 Hz; word-timed lyrics use 10 Hz when the
