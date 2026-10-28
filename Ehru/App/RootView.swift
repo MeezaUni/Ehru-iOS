@@ -12,6 +12,7 @@ struct RootView: View {
     @Environment(SoundStore.self) private var sound
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.palette) private var palette
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsImporter = false
     @State private var chrome = LibraryChromeState()
     @State private var visualBudget = VisualWorkBudget.current
@@ -66,9 +67,9 @@ struct RootView: View {
         .environment(\.visualWorkBudget, visualBudget)
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange)) { _ in visualBudget = .current }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in visualBudget = .current }
-        .onChange(of: router.section) { _, _ in chrome.expand() }
-        .onChange(of: router.showsSearch) { _, _ in chrome.expand() }
-        .onChange(of: router.paths[router.section]?.count) { _, _ in chrome.expand() }
+        .onChange(of: router.section) { _, _ in chrome.expand(reduceMotion: reduceMotion) }
+        .onChange(of: router.showsSearch) { _, _ in chrome.expand(reduceMotion: reduceMotion) }
+        .onChange(of: router.paths[router.section]?.count) { _, _ in chrome.expand(reduceMotion: reduceMotion) }
         .sheet(isPresented: $router.showsSearch) { SearchView() }
         .routerSheets(active: !router.showsNowPlaying)
         .alert("New playlist", isPresented: $router.showsNewPlaylist) { NewPlaylistAlert() }
