@@ -6,10 +6,17 @@ drag previews a position and seeks once on release; cancellation clears the prev
 seeking. A tap still seeks directly. The waveform seek bar uses the same interaction. VoiceOver
 keeps its ten-second adjustable seek action.
 
-Song rows support a deliberate swipe of at least 72 points: right appends the song to the queue;
-left adds it to Liked Songs. Repeating the like action does not unlike the song. Vertical gestures
-and short swipes do neither. Existing play, heart, context-menu and ellipsis actions remain.
-The ellipsis uses a plain 44-point control rather than the system's filled menu-button style.
+Song artwork/title areas support a deliberate swipe of at least 72 points: right appends the song
+to the queue; left toggles Liked Songs, including removing an already-liked song. The swipe reveals
+only a queue or heart icon. Playback taps and swipes share a native recognizer pair: the tap must
+wait for the pan to fail, so releasing a swipe cannot also start playback. Vertical gestures and
+short swipes do neither. The heart, context menu and ellipsis remain separate controls; VoiceOver
+retains playback and named queue/favorite actions. The ellipsis uses a plain 44-point control.
+
+Confirmations say "Added to queue", "Added to Liked Songs" or "Removed from Liked Songs" without
+repeating the song title. They sit just above the current bottom chrome height, moving lower when
+it collapses, and do not intercept touches. Repeated identical confirmations refresh their expiry;
+a cancelled/older expiry task cannot dismiss a newer confirmation.
 
 The centered player header shows its playback source as ordinary text. Tapping it closes the
 player and opens the source. Album/playlist sources come from the collection actually started,

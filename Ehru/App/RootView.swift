@@ -35,12 +35,8 @@ struct RootView: View {
             if router.paths[router.section]?.isEmpty ?? true { drawerEdge }
             LibraryBottomChrome(chrome: chrome).zIndex(2)
             if let message = actions.message, !router.showsNowPlaying {
-                Toast(text: message)
-                    .padding(.bottom, player.state.currentSong == nil ? 96 : 160)
-                    .task(id: message) {
-                        try? await Task.sleep(for: .seconds(2.5))
-                        withAnimation { if actions.message == message { actions.message = nil } }
-                    }
+                LibraryChromeToast(text: message, id: actions.messageID, hasSong: player.state.currentSong != nil)
+                    .zIndex(2)
             }
             drawer.zIndex(3)
         }
@@ -210,6 +206,19 @@ struct RootView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Only this small overlay observes the animated chrome height, not the library screen tree.
+private struct LibraryChromeToast: View {
+    let text: String
+    let id: UUID
+    let hasSong: Bool
+    @Environment(LibraryChromeState.self) private var chrome
+
+    var body: some View {
+        LibraryActionToast(text: text, id: id)
+            .padding(.bottom, LibraryChromeGeometry(width: 0, fraction: chrome.fraction, hasSong: hasSong).height + Spacing.xs + Spacing.md)
     }
 }
 

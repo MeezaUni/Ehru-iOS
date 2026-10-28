@@ -162,8 +162,7 @@ final class AppRouter {
                 AppServices.shared.fixTags.enqueue([song])
                 self?.open(.autoFixTags)
             },
-            hideFromMixes: hideFromMixes,
-            like: { actions.like($0) }
+            hideFromMixes: hideFromMixes
         )
     }
 }

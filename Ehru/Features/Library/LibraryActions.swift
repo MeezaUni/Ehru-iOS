@@ -14,6 +14,7 @@ final class LibraryActions {
     }
 
     var message: String?
+    private(set) var messageID = UUID()
     private(set) var radio: RadioSession?
 
     private let database: LibraryDatabase
@@ -26,7 +27,14 @@ final class LibraryActions {
         self.mixes = mixes
     }
 
-    func show(_ text: String) { message = text }
+    func show(_ text: String) {
+        messageID = UUID()
+        message = text
+    }
+
+    func dismissMessage(id: UUID) {
+        if messageID == id { message = nil }
+    }
 
     /// [slots]: each song's playlist position, when [origin] is a playlist (a song may be in it twice).
     func play(_ songs: [Song], startIndex: Int, origin: CollectionRef? = nil, slots: [Int]? = nil, source: PlaybackSource? = nil) {
@@ -60,18 +68,16 @@ final class LibraryActions {
 
     func addToQueue(_ song: Song, source: PlaybackSource? = nil) {
         player.addToQueue(song, source: source)
-        show("Added \"\(song.title)\" to queue")
+        show("Added to queue")
     }
 
     func toggleFavorite(_ song: Song) {
-        do { try database.toggleFavorite(songId: song.id) } catch { show("Couldn't change the favourite: \(error.localizedDescription)") }
-    }
-
-    func like(_ song: Song) {
         do {
-            try database.setFavorite(songId: song.id, true)
-            show("Added \"\(song.title)\" to Liked Songs")
-        } catch { show("Couldn't like the song: \(error.localizedDescription)") }
+            try database.toggleFavorite(songId: song.id)
+            // Read the database result rather than trusting a potentially older row snapshot.
+            guard let updated = try database.song(id: song.id) else { return }
+            show(updated.isFavorite ? "Added to Liked Songs" : "Removed from Liked Songs")
+        } catch { show("Couldn't change the favourite: \(error.localizedDescription)") }
     }
 
     /// The library songs with [ids], in that order (missing ones left out).

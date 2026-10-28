@@ -14,7 +14,6 @@ struct SongActions {
     var hideFromMixes: ((Song) -> Void)?
     /// Playlist pages only.
     var removeFromPlaylist: ((Song) -> Void)?
-    var like: ((Song) -> Void)?
 }
 
 /// The song actions as menu items (a row's "…" button and its long-press menu).
@@ -59,30 +58,49 @@ struct TrackRow: View {
     let onTap: () -> Void
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @GestureState private var swipe: CGFloat = 0
-    @GestureState private var gestureActive = false
-    @State private var horizontal: Bool?
+    @State private var swipe: CGFloat = 0
 
     var body: some View {
         HStack(spacing: Spacing.md) {
-            Button(action: onTap) {
-                HStack(spacing: Spacing.md) {
-                    leading
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(song.title)
-                            .font(.body.weight(.semibold))
-                            .foregroundStyle(isCurrent ? Color.accentColor : palette.onSurface)
-                            .lineLimit(1)
-                        Text(subtitle ?? [song.artist, song.album].filter { !$0.isBlank }.joined(separator: " · "))
-                            .font(.subheadline)
-                            .foregroundStyle(palette.onSurfaceVariant)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 0)
+            // One native recognizer pair owns playback taps and row swipes. The tap waits
+            // for the horizontal pan to fail, so releasing a swipe cannot play this song.
+            HStack(spacing: Spacing.md) {
+                leading
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(song.title)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(isCurrent ? Color.accentColor : palette.onSurface)
+                        .lineLimit(1)
+                    Text(subtitle ?? [song.artist, song.album].filter { !$0.isBlank }.joined(separator: " · "))
+                        .font(.subheadline)
+                        .foregroundStyle(palette.onSurfaceVariant)
+                        .lineLimit(1)
                 }
-                .contentShape(Rectangle())
+                Spacer(minLength: 0)
             }
-            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+            .overlay {
+                PanInteraction(canBegin: { _, delta in HorizontalGestureIntent.accepts(delta) },
+                               change: { sample in
+                                   var transaction = Transaction()
+                                   transaction.disablesAnimations = true
+                                   withTransaction(transaction) { swipe = sample.translation.width.clamped(-112, 112) }
+                               },
+                               end: { sample in
+                                   resetSwipe()
+                                   switch SongSwipeAction.committed(translation: sample.translation, startedHorizontally: true) {
+                                   case .queue: actions.addToQueue(song)
+                                   case .like: actions.toggleFavorite(song)
+                                   case nil: break
+                                   }
+                               },
+                               cancel: resetSwipe,
+                               tap: { _ in onTap() })
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel([song.title, song.artist].filter { !$0.isBlank }.joined(separator: ", "))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onTap() }
             Button { actions.toggleFavorite(song) } label: {
                 Image(systemName: song.isFavorite ? "heart.fill" : "heart")
                     .foregroundStyle(song.isFavorite ? palette.primary : palette.onSurfaceVariant)
@@ -105,10 +123,10 @@ struct TrackRow: View {
         .offset(x: swipe)
         .background(alignment: swipe >= 0 ? .leading : .trailing) {
             if swipe != 0 {
-                Label(swipe > 0 ? "Queue" : "Like", systemImage: swipe > 0 ? "text.badge.plus" : "heart.fill")
-                    .font(.subheadline.weight(.semibold))
+                Image(systemName: swipe > 0 ? "text.badge.plus" : (song.isFavorite ? "heart.slash" : "heart.fill"))
+                    .font(.title3.weight(.semibold))
                     .foregroundStyle(palette.primary)
-                    .padding(.horizontal, Spacing.xl)
+                    .frame(width: 64)
                     .frame(maxHeight: .infinity)
                     .background(palette.primary.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
                     .opacity(min(Double(abs(swipe) / 60), 1))
@@ -116,34 +134,14 @@ struct TrackRow: View {
                     .clipped()
             }
         }
-        .simultaneousGesture(DragGesture(minimumDistance: 16, coordinateSpace: .global)
-            .updating($gestureActive) { _, active, _ in active = true }
-            .updating($swipe) { value, offset, transaction in
-                guard horizontal ?? HorizontalGestureIntent.accepts(value.translation) else { return }
-                transaction.disablesAnimations = true
-                offset = value.translation.width.clamped(-112, 112)
-            }
-            .onChanged { value in
-                if horizontal == nil { horizontal = HorizontalGestureIntent.accepts(value.translation) }
-            }
-            .onEnded { value in
-                defer { horizontal = nil }
-                switch SongSwipeAction.committed(translation: value.translation, startedHorizontally: horizontal == true) {
-                case .queue: actions.addToQueue(song)
-                case .like:
-                    if let like = actions.like { like(song) }
-                    else if !song.isFavorite { actions.toggleFavorite(song) }
-                case nil: break
-                }
-            })
-        .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: swipe == 0)
-        .onChange(of: gestureActive) { _, active in if !active { horizontal = nil } }
+        .onDisappear { swipe = 0 }
         .accessibilityAction(named: "Add to queue") { actions.addToQueue(song) }
-        .accessibilityAction(named: "Like song") {
-            if let like = actions.like { like(song) }
-            else if !song.isFavorite { actions.toggleFavorite(song) }
-        }
+        .accessibilityAction(named: song.isFavorite ? "Remove from Liked Songs" : "Add to Liked Songs") { actions.toggleFavorite(song) }
         .contextMenu { SongActionItems(song: song, actions: actions) }
+    }
+
+    private func resetSwipe() {
+        withAnimation(reduceMotion ? nil : .smooth(duration: 0.22)) { swipe = 0 }
     }
 
     @ViewBuilder private var leading: some View {
@@ -311,5 +309,22 @@ struct Toast: View {
             .background(Capsule().fill(palette.primary))
             .padding(.horizontal, Spacing.xl)
             .transition(.move(edge: .bottom).combined(with: .opacity))
+            .allowsHitTesting(false)
+    }
+}
+
+/// A new identity extends the display time even when consecutive actions have the same text.
+struct LibraryActionToast: View {
+    let text: String
+    let id: UUID
+    @Environment(LibraryActions.self) private var actions
+
+    var body: some View {
+        Toast(text: text)
+            .task(id: id) {
+                do { try await Task.sleep(for: .seconds(2.5)) }
+                catch { return }
+                withAnimation { actions.dismissMessage(id: id) }
+            }
     }
 }

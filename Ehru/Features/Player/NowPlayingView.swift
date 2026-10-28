@@ -131,12 +131,8 @@ struct NowPlayingView: View {
     @ViewBuilder
     private var toast: some View {
         if let message = actions.message {
-            Toast(text: message)
+            LibraryActionToast(text: message, id: actions.messageID)
                 .padding(.bottom, Spacing.xl)
-                .task(id: message) {
-                    try? await Task.sleep(for: .seconds(2.5))
-                    withAnimation { if actions.message == message { actions.message = nil } }
-                }
         }
     }
 
