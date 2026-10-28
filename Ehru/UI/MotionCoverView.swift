@@ -15,6 +15,7 @@ extension EnvironmentValues {
 struct MotionCoverView: View {
     let song: Song?
     var playing = false
+    var rendersVideo = true
     var maxPixels = 1200
     var animateStill = false
     @Environment(AnimatedArtworkStore.self) private var store
@@ -30,7 +31,7 @@ struct MotionCoverView: View {
         ZStack {
             SongArtworkView(song: song, maxPixels: maxPixels)
                 .modifier(MovingArtwork(isPlaying: animateStill && playing && url == nil))
-            if visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url {
+            if rendersVideo, visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url {
                 // Pause the existing decoder instead of destroying/recreating it on every pause.
                 LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion)
                     .allowsHitTesting(false)

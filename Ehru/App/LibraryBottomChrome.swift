@@ -150,9 +150,10 @@ private struct SectionCapsule: View {
                     .onEnded { value in
                         guard abs(value.translation.width) > abs(value.translation.height) else { return }
                         let index = SectionCapsuleGeometry.index(at: value.location.x, width: geometry.size.width, count: sections.count)
-                        select(sections[index])
+                        if sections[index] != router.section { select(sections[index]) }
                     })
                 .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: router.section)
+                .animation(reduceMotion ? nil : .smooth(duration: 0.24), value: draggedPosition == nil)
             }
             .opacity(Double(max(CGFloat(1) - compactness * 2, 0)))
             .allowsHitTesting(compactness < 0.5)

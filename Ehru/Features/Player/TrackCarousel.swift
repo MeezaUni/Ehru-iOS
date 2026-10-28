@@ -218,7 +218,7 @@ private struct CarouselCard: View {
         let colors = LyricsColors(artworkPalette.palette(for: song.url))
         let shape = RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
         VStack(spacing: 0) {
-            MotionCoverView(song: song, playing: isCurrent && isPlaying, animateStill: true)
+            MotionCoverView(song: song, playing: isCurrent && isPlaying, rendersVideo: isCurrent, animateStill: true)
                 .frame(width: metrics.artSide, height: metrics.artSide)
                 .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
             HStack(spacing: 0) {
