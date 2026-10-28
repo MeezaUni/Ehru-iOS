@@ -29,7 +29,10 @@ struct NowPlayingView: View {
         let state = player.state
         VStack(spacing: 0) {
             header
-            if let song = state.currentSong {
+            if let current = state.currentSong {
+                // Queue snapshots keep playback stable; favorite/tag changes come from the
+                // current library so a swipe-to-like is reflected on the playing card too.
+                let song = library.songs.first(where: { $0.id == current.id }) ?? current
                 GeometryReader { geometry in
                     let viewport = geometry.size.height
                     ScrollView {
