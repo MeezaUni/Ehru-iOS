@@ -43,6 +43,20 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertTrue(scene.items.isEmpty)
     }
 
+    func testRepeatedInterruptedSwipesKeepAtMostSevenNearbyCards() {
+        let entries = (0..<100).map { QueueEntry(song: testSong(Int64($0))) }
+        var scene = CarouselScene()
+        for index in entries.indices {
+            scene.select(CarouselSelection(previous: index > 0 ? entries[index - 1] : nil,
+                                           current: entries[index], next: index + 1 < entries.count ? entries[index + 1] : nil))
+            XCTAssertLessThanOrEqual(scene.items.count, 7)
+            XCTAssertEqual(Set(scene.items.map(\.ordinal)).count, scene.items.count)
+            XCTAssertTrue(scene.items.contains { $0.id == scene.currentKey })
+        }
+        scene.settle()
+        XCTAssertEqual(scene.items.count, 2)
+    }
+
     func testProjectedCardsRemainSeparatedThroughoutBothSwipeDirections() {
         for width in [CGFloat(160), 260, 320, 480] {
             let size = CGSize(width: width, height: width + 100)

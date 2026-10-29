@@ -63,7 +63,9 @@ final class MotionVideoSession {
         outputItem = player.currentItem
         if let item = outputItem {
             // Native decoded pixels; no second player or continuous snapshot polling.
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
+            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
+            ])
             item.add(output)
             self.output = output
         }

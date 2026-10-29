@@ -32,8 +32,12 @@ struct CarouselScene {
         else { center += direction }
         selection = next
         let fresh = targetItems
-        let keys = Set(fresh.map(\.id))
-        items = (items.filter { !keys.contains($0.id) } + fresh).sorted { $0.ordinal < $1.ordinal }
+        // Far pages are already invisible. Keep one occurrence per coordinate and at most
+        // seven nearby pages even if the user interrupts every settlement with another swipe.
+        var nearby: [Int: Item] = [:]
+        for item in items where abs(item.ordinal - center) <= 3 { nearby[item.ordinal] = item }
+        for item in fresh { nearby[item.ordinal] = item }
+        items = nearby.values.sorted { $0.ordinal < $1.ordinal }
         return direction != 0
     }
 

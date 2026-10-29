@@ -40,7 +40,8 @@ Motion, offscreen, low-power and thermal restrictions retain their existing beha
 
 The strip uses stable page ordinals and entry-occurrence keys instead of rebasing by a page on
 a later main-loop turn. Shared cards keep their loaded artwork and identity when the queue moves.
-Departing cards are retained through settlement and then pruned. A compositor meter lets a rapid
+Departing cards are retained through settlement and then pruned, with at most seven nearby
+occurrences even during repeatedly interrupted swipes. A compositor meter lets a rapid
 new touch pick up the visible interpolated position. Generation tokens discard stale completions.
 Side-by-side page spacing keeps projected card surfaces separated; intentional stack mode gathers
 neighbours only at rest. Expanded artwork geometry is not republished on every horizontal frame.
