@@ -16,7 +16,8 @@ final class PlayerDragStateTests: XCTestCase {
         XCTAssertEqual(drag.translation, 0)
         drag.restore()
         XCTAssertEqual(drag.translation, 0)
-        XCTAssertTrue(drag.isMoving)
+        XCTAssertEqual(drag.progress, 1)
+        // Without an attached view, SwiftUI can complete an animation immediately.
         drag.beginDismissal() // Cancel the settling task; motion stays suspended during removal.
         XCTAssertTrue(drag.isMoving)
     }
