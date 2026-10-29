@@ -32,7 +32,8 @@ struct MotionCoverView: View {
         let url = song.flatMap { store.url(for: $0) }
         ZStack {
             SongArtworkView(song: song, maxPixels: maxPixels)
-                .modifier(MovingArtwork(isPlaying: animateStill && playing && !suspended && url == nil))
+                .modifier(MovingArtwork(isPlaying: animateStill && playing && !suspended && url == nil,
+                                        enabled: animateStill && url == nil))
             if rendersVideo, visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url {
                 // Pause the existing decoder instead of destroying/recreating it on every pause.
                 LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion && !suspended,

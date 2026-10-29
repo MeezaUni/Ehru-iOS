@@ -28,7 +28,8 @@ Motion video lives in an ordinary UIKit container with an AVPlayerLayer sublayer
 implicit layer resizing. Gesture start pauses the current decoder and copies its current decoded
 pixel buffer once, converting a bounded image off the main thread. That flat frozen frame follows
 the same cover transform as static artwork, and the video surface fades into the poster used by
-the mini-player. If a decoded buffer is not ready, the paused native frame remains as fallback.
+the mini-player. Animated-video posters bypass the separate still-art drift/zoom, so their final
+crop matches the mini-player exactly. If a decoded buffer is not ready, the paused native frame remains as fallback.
 There is no continuous snapshot polling, second video decode, or screen-sized rendering capture.
 Cancelled motion restores the existing layer; obsolete snapshot callbacks are ignored.
 
