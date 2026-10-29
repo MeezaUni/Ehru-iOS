@@ -191,56 +191,72 @@ struct PairTransitionWorkspace: View {
 
     private func waveform(_ timing: PairTransitionTiming) -> some View {
         GeometryReader { geometry in
-            PairAudioPlot(timing: timing, viewport: viewport(timing), outgoing: outgoing, incoming: incoming,
-                          inspectedMs: inspection(timing), displayGain: displayGain(timing), activeRole: cueSession?.role ?? curveSession?.handle.role,
-                          editingVolume: editingVolume, selectedHandle: selectedHandle)
-                .overlay {
-                    PanInteraction(canBegin: { start, delta in
-                        guard !pinching else { return false }
-                        return editingVolume ? curveLayout(timing, geometry.size).nearest(start, spec: workingSpec) != nil : HorizontalGestureIntent.accepts(delta)
-                    }, change: { gesture in
-                        if editingVolume { updateCurveDrag(gesture, size: geometry.size, timing: timing) }
-                        else { updateCueDrag(gesture, size: geometry.size, timing: timing) }
-                    }, end: { gesture in
-                        if editingVolume { finishCurveDrag(gesture) } else { finishCueDrag(gesture) }
-                    }, cancel: cancelCueDrag, tap: { location in
-                        if editingVolume { selectOrAddPoint(location, size: geometry.size, timing: timing) }
-                        else { inspectedMs = viewport(timing).time(at: Double(location.x / max(geometry.size.width, 1))) }
-                    })
-                }
-                .simultaneousGesture(MagnifyGesture(minimumScaleDelta: 0.02)
-                    .updating($pinching) { _, active, _ in active = true }
-                    .onChanged { value in
-                        cancelCueDrag()
-                        let initial = PairTransitionTiming(spec: spec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs) ?? timing
-                        if pinchViewport == nil { pinchViewport = viewport(initial); pinchZoom = timeZoom }
-                        guard let base = pinchViewport, let zoom = pinchZoom else { return }
-                        let next = (zoom * Double(value.magnification)).clamped(1, 8)
-                        let view = base.zoomed(timing: initial, zoom: next, anchor: Double(value.startAnchor.x))
-                        timeZoom = next
-                        viewFocusMs = view.centerMs
-                    }
-                    .onEnded { _ in pinchViewport = nil; pinchZoom = nil })
-                .overlay {
-                    Button { toggleAudition(timing) } label: {
-                        Group {
-                            if preview.isPreparing { ProgressView().tint(palette.onSurface) }
-                            else { Image(systemName: preview.isPlaying ? "stop.fill" : "play.fill").font(.title3.weight(.semibold)) }
-                        }
-                        .frame(width: 52, height: 44)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.16)))
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil || curveSession != nil)
-                    .accessibilityLabel(preview.isPreparing || preview.isPlaying ? "Stop transition preview" : "Audition this transition")
-                }
+            waveformPlot(timing)
+                .overlay { waveformInteraction(timing, size: geometry.size) }
+                .simultaneousGesture(magnification(timing))
+                .overlay { auditionButton(timing) }
                 .accessibilityAction(named: "Move outgoing cue earlier") { nudge(.outgoing, delta: 100) }
                 .accessibilityAction(named: "Move outgoing cue later") { nudge(.outgoing, delta: -100) }
                 .accessibilityAction(named: "Move incoming cue earlier") { nudge(.incoming, delta: 100) }
                 .accessibilityAction(named: "Move incoming cue later") { nudge(.incoming, delta: -100) }
         }
         .frame(height: 320)
+    }
+
+    private func waveformPlot(_ timing: PairTransitionTiming) -> some View {
+        PairAudioPlot(timing: timing, viewport: viewport(timing), outgoing: outgoing, incoming: incoming,
+                      inspectedMs: inspection(timing), displayGain: displayGain(timing),
+                      activeRole: cueSession?.role ?? curveSession?.handle.role,
+                      editingVolume: editingVolume, selectedHandle: selectedHandle)
+    }
+
+    private func waveformInteraction(_ timing: PairTransitionTiming, size: CGSize) -> some View {
+        PanInteraction(canBegin: { start, delta in
+            guard !pinching else { return false }
+            return editingVolume ? curveLayout(timing, size).nearest(start, spec: workingSpec) != nil : HorizontalGestureIntent.accepts(delta)
+        }, change: { gesture in
+            if editingVolume { updateCurveDrag(gesture, size: size, timing: timing) }
+            else { updateCueDrag(gesture, size: size, timing: timing) }
+        }, end: { gesture in
+            if editingVolume { finishCurveDrag(gesture) } else { finishCueDrag(gesture) }
+        }, cancel: cancelCueDrag, tap: { location in
+            if editingVolume { selectOrAddPoint(location, size: size, timing: timing) }
+            else { inspectedMs = viewport(timing).time(at: Double(location.x / max(size.width, 1))) }
+        })
+    }
+
+    private func magnification(_ timing: PairTransitionTiming) -> some Gesture {
+        MagnifyGesture(minimumScaleDelta: 0.02)
+            .updating($pinching) { _, active, _ in active = true }
+            .onChanged { value in
+                cancelCueDrag()
+                let initial = PairTransitionTiming(spec: spec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs) ?? timing
+                if pinchViewport == nil { pinchViewport = viewport(initial); pinchZoom = timeZoom }
+                guard let base = pinchViewport, let zoom = pinchZoom else { return }
+                let next = (zoom * Double(value.magnification)).clamped(1, 8)
+                let view = base.zoomed(timing: initial, zoom: next, anchor: Double(value.startAnchor.x))
+                timeZoom = next
+                viewFocusMs = view.centerMs
+            }
+            .onEnded { _ in pinchViewport = nil; pinchZoom = nil }
+    }
+
+    private func auditionButton(_ timing: PairTransitionTiming) -> some View {
+        Button { toggleAudition(timing) } label: {
+            auditionIcon
+                .frame(width: 52, height: 44)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.16)))
+        }
+        .buttonStyle(.plain)
+        .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil || curveSession != nil)
+        .accessibilityLabel(preview.isPreparing || preview.isPlaying ? "Stop transition preview" : "Audition this transition")
+    }
+
+    @ViewBuilder
+    private var auditionIcon: some View {
+        if preview.isPreparing { ProgressView().tint(palette.onSurface) }
+        else { Image(systemName: preview.isPlaying ? "stop.fill" : "play.fill").font(.title3.weight(.semibold)) }
     }
 
     private func updateCueDrag(_ gesture: PanInteraction.Sample, size: CGSize, timing: PairTransitionTiming) {
