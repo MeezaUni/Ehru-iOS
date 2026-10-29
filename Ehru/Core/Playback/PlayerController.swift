@@ -41,6 +41,7 @@ final class PlayerController {
     enum VisualMotion: Hashable { case carousel, presentation }
     @ObservationIgnored private var visualMotion: Set<VisualMotion> = []
     @ObservationIgnored private var nowPlayingUpdate: Task<Void, Never>?
+    @ObservationIgnored private let albumHistoryQueue = DispatchQueue(label: "ehru.album-history", qos: .utility)
     @ObservationIgnored private var artworkWarmup: Task<Void, Never>?
     @ObservationIgnored private var fileWarmup: Task<Void, Never>?
     @ObservationIgnored private var restoreFinished = false
@@ -743,7 +744,7 @@ final class PlayerController {
 
     private func recordAlbumPlayed(_ songID: Int64) {
         let database = database
-        Task.detached(priority: .utility) { try? database.recordAlbumOfSongPlayed(songID) }
+        albumHistoryQueue.async { try? database.recordAlbumOfSongPlayed(songID) }
     }
 
     func setVisualMotion(_ reason: VisualMotion, active: Bool) {
@@ -773,9 +774,10 @@ final class PlayerController {
         }
         if artworkSongId != song.id {
             artworkSongId = song.id
-            let cached = ArtworkLoader.shared.cachedImage(for: song.url, maxPixels: 600, fallbackSizes: [1200, 400, 300, 150, 120, 80])
+            let exact = ArtworkLoader.shared.cachedImage(for: song.url, maxPixels: 600)
+            let cached = exact ?? ArtworkLoader.shared.cachedImage(for: song.url, maxPixels: 600, fallbackSizes: [1200, 400, 300, 150, 120, 80])
             artwork = cached.map(Self.makeArtwork)
-            loadArtwork(for: song)
+            if exact == nil { loadArtwork(for: song) }
         }
         var info: [String: Any] = [
             MPMediaItemPropertyTitle: song.title,

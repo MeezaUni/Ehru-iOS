@@ -165,10 +165,8 @@ final class AudioEngine {
             // handoff avoids stopping audio while a new format/decoder is scheduled.
             var handoff = TransitionSpec()
             handoff.curve = .linear
-            let lead = max(AVAudioSession.sharedInstance().ioBufferDuration * 2, 0.012)
             try startCrossfade(file: file, entryId: entryId, incomingStartMs: positionMs,
-                               spec: handoff, durationMs: 20,
-                               startHostTime: mach_absolute_time() + TransitionStageKernel.hostTicks(forSeconds: lead))
+                               spec: handoff, durationMs: 20, startHostTime: nil)
             return
         }
         stop(other)
@@ -253,7 +251,7 @@ final class AudioEngine {
     }
 
     private func startCrossfade(file: AVAudioFile, entryId: UUID, incomingStartMs: Int64, spec: TransitionSpec,
-                                durationMs: Int, startHostTime: UInt64) throws {
+                                durationMs: Int, startHostTime: UInt64?) throws {
         let outgoing = active
         let incoming = other
         stop(incoming)
@@ -262,6 +260,10 @@ final class AudioEngine {
         schedule(incoming, entryId: entryId, file: file, from: start)
         // Nothing may follow the outgoing track on its own deck any more.
         outgoing.segments = Array(outgoing.segments.prefix(1))
+        // Manual handoffs start only after format conversion/decoder scheduling is ready.
+        // Automatic album transitions retain their already-planned absolute host time.
+        let lead = max(AVAudioSession.sharedInstance().ioBufferDuration * 2, 0.012)
+        let startHostTime = startHostTime ?? mach_absolute_time() + TransitionStageKernel.hostTicks(forSeconds: lead)
         outgoing.stage.arm(TransitionAutomation(role: .outgoing, spec: spec, durationMs: durationMs), startHostTime: startHostTime)
         incoming.stage.arm(TransitionAutomation(role: .incoming, spec: spec, durationMs: durationMs), startHostTime: startHostTime)
         try startEngineIfNeeded()
