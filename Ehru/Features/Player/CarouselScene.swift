@@ -5,6 +5,12 @@ struct CarouselSelection: Equatable {
     let previous: QueueEntry?
     let current: QueueEntry?
     let next: QueueEntry?
+
+    func canMove(_ direction: Int) -> Bool {
+        guard let current else { return false }
+        let neighbour = direction == 1 ? next : direction == -1 ? previous : nil
+        return neighbour != nil && neighbour?.id != current.id
+    }
 }
 
 /// Stable, unbounded page coordinates: changing the current entry never rebases the strip.

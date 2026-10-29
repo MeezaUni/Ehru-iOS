@@ -106,7 +106,7 @@ struct TrackCarousel: View {
                 let projection = value.predictedEndTranslation.width - value.translation.width
                 let wanted = abs(projection) > 180 ? (projection < 0 ? 1 : -1)
                     : abs(displacement) > 0.25 ? (displacement > 0 ? 1 : -1) : 0
-                let allowed = (wanted == 1 && next != nil) || (wanted == -1 && previous != nil)
+                let allowed = selection.canMove(wanted)
                 if allowed { skip(wanted) }
                 else { settle(on: CGFloat(scene.center)) }
             }
@@ -123,6 +123,7 @@ struct TrackCarousel: View {
             stackAmount = 0
             settle(on: CGFloat(scene.center))
         } else {
+            generation = UUID()
             var instant = Transaction(); instant.disablesAnimations = true
             withTransaction(instant) {
                 focus = CGFloat(scene.center)

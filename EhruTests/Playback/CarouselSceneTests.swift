@@ -57,6 +57,18 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertEqual(scene.items.count, 2)
     }
 
+    func testSingleEntryRepeatBouncesAndDuplicateSongsWithDifferentEntriesStillSwipe() {
+        let entry = QueueEntry(song: testSong(1))
+        let single = CarouselSelection(previous: entry, current: entry, next: entry)
+        XCTAssertFalse(single.canMove(1))
+        XCTAssertFalse(single.canMove(-1))
+        let duplicate = QueueEntry(song: entry.song)
+        let pair = CarouselSelection(previous: duplicate, current: entry, next: duplicate)
+        XCTAssertTrue(pair.canMove(1))
+        XCTAssertTrue(pair.canMove(-1))
+        XCTAssertFalse(pair.canMove(0))
+    }
+
     func testProjectedCardsRemainSeparatedThroughoutBothSwipeDirections() {
         for width in [CGFloat(160), 260, 320, 480] {
             let size = CGSize(width: width, height: width + 100)
