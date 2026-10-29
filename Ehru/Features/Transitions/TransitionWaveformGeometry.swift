@@ -79,3 +79,64 @@ extension TransitionAudioSlice {
         return first < last ? peaks[first..<last].max() ?? 0 : 0
     }
 }
+
+/// The same geometry is used for drawing and touching the on-waveform gain handles.
+struct TransitionCurveHandle: Equatable {
+    let role: TransitionRole
+    let index: Int
+}
+
+struct TransitionCurveLayout {
+    let viewport: TransitionWaveformViewport
+    let durationMs: Double
+    let size: CGSize
+
+    func role(at point: CGPoint) -> TransitionRole { point.y < size.height / 2 ? .outgoing : .incoming }
+
+    func position(_ point: CurvePoint, role: TransitionRole) -> CGPoint {
+        let laneHeight = size.height / 2
+        let center = (role == .outgoing ? 0 : laneHeight) + laneHeight / 2 + 7
+        let amplitude = max((laneHeight - 50) / 2, 1)
+        return CGPoint(x: CGFloat(viewport.fraction(at: Double(point.t) * durationMs)) * size.width,
+                       y: center + amplitude - CGFloat(point.gain) * amplitude * 2)
+    }
+
+    func value(at location: CGPoint, role: TransitionRole) -> CurvePoint {
+        let laneHeight = size.height / 2
+        let center = (role == .outgoing ? 0 : laneHeight) + laneHeight / 2 + 7
+        let amplitude = max((laneHeight - 50) / 2, 1)
+        return CurvePoint(t: Float(viewport.time(at: Double(location.x / max(size.width, 1))) / max(durationMs, 1)).clamped(0, 1),
+                          gain: Float((center + amplitude - location.y) / (2 * amplitude)).clamped(0, 1))
+    }
+
+    func nearest(_ point: CGPoint, spec: TransitionSpec, radius: CGFloat = 26) -> TransitionCurveHandle? {
+        var best: TransitionCurveHandle?
+        var gap = radius
+        for role in [TransitionRole.outgoing, .incoming] {
+            for (index, control) in TransitionEditing.curveOf(spec, role).points.enumerated() {
+                let p = position(control, role: role)
+                guard p.x >= 0, p.x <= size.width else { continue }
+                let distance = hypot(p.x - point.x, p.y - point.y)
+                if distance <= gap { gap = distance; best = TransitionCurveHandle(role: role, index: index) }
+            }
+        }
+        return best
+    }
+}
+
+/// One transient edit, committed once on release. Keeping the initial grab offset avoids
+/// a jump when a finger lands beside a small dot, and avoids compounding intermediate updates.
+struct TransitionCurveDrag {
+    let base: TransitionSpec
+    let handle: TransitionCurveHandle
+    let layout: TransitionCurveLayout
+
+    func moved(translation: CGSize) -> TransitionSpec {
+        guard translation != .zero else { return base }
+        let points = TransitionEditing.curveOf(base, handle.role).points
+        guard points.indices.contains(handle.index), translation.width.isFinite, translation.height.isFinite else { return base }
+        let start = layout.position(points[handle.index], role: handle.role)
+        let value = layout.value(at: CGPoint(x: start.x + translation.width, y: start.y + translation.height), role: handle.role)
+        return TransitionEditing.movePoint(base, handle.role, index: handle.index, t: value.t, gain: value.gain)
+    }
+}

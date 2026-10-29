@@ -8,15 +8,18 @@ struct PairAudioPlot: View {
     let inspectedMs: Double
     let displayGain: Float
     let activeRole: TransitionRole?
+    var editingVolume = false
+    var selectedHandle: TransitionCurveHandle?
     @Environment(\.palette) private var palette
 
     var body: some View {
         Canvas { context, size in
             let width = size.width, height = size.height
+            let layout = TransitionCurveLayout(viewport: viewport, durationMs: Double(timing.plan.durationMs), size: size)
             func x(_ ms: Double) -> CGFloat { CGFloat(viewport.fraction(at: ms)) * width }
             let left = max(x(0), 0), right = min(x(Double(timing.plan.durationMs)), width)
             if right > left {
-                context.fill(Path(CGRect(x: left, y: 0, width: right - left, height: height)), with: .color(palette.primary.opacity(0.08)))
+                context.fill(Path(roundedRect: CGRect(x: left, y: 0, width: right - left, height: height), cornerRadius: 14), with: .color(palette.primary.opacity(0.10)))
             }
             drawRuler(context, size)
             for (index, role) in [TransitionRole.outgoing, .incoming].enumerated() {
@@ -47,8 +50,19 @@ struct PairAudioPlot: View {
                     let point = CGPoint(x: x(time), y: center + amplitude - CGFloat(gain) * amplitude * 2)
                     if step == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
                 }
-                context.stroke(curve, with: .color(palette.onSurface), style: StrokeStyle(lineWidth: 1.5, dash: index == 0 ? [] : [4, 3]))
-                let title = role == .outgoing ? "OUT · drag" : "IN · drag"
+                context.stroke(curve, with: .color(AutomationColors.volume), style: StrokeStyle(lineWidth: 2.5, lineJoin: .round, dash: index == 0 ? [] : [4, 3]))
+                if editingVolume {
+                    for (pointIndex, control) in TransitionEditing.curveOf(timing.plan.spec, role).points.enumerated() {
+                        let point = layout.position(control, role: role)
+                        guard point.x >= 0, point.x <= width else { continue }
+                        let selected = selectedHandle == TransitionCurveHandle(role: role, index: pointIndex)
+                        let radius: CGFloat = selected ? 8 : 6
+                        let dot = Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
+                        context.fill(dot, with: .color(index == 0 ? AutomationColors.volume : palette.surface))
+                        context.stroke(dot, with: .color(AutomationColors.volume), lineWidth: 2)
+                    }
+                }
+                let title = (role == .outgoing ? "OUT" : "IN") + (editingVolume ? " · volume" : " · drag audio")
                 context.draw(Text(title).font(.caption2.weight(.semibold)).foregroundColor(color),
                              at: CGPoint(x: 8, y: lane.minY + 13), anchor: .leading)
                 let times = "\(sourceTimeLabel(sourceStart + viewport.startMs)) – \(sourceTimeLabel(sourceStart + viewport.endMs))"
@@ -74,7 +88,7 @@ struct PairAudioPlot: View {
         .accessibilityElement()
         .accessibilityLabel("Outgoing and incoming audio waveforms")
         .accessibilityValue("\(TransitionSpec.durationLabel(timing.plan.durationMs)) overlap. \(String(format: "%.2f", viewport.durationMs / 1000)) seconds visible.")
-        .accessibilityHint("Drag each waveform horizontally to move its cue. Pinch to zoom.")
+        .accessibilityHint("Drag each waveform horizontally to move its cue, or choose Edit fade to change volume points. Pinch to zoom.")
     }
 
     private func sourceTimeLabel(_ ms: Double) -> String {

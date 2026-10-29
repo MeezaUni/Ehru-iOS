@@ -25,7 +25,7 @@ waveform, spectrum, beat grid, or loudness-normalized decorative shape. Opposite
 does not cancel the measurement. Missing/truncated/unsupported audio is marked unavailable.
 
 The timing comes directly from `TransitionPlanner`, including effective duration limits and cues.
-White volume curves sample `TransitionAutomation`, also used by the engine. The inspection slider
+Blue volume curves sample `TransitionAutomation`, also used by the engine. The inspection slider
 shows source times, volume dB, 200 Hz bass-shelf dB and filter cutoff targets at millisecond
 precision. Source peak/RMS measurements are dBFS over each loaded audio window before processing
 (its exact range is listed beside the measurements, independently of the visible zoom);
@@ -38,12 +38,21 @@ the outgoing cue and the lower lane only the incoming cue. Each drag captures it
 cue and time scale, updates locally under the finger, then commits one undoable edit on release.
 Cancellation leaves the draft alone. Vertical gestures remain available for scrolling.
 
-Fit fills most of the plot with the overlap. Fit/2×/4×/8× buttons and anchored pinch zoom control
+Fit fills most of the plot with the overlap. Fit/2×/4×/8× menu choices and anchored pinch zoom control
 the time scale; a separate overview strip moves the view without changing either cue. A ruler
 and source-time labels show the actual scale. Auto/1×/4×/16× height controls amplify the drawing
 with an explicit display-gain label. Both lanes share the same display gain, frozen during a cue
 drag, and silence stays silent. These controls never change audio volume or raw peak/RMS values.
 Dimmed source samples are outside the playback interval; missing source data is left empty.
+
+The pair workspace puts the outgoing track above the waveforms and incoming track below.
+Move audio shifts each lane independently; Edit fade exposes volume handles directly over the
+source audio. Handles use the same time/gain geometry as the drawn engine curves. Dragging a
+handle preserves its initial finger offset, keeps the other lane and both cues intact, and
+commits one undoable edit on release; cancellation discards the transient edit. Tapping a lane
+adds a point on its current curve; selecting an interior point allows removal. Fixed endpoint
+levels and point-order limits still apply. The central play/stop control auditions the draft;
+technical measurements and source ranges remain in an expandable analysis section.
 
 Preview schedules bounded source segments on two decks with the same
 transition DSP and current equalizer as playback. The incoming start uses the render clock.

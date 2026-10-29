@@ -52,6 +52,7 @@ struct TrackCarousel: View {
                                  isPlaying: item.slot == 0 && isPlaying, distance: distance, metrics: metrics)
                         .modifier(DepthCard(distance: distance, width: metrics.cardWidth, stack: stacked ? 1 : 0,
                                             hideLeft: next != nil, reduceMotion: reduceMotion))
+                        .modifier(PlayerNeighbourFade(isCurrent: item.slot == 0))
                         .zIndex(abs(distance) < 0.5 ? 1 : 0)
                         .onTapGesture {
                             if item.slot != 0, !stacked { skip(item.slot) }
@@ -220,7 +221,8 @@ private struct CarouselCard: View {
         VStack(spacing: 0) {
             MotionCoverView(song: song, playing: isCurrent && isPlaying, rendersVideo: isCurrent, animateStill: true)
                 .frame(width: metrics.artSide, height: metrics.artSide)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.large, style: .continuous))
+                .modifier(PlayerArtworkClip(isCurrent: isCurrent, side: metrics.artSide))
+                .background { if isCurrent { Color.clear.playerArtworkFrame(expanded: true) } }
             HStack(spacing: 0) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(song.title).font(.title2.weight(.bold)).foregroundStyle(colors.content).lineLimit(1)
@@ -242,12 +244,13 @@ private struct CarouselCard: View {
                     .accessibilityLabel(song.isFavorite ? "Remove from favorites" : "Add to favorites")
                 }
             }
+            .modifier(PlayerChromeFade())
             .padding(.leading, Spacing.xs)
             .padding(.top, Spacing.sm)
             .frame(width: metrics.artSide, height: metrics.metadataHeight, alignment: .top)
         }
         .padding(CardMetrics.padding)
-        .background(CardSurface(colors: colors, shape: shape))
+        .background(CardSurface(colors: colors, shape: shape).modifier(PlayerChromeFade()))
         .overlay(Color.black.opacity(Double(min(abs(distance), 1)) * 0.45).allowsHitTesting(false))
         .clipShape(shape)
         .shadow(color: .black.opacity(0.28), radius: 20, y: 12)
@@ -262,5 +265,13 @@ private struct CarouselCard: View {
             guard !Task.isCancelled else { return }
             artworkPalette.set(next, for: song.url, revision: revision)
         }
+    }
+}
+
+private struct PlayerNeighbourFade: ViewModifier {
+    let isCurrent: Bool
+    @Environment(PlayerDragState.self) private var drag
+    func body(content: Content) -> some View {
+        content.opacity(isCurrent ? 1 : PlayerCoverGeometry.chromeOpacity(drag.progress))
     }
 }

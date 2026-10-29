@@ -28,7 +28,7 @@ struct NowPlayingView: View {
     var body: some View {
         let state = player.state
         VStack(spacing: 0) {
-            header
+            header.modifier(PlayerChromeFade())
             if let current = state.currentSong {
                 // Queue snapshots keep playback stable; favorite/tag changes come from the
                 // current library so a swipe-to-like is reflected on the playing card too.
@@ -47,12 +47,14 @@ struct NowPlayingView: View {
                                     ProgressSection(song: song)
                                     controls(state)
                                 }
+                                .modifier(PlayerChromeFade())
                                 .padding(.horizontal, Spacing.heroGutter)
                             }
                             .padding(.top, Spacing.sm)
                             .padding(.bottom, Spacing.md)
                             .frame(height: max(viewport - Self.lyricsPeek, 420))
                             LyricsPanel(song: song) { showsLyrics = true }
+                                .modifier(PlayerChromeFade())
                                 .frame(height: min(max(viewport * 0.62, 300), 560))
                                 .padding(.horizontal, Spacing.heroGutter)
                             Spacer().frame(height: Spacing.xl)
@@ -68,7 +70,8 @@ struct NowPlayingView: View {
         }
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(backdrop(state.currentSong).ignoresSafeArea())
+        .modifier(PlayerForegroundMotion(drag: drag))
+        .background(backdrop(state.currentSong).ignoresSafeArea().modifier(PlayerBackdropFade(drag: drag)))
         .contentShape(Rectangle())
         .overlay(alignment: .bottom) { toast }
         .animation(.easeInOut(duration: 0.2), value: actions.message)

@@ -108,4 +108,54 @@ final class TransitionWaveformEditingTests: XCTestCase {
         XCTAssertEqual(slice.meanRMS, 0.04)
         XCTAssertEqual(slice.peaks, [0.05, 0.1])
     }
+
+    func testOnWaveformVolumeHandlesUseTheSameTimeAndGainAsPlayback() throws {
+        let spec = TransitionEditing.setCurve(TransitionSpec(), .custom)
+        let timing = try makeTiming(spec)
+        let view = TransitionWaveformViewport(timing: timing, zoom: 1)
+        let layout = TransitionCurveLayout(viewport: view, durationMs: Double(timing.plan.durationMs), size: CGSize(width: 300, height: 320))
+        for role in [TransitionRole.outgoing, .incoming] {
+            let controls = TransitionEditing.curveOf(spec, role).points
+            for (index, control) in controls.enumerated() {
+                let position = layout.position(control, role: role)
+                let value = layout.value(at: position, role: role)
+                XCTAssertEqual(value.t, control.t, accuracy: 1e-6)
+                XCTAssertEqual(value.gain, timing.automation(role).gainAt(Double(control.t) * Double(timing.plan.durationMs)), accuracy: 1e-5)
+                XCTAssertEqual(layout.nearest(position, spec: spec), TransitionCurveHandle(role: role, index: index))
+            }
+        }
+    }
+
+    func testCurveDraggingKeepsTheOtherLaneAndCuesAndCommitsOneUndoStep() throws {
+        var base = TransitionEditing.setCurve(TransitionSpec(), .custom)
+        base.outgoingCutMs = 4000
+        base.incomingStartMs = 6000
+        let timing = try makeTiming(base)
+        let layout = TransitionCurveLayout(viewport: TransitionWaveformViewport(timing: timing, zoom: 1),
+                                           durationMs: Double(timing.plan.durationMs), size: CGSize(width: 300, height: 320))
+        let handle = TransitionCurveHandle(role: .incoming, index: 2)
+        let session = TransitionCurveDrag(base: base, handle: handle, layout: layout)
+        XCTAssertEqual(session.moved(translation: .zero), base)
+        let movement = CGSize(width: 12, height: -11)
+        let updated = session.moved(translation: movement)
+        XCTAssertEqual(updated, session.moved(translation: movement))
+        XCTAssertNotEqual(updated.incomingCurve, base.incomingCurve)
+        XCTAssertEqual(updated.outgoingCurve, base.outgoingCurve)
+        XCTAssertEqual(updated.incomingStartMs, 6000)
+        XCTAssertEqual(updated.outgoingCutMs, 4000)
+        XCTAssertEqual(updated.durationMs, base.durationMs)
+        XCTAssertTrue(try XCTUnwrap(updated.incomingCurve).isValid(.incoming))
+        let points = try XCTUnwrap(updated.incomingCurve).points
+        let updatedTiming = try makeTiming(updated)
+        XCTAssertEqual(updatedTiming.automation(.incoming).gainAt(Double(points[2].t) * Double(updatedTiming.plan.durationMs)), points[2].gain, accuracy: 1e-5)
+        XCTAssertEqual(session.moved(translation: CGSize(width: .nan, height: 0)), base)
+        var config = TransitionConfig()
+        config.global.defaultChoice = .custom(base)
+        var draft = EditorDraft.open(.global, config: config)
+        draft.edit { _ in updated }
+        XCTAssertEqual(draft.undo.count, 1)
+        draft.undoLast()
+        XCTAssertEqual(draft.spec, base)
+    }
+
 }

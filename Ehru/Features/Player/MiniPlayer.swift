@@ -17,6 +17,8 @@ struct MiniPlayer: View {
                     SongArtworkView(song: song, maxPixels: 132)
                         .frame(width: ArtworkSize.miniPlayer, height: ArtworkSize.miniPlayer)
                         .clipShape(RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
+                        .playerArtworkFrame(expanded: false)
+                        .modifier(MiniArtworkVisibility())
                         .accessibilityLabel("Album artwork")
                     VStack(alignment: .leading, spacing: 1) {
                         Text(song.title).font(.subheadline.weight(.semibold)).foregroundStyle(palette.onSurface).lineLimit(1)

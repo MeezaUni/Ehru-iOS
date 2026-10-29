@@ -15,6 +15,8 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showsImporter = false
     @State private var chrome = LibraryChromeState()
+    @State private var playerMotion = PlayerDragState()
+    @State private var artworkFrames = PlayerArtworkFrames()
     @State private var visualBudget = VisualWorkBudget.current
     /// While a finger moves the side menu: how far it has pulled (positive opening, negative closing).
     @State private var drawerDrag: CGFloat?
@@ -43,23 +45,32 @@ struct RootView: View {
         .overlay {
             GeometryReader { geometry in
                 ZStack {
-                    if router.showsNowPlaying {
-                        PlayerPresentation()
+                    if playerMotion.isPresented {
+                        PlayerPresentation(drag: playerMotion, frames: artworkFrames)
                             .frame(width: geometry.size.width, height: geometry.size.height)
-                            // Move beyond both unsafe edges too, so the outgoing header cannot
-                            // remain visible over the home indicator at the end of dismissal.
-                            .transition(.offset(y: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom + 1))
+                            .transition(.identity)
                             .zIndex(1)
                     }
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height)
+                .onChange(of: geometry.size, initial: true) { _, size in playerMotion.travel = max(size.height * 0.65, 240) }
             }
-            .allowsHitTesting(router.showsNowPlaying)
+            .allowsHitTesting(playerMotion.isPresented)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
-        .animation(.smooth(duration: 0.32), value: router.showsNowPlaying)
+        .coordinateSpace(name: PlayerArtworkSpace.root)
+        .onPreferenceChange(PlayerArtworkFrameKey.self) { next in
+            // Frames are measured inside the foreground transform to avoid drag feedback.
+            if next.mini.width > 0 { artworkFrames.mini = next.mini }
+            if next.expanded.width > 0 { artworkFrames.expanded = next.expanded }
+        }
+        .onChange(of: router.showsNowPlaying, initial: true) { _, shown in
+            if shown && !playerMotion.isPresented { artworkFrames.expanded = .zero }
+            playerMotion.setPresented(shown, reduceMotion: reduceMotion)
+        }
         .animation(.easeInOut(duration: 0.2), value: actions.message)
         .environment(chrome)
+        .environment(playerMotion)
         .environment(\.visualWorkBudget, visualBudget)
         .onReceive(NotificationCenter.default.publisher(for: .NSProcessInfoPowerStateDidChange).receive(on: RunLoop.main)) { _ in visualBudget = .current }
         .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification).receive(on: RunLoop.main)) { _ in visualBudget = .current }

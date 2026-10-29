@@ -24,6 +24,9 @@ struct PairTransitionWorkspace: View {
     @State private var cueSession: TransitionWaveformDrag?
     @State private var draggedSpec: TransitionSpec?
     @State private var cueDisplayGain: Float?
+    @State private var editingVolume = false
+    @State private var curveSession: TransitionCurveDrag?
+    @State private var selectedHandle: TransitionCurveHandle?
     @State private var pinchViewport: TransitionWaveformViewport?
     @State private var pinchZoom: Double?
     @GestureState private var pinching = false
@@ -57,19 +60,27 @@ struct PairTransitionWorkspace: View {
         StudioPanel {
             sourceLine("Outgoing", pair.from.song, outgoing)
             if let timing {
-                waveformControls(timing)
                 waveform(timing)
-                TransitionWaveformOverview(timing: timing, viewport: viewport(timing)) { viewFocusMs = $0 }
-                    .allowsHitTesting(cueSession == nil)
                 sourceLine("Incoming", pair.to.song, incoming)
+                waveformControls(timing)
+                TransitionWaveformOverview(timing: timing, viewport: viewport(timing)) { viewFocusMs = $0 }
+                    .allowsHitTesting(cueSession == nil && curveSession == nil)
                 HStack {
                     Text(String(format: "Wave height +%.1f dB · display only", 20 * log10(displayGain(timing))))
                         .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
                     Spacer(minLength: 0)
                     if loading { ProgressView().controlSize(.small) }
                 }
-                Text("Drag the upper/lower waveform to move its cue. Pinch to zoom; use the strip to move the view. White lines: volume. Dimmed audio is outside playback.")
+                Text(editingVolume ? "Drag a blue point to shape the fade. Tap a lane to add a point; select an inner point to remove it." : "Drag either waveform to choose where that song joins the mix. Pinch to zoom; the strip below moves the view.")
                     .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+                if let selected = selectedHandle, editingVolume,
+                   selected.index > 0, selected.index < TransitionEditing.curveOf(workingSpec, selected.role).points.count - 1 {
+                    Button(role: .destructive) {
+                        edit { TransitionEditing.removePoint($0, selected.role, index: selected.index) }
+                        selectedHandle = nil
+                    } label: { Label("Remove selected point", systemImage: "minus.circle") }
+                    .font(.caption).frame(minHeight: 44)
+                }
                 if cueSession != nil {
                     Text("Out end \(transitionTimestamp(Double(workingSpec.outgoingEndMs(pair.from.song.durationMs)))) · In start \(transitionTimestamp(Double(workingSpec.incomingStartMs)))")
                         .font(.caption.monospacedDigit()).foregroundStyle(palette.primary)
@@ -78,9 +89,11 @@ struct PairTransitionWorkspace: View {
                     Text("Audio analysis unavailable for \(outgoing == nil && incoming == nil ? "both files" : outgoing == nil ? "the outgoing file" : "the incoming file"). Check that the file is present and readable.")
                         .font(.caption).foregroundStyle(palette.onSurfaceVariant)
                 }
-                audition(timing)
-                Divider()
-                inspector(timing)
+                DisclosureGroup("Analysis & automation") {
+                    audition(timing)
+                    inspector(timing)
+                }
+                .font(.subheadline)
                 DisclosureGroup("Cue points · precise editing") { cues(timing) }
                     .font(.subheadline)
                 if !masterEnabled {
@@ -108,6 +121,7 @@ struct PairTransitionWorkspace: View {
             loading = false
         }
         .onChange(of: spec) { _, _ in preview.stop(); cancelCueDrag() }
+        .onChange(of: editingVolume) { _, _ in cancelCueDrag(); selectedHandle = nil }
         .onChange(of: pinching) { _, active in if !active { pinchViewport = nil; pinchZoom = nil } }
         .onChange(of: scenePhase) { _, phase in if phase != .active { preview.stop(resume: false); cancelCueDrag() } }
         .onChange(of: player.state.isPlaying) { _, playing in
@@ -137,20 +151,23 @@ struct PairTransitionWorkspace: View {
 
     private func waveformControls(_ timing: PairTransitionTiming) -> some View {
         HStack(spacing: Spacing.xs) {
-            ForEach([1.0, 2, 4, 8], id: \.self) { zoom in
-                Button {
-                    timeZoom = zoom
-                    viewFocusMs = zoom == 1 ? nil : inspection(timing)
-                } label: {
-                    Text(zoom == 1 ? "Fit" : "\(Int(zoom))×")
-                        .font(.caption.weight(.semibold))
-                        .frame(minWidth: 38, minHeight: 44)
-                        .background(abs(timeZoom - zoom) < 0.05 ? palette.primary.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 10))
-                }
-                .accessibilityLabel(zoom == 1 ? "Fit transition in view" : "Time zoom \(Int(zoom)) times")
-                .accessibilityAddTraits(abs(timeZoom - zoom) < 0.05 ? .isSelected : [])
+            Picker("Waveform tool", selection: $editingVolume) {
+                Text("Move audio").tag(false)
+                Text("Edit fade").tag(true)
             }
-            Spacer(minLength: 0)
+            .pickerStyle(.segmented)
+            Menu {
+                ForEach([1.0, 2, 4, 8], id: \.self) { zoom in
+                    Button(zoom == 1 ? "Fit overlap" : "\(Int(zoom))× time zoom") {
+                        timeZoom = zoom
+                        viewFocusMs = zoom == 1 ? nil : inspection(timing)
+                    }
+                }
+            } label: {
+                Text(timeZoom <= 1 ? "Fit" : String(format: "%.1f×", timeZoom))
+                    .font(.caption.weight(.semibold)).frame(minWidth: 40, minHeight: 44)
+            }
+            .accessibilityLabel("Time zoom")
             Menu {
                 ForEach(TransitionWaveformHeight.allCases) { height in
                     Button { waveHeight = height } label: {
@@ -161,7 +178,6 @@ struct PairTransitionWorkspace: View {
             } label: {
                 HStack(spacing: 4) {
                     Image(systemName: "waveform")
-                    Text(waveHeight.label)
                     Image(systemName: "chevron.down").font(.caption2)
                 }
                 .font(.caption).frame(minHeight: 44)
@@ -170,18 +186,27 @@ struct PairTransitionWorkspace: View {
             .accessibilityLabel("Waveform display height: \(waveHeight.label)")
         }
         .buttonStyle(.plain)
-        .disabled(cueSession != nil)
+        .disabled(cueSession != nil || curveSession != nil)
     }
 
     private func waveform(_ timing: PairTransitionTiming) -> some View {
         GeometryReader { geometry in
             PairAudioPlot(timing: timing, viewport: viewport(timing), outgoing: outgoing, incoming: incoming,
-                          inspectedMs: inspection(timing), displayGain: displayGain(timing), activeRole: cueSession?.role)
+                          inspectedMs: inspection(timing), displayGain: displayGain(timing), activeRole: cueSession?.role ?? curveSession?.handle.role,
+                          editingVolume: editingVolume, selectedHandle: selectedHandle)
                 .overlay {
-                    PanInteraction(canBegin: { _, delta in !pinching && HorizontalGestureIntent.accepts(delta) },
-                                   change: { updateCueDrag($0, size: geometry.size, timing: timing) },
-                                   end: { finishCueDrag($0) }, cancel: cancelCueDrag,
-                                   tap: { inspectedMs = viewport(timing).time(at: Double($0.x / max(geometry.size.width, 1))) })
+                    PanInteraction(canBegin: { start, delta in
+                        guard !pinching else { return false }
+                        return editingVolume ? curveLayout(timing, geometry.size).nearest(start, spec: workingSpec) != nil : HorizontalGestureIntent.accepts(delta)
+                    }, change: { gesture in
+                        if editingVolume { updateCurveDrag(gesture, size: geometry.size, timing: timing) }
+                        else { updateCueDrag(gesture, size: geometry.size, timing: timing) }
+                    }, end: { gesture in
+                        if editingVolume { finishCurveDrag(gesture) } else { finishCueDrag(gesture) }
+                    }, cancel: cancelCueDrag, tap: { location in
+                        if editingVolume { selectOrAddPoint(location, size: geometry.size, timing: timing) }
+                        else { inspectedMs = viewport(timing).time(at: Double(location.x / max(geometry.size.width, 1))) }
+                    })
                 }
                 .simultaneousGesture(MagnifyGesture(minimumScaleDelta: 0.02)
                     .updating($pinching) { _, active, _ in active = true }
@@ -196,12 +221,26 @@ struct PairTransitionWorkspace: View {
                         viewFocusMs = view.centerMs
                     }
                     .onEnded { _ in pinchViewport = nil; pinchZoom = nil })
+                .overlay {
+                    Button { toggleAudition(timing) } label: {
+                        Group {
+                            if preview.isPreparing { ProgressView().tint(palette.onSurface) }
+                            else { Image(systemName: preview.isPlaying ? "stop.fill" : "play.fill").font(.title3.weight(.semibold)) }
+                        }
+                        .frame(width: 52, height: 44)
+                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.16)))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil || curveSession != nil)
+                    .accessibilityLabel(preview.isPreparing || preview.isPlaying ? "Stop transition preview" : "Audition this transition")
+                }
                 .accessibilityAction(named: "Move outgoing cue earlier") { nudge(.outgoing, delta: 100) }
                 .accessibilityAction(named: "Move outgoing cue later") { nudge(.outgoing, delta: -100) }
                 .accessibilityAction(named: "Move incoming cue earlier") { nudge(.incoming, delta: 100) }
                 .accessibilityAction(named: "Move incoming cue later") { nudge(.incoming, delta: -100) }
         }
-        .frame(height: 300)
+        .frame(height: 320)
     }
 
     private func updateCueDrag(_ gesture: PanInteraction.Sample, size: CGSize, timing: PairTransitionTiming) {
@@ -227,7 +266,45 @@ struct PairTransitionWorkspace: View {
         if result != session.base { edit { _ in result } }
     }
 
-    private func cancelCueDrag() { cueSession = nil; draggedSpec = nil; cueDisplayGain = nil }
+    private func cancelCueDrag() { cueSession = nil; curveSession = nil; draggedSpec = nil; cueDisplayGain = nil }
+
+    private func curveLayout(_ timing: PairTransitionTiming, _ size: CGSize) -> TransitionCurveLayout {
+        TransitionCurveLayout(viewport: viewport(timing), durationMs: Double(timing.plan.durationMs), size: size)
+    }
+
+    private func updateCurveDrag(_ gesture: PanInteraction.Sample, size: CGSize, timing: PairTransitionTiming) {
+        if curveSession == nil {
+            let layout = curveLayout(timing, size)
+            guard let handle = layout.nearest(gesture.startLocation, spec: spec) else { return }
+            preview.stop()
+            selectedHandle = handle
+            curveSession = TransitionCurveDrag(base: spec, handle: handle, layout: layout)
+        }
+        guard let session = curveSession else { return }
+        var transaction = Transaction(); transaction.disablesAnimations = true
+        withTransaction(transaction) { draggedSpec = session.moved(translation: gesture.translation) }
+    }
+
+    private func finishCurveDrag(_ gesture: PanInteraction.Sample) {
+        guard let session = curveSession else { return }
+        let result = session.moved(translation: gesture.translation)
+        cancelCueDrag()
+        if result != session.base { edit { _ in result } }
+    }
+
+    private func selectOrAddPoint(_ location: CGPoint, size: CGSize, timing: PairTransitionTiming) {
+        let layout = curveLayout(timing, size)
+        if let handle = layout.nearest(location, spec: spec) { selectedHandle = handle; return }
+        let role = layout.role(at: location)
+        let point = layout.value(at: location, role: role)
+        selectedHandle = nil
+        edit { TransitionEditing.addPoint($0, role, t: point.t) }
+    }
+
+    private func toggleAudition(_ timing: PairTransitionTiming) {
+        if preview.isPlaying || preview.isPreparing { preview.stop() }
+        else { preview.play(pair: pair, timing: timing, player: player, sound: sound.settings) }
+    }
 
     private func nudge(_ role: TransitionRole, delta: Float) {
         edit { TransitionEditing.shiftCue($0, role, deltaMs: delta, outgoingDurationMs: pair.from.song.durationMs, incomingDurationMs: pair.to.song.durationMs) }
@@ -241,6 +318,10 @@ struct PairTransitionWorkspace: View {
                 Text(role.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(palette.onSurfaceVariant)
                 Text(song.title).font(.subheadline.weight(.semibold)).lineLimit(1)
                 Text(song.artist).font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
+                Text(role == "Outgoing"
+                     ? "Hands over at \(transitionTimestamp(Double(workingSpec.outgoingEndMs(song.durationMs))))"
+                     : "Starts at \(transitionTimestamp(Double(workingSpec.incomingStartMs)))")
+                    .font(.caption2.monospacedDigit()).foregroundStyle(palette.primary).lineLimit(1)
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 2) {
@@ -258,18 +339,6 @@ struct PairTransitionWorkspace: View {
 
     private func audition(_ timing: PairTransitionTiming) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            Button {
-                if preview.isPlaying || preview.isPreparing { preview.stop() }
-                else { preview.play(pair: pair, timing: timing, player: player, sound: sound.settings) }
-            } label: {
-                Label(preview.isPreparing ? "Preparing preview…" : preview.isPlaying ? "Stop preview" : "Audition this transition",
-                      systemImage: preview.isPlaying || preview.isPreparing ? "stop.fill" : "play.fill")
-                    .font(.subheadline.weight(.semibold))
-                    .frame(maxWidth: .infinity, minHeight: 44)
-                    .background(palette.primary.opacity(0.14), in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil)
             Text("\(transitionTimestamp(Double(timing.plan.startAtMs))) → \(transitionTimestamp(Double(timing.outgoingRange.upperBound))) out · \(transitionTimestamp(Double(timing.plan.incomingStartMs))) → \(transitionTimestamp(Double(timing.incomingRange.upperBound))) in")
                 .font(.caption2.monospacedDigit()).foregroundStyle(palette.onSurfaceVariant)
             Text("Preview uses the current equalizer and saved audio files; it pauses your music and resumes it afterward.")
