@@ -48,8 +48,11 @@ final class ArtworkLoader: @unchecked Sendable {
     }
 
     /// A cached image without loading (for drawing the first frame without a flash).
-    func cachedImage(for url: URL, maxPixels: Int) -> UIImage? {
-        cache.object(forKey: key(for: url, maxPixels: maxPixels))
+    func cachedImage(for url: URL, maxPixels: Int, fallbackSizes: [Int] = []) -> UIImage? {
+        for size in [maxPixels] + fallbackSizes {
+            if let image = cache.object(forKey: key(for: url, maxPixels: size)) { return image }
+        }
+        return nil
     }
 
     /// An image file (custom artist or playlist cover) at [path], downsampled.

@@ -6,6 +6,14 @@ final class TransitionPreviewClockTests: XCTestCase {
         try XCTUnwrap(PairTransitionTiming(spec: TransitionSpec(), outgoingMs: 60_000, incomingMs: 60_000))
     }
 
+    func testRealSamplesRemainUsableWhenARouteOmitsHostTime() {
+        XCTAssertEqual(TransitionPreviewClock.elapsed(sampleTime: 22_050, sampleRate: 44_100, renderHost: nil, scheduledHost: 100), 500)
+        XCTAssertNil(TransitionPreviewClock.elapsed(sampleTime: 0, sampleRate: 44_100, renderHost: nil, scheduledHost: 100))
+        XCTAssertNil(TransitionPreviewClock.elapsed(sampleTime: 22_050, sampleRate: 44_100, renderHost: 99, scheduledHost: 100))
+        XCTAssertEqual(TransitionPreviewClock.elapsed(sampleTime: 0, sampleRate: 44_100, renderHost: 100, scheduledHost: 100), 0)
+        XCTAssertNil(TransitionPreviewClock.elapsed(sampleTime: -1, sampleRate: 44_100, renderHost: nil, scheduledHost: 100))
+    }
+
     func testPlayheadComesOnlyFromRenderedAudioAndIncludesLeadIn() throws {
         let clock = TransitionPreviewClock(timing: try makeTiming())
         XCTAssertNil(clock.position(outgoingElapsedMs: nil, incomingElapsedMs: nil, latencyMs: 80))

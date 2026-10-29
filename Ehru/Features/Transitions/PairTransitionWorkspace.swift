@@ -143,6 +143,8 @@ struct PairTransitionWorkspace: View {
     private func stage(_ timing: PairTransitionTiming) -> some View {
         VStack(spacing: 6) {
             waveform(timing)
+            auditionButton(timing)
+                .padding(.top, 4)
             sourceLine("Incoming", pair.to.song)
                 .padding(.vertical, Spacing.xs)
             HStack(spacing: Spacing.sm) {
@@ -179,9 +181,7 @@ struct PairTransitionWorkspace: View {
 
     private func stageStatus(_ timing: PairTransitionTiming) -> some View {
         HStack(spacing: Spacing.sm) {
-            if preview.isPlaying || preview.isPreparing {
-                TransitionPreviewReadout(preview: preview, durationMs: timing.plan.durationMs)
-            } else if transitionEnabled {
+            if transitionEnabled {
                 Text(editingHint)
                     .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
             }
@@ -274,7 +274,6 @@ struct PairTransitionWorkspace: View {
                 .overlay { waveformInteraction(timing, size: geometry.size) }
                 .simultaneousGesture(magnification(timing))
                 .overlay { TransitionPreviewPlayhead(preview: preview, viewport: viewport(timing)) }
-                .overlay { auditionButton(timing) }
                 .accessibilityAction(named: "Move outgoing cue earlier") { nudge(.outgoing, delta: 100) }
                 .accessibilityAction(named: "Move outgoing cue later") { nudge(.outgoing, delta: -100) }
                 .accessibilityAction(named: "Move incoming cue earlier") { nudge(.incoming, delta: 100) }
@@ -382,10 +381,17 @@ struct PairTransitionWorkspace: View {
 
     private func auditionButton(_ timing: PairTransitionTiming) -> some View {
         Button { toggleAudition(timing) } label: {
-            auditionIcon
-                .frame(width: 52, height: 44)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
-                .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.16)))
+            HStack(spacing: 8) {
+                auditionIcon
+                Text(preview.isPreparing ? "Preparing preview…" : preview.isPlaying ? "Stop preview" : "Play preview")
+                    .font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+                if preview.isPlaying { TransitionPreviewReadout(preview: preview, durationMs: timing.plan.durationMs) }
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.white.opacity(0.16)))
         }
         .buttonStyle(.plain)
         .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil || curveSession != nil || effectSession != nil)

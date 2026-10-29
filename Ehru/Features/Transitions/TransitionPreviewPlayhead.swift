@@ -9,24 +9,36 @@ struct TransitionPreviewPlayhead: View {
         TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !preview.isPlaying)) { _ in
             GeometryReader { geometry in
                 if let time = preview.positionMs() {
-                    let fraction = viewport.fraction(at: time)
-                    if (0...1).contains(fraction) {
-                        let x = CGFloat(fraction) * geometry.size.width
-                        Rectangle().fill(.black.opacity(0.45)).frame(width: 4)
-                            .overlay(Rectangle().fill(.green).frame(width: 2))
-                            .overlay(alignment: .top) { Circle().fill(.green).frame(width: 7, height: 7) }
-                            .position(x: x, y: geometry.size.height / 2)
-                    } else {
-                        Image(systemName: fraction < 0 ? "arrow.left" : "arrow.right")
-                            .font(.caption.bold()).foregroundStyle(.green)
-                            .position(x: fraction < 0 ? 12 : geometry.size.width - 12, y: 12)
-                    }
+                    TransitionPlayheadStroke(fraction: viewport.fraction(at: time))
                 }
             }
         }
         .clipped()
         .allowsHitTesting(false)
         .accessibilityHidden(true)
+    }
+}
+
+/// Explicit paths span the complete plot; position() on an unbounded thin Rectangle can
+/// otherwise give it its ideal (tiny) height instead of the waveform's height.
+struct TransitionPlayheadStroke: View {
+    let fraction: Double
+    var body: some View {
+        Canvas { context, size in
+            guard fraction.isFinite else { return }
+            if (0...1).contains(fraction) {
+                let x = CGFloat(fraction) * size.width
+                var line = Path()
+                line.move(to: CGPoint(x: x, y: 0)); line.addLine(to: CGPoint(x: x, y: size.height))
+                context.stroke(line, with: .color(.black.opacity(0.75)), lineWidth: 5)
+                context.stroke(line, with: .color(.green), lineWidth: 2)
+                context.fill(Path(ellipseIn: CGRect(x: x - 4, y: 0, width: 8, height: 8)), with: .color(.green))
+            } else {
+                context.draw(Text(fraction < 0 ? "←" : "→").font(.caption.bold()).foregroundColor(.green),
+                             at: CGPoint(x: fraction < 0 ? 12 : size.width - 12, y: 12))
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

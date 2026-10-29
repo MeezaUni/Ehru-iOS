@@ -71,6 +71,38 @@ final class AudioEngineTests: XCTestCase {
     }
 
     @MainActor
+    func testManualTrackSwitchPreparesTheOtherDeckBeforeReleasingAudio() async throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
+        defer { try? FileManager.default.removeItem(at: url) }
+        let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 132_300)!
+        buffer.frameLength = buffer.frameCapacity
+        for channel in 0..<2 {
+            for frame in 0..<Int(buffer.frameLength) { buffer.floatChannelData![channel][frame] = 0.1 }
+        }
+        do { let file = try AVAudioFile(forWriting: url, settings: format.settings); try file.write(from: buffer) }
+        let engine = AudioEngine()
+        await engine.setUp()
+        defer { engine.stopAll() }
+        let firstID = UUID(), secondID = UUID()
+        try engine.play(entryId: firstID, url: url, positionMs: 0, startPlaying: true)
+        try await Task.sleep(for: .milliseconds(100))
+        let outgoing = engine.active
+        try engine.play(entryId: secondID, url: url, positionMs: 0, startPlaying: true)
+        XCTAssertTrue(engine.isRunning)
+        XCTAssertFalse(engine.active === outgoing)
+        XCTAssertTrue(engine.other === outgoing)
+        XCTAssertEqual(engine.currentPosition()?.entryId, secondID)
+        XCTAssertEqual(outgoing.segments.first?.entryId, firstID)
+        XCTAssertTrue(outgoing.player.isPlaying)
+        XCTAssertTrue(outgoing.stage.isEngaged)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertGreaterThan(try XCTUnwrap(engine.currentPosition()).positionMs, 0)
+        engine.releaseFinishedOutgoing()
+        XCTAssertTrue(engine.other.segments.isEmpty)
+    }
+
+    @MainActor
     func testPauseKeepsPositionAndStopsRenderingUntilResume() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".wav")
         defer { try? FileManager.default.removeItem(at: url) }

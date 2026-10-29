@@ -20,6 +20,7 @@ struct MotionCoverView: View {
     var animateStill = false
     var suspended = false
     var videoSession: MotionVideoSession? = nil
+    var tracksScrollVisibility = true
     @Environment(AnimatedArtworkStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motionCoverVisible) private var sectionVisible
@@ -46,7 +47,7 @@ struct MotionCoverView: View {
         .clipped()
         .onAppear { visible = true }
         .onDisappear { visible = false }
-        .reportsScrollVisibility { visible = $0 }
+        .reportsScrollVisibility(enabled: tracksScrollVisibility) { visible = $0 }
     }
 }
 
@@ -66,15 +67,15 @@ private struct LoopingMotionVideo: UIViewRepresentable {
         }
     }
     func makeCoordinator() -> Coordinator { Coordinator(session) }
-    func makeUIView(context: Context) -> MotionVideoSurface {
-        let surface = MotionVideoSurface()
+    func makeUIView(context: Context) -> MotionVideoHost {
+        let surface = MotionVideoHost()
         context.coordinator.session.attach(surface, url: url, playing: isPlaying, frozen: frozen)
         return surface
     }
-    func updateUIView(_ surface: MotionVideoSurface, context: Context) {
+    func updateUIView(_ surface: MotionVideoHost, context: Context) {
         context.coordinator.session.attach(surface, url: url, playing: isPlaying, frozen: frozen)
     }
-    static func dismantleUIView(_ surface: MotionVideoSurface, coordinator: Coordinator) {
+    static func dismantleUIView(_ surface: MotionVideoHost, coordinator: Coordinator) {
         coordinator.session.detach(surface)
         if coordinator.ownsSession { coordinator.session.stop() }
     }

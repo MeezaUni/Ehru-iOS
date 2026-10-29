@@ -8,11 +8,15 @@ struct SongArtworkView: View {
     @Environment(\.palette) private var palette
     @State private var image: UIImage?
     @State private var artworkRevision = 0
+    @State private var imageRequest = ""
+    private var request: String { "\(url?.path ?? "")|\(maxPixels)|\(artworkRevision)" }
 
     var body: some View {
+        let displayed = imageRequest == request ? image
+            : url.flatMap { ArtworkLoader.shared.cachedImage(for: $0, maxPixels: maxPixels, fallbackSizes: [1200, 600, 400, 300, 120]) }
         ZStack {
-            if let image {
-                FillImage(image: image)
+            if let displayed {
+                FillImage(image: displayed)
             } else {
                 Rectangle().fill(palette.surfaceVariant)
                 Image(systemName: placeholder)
@@ -23,13 +27,16 @@ struct SongArtworkView: View {
         .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
             if note.object as? String == url?.path { artworkRevision += 1 }
         }
-        .task(id: "\(url?.path ?? "")|\(maxPixels)|\(artworkRevision)") {
+        .task(id: request) {
+            let token = request
             guard let url else {
                 image = nil
+                imageRequest = token
                 return
             }
-            image = ArtworkLoader.shared.cachedImage(for: url, maxPixels: maxPixels)
-            if image == nil {
+            image = ArtworkLoader.shared.cachedImage(for: url, maxPixels: maxPixels, fallbackSizes: [1200, 600, 400, 300, 120])
+            imageRequest = token
+            if ArtworkLoader.shared.cachedImage(for: url, maxPixels: maxPixels) == nil {
                 let loaded = await ArtworkLoader.shared.image(for: url, maxPixels: maxPixels)
                 guard !Task.isCancelled else { return }
                 image = loaded

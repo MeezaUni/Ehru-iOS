@@ -195,4 +195,27 @@ final class LockScreenMotionArtworkTests: XCTestCase {
         await fulfillment(of: [ready], timeout: 10)
         XCTAssertEqual(manager.status, .ready)
     }
+    @MainActor
+    func testReturningToAnAlbumReusesItsPreparedAnimationImmediately() async throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Animated Now Playing artwork requires iOS 26") }
+        let a = try await movie(), b = try await movie()
+        defer { try? FileManager.default.removeItem(at: a); try? FileManager.default.removeItem(at: b) }
+        let manager = LockScreenMotionArtwork(supportedKeys: { [MPNowPlayingInfoProperty1x1AnimatedArtwork] })
+        let first = expectation(description: "First album prepared")
+        manager.update(sources: [a]) { first.fulfill() }
+        await fulfillment(of: [first], timeout: 10)
+        let second = expectation(description: "Second album prepared")
+        manager.update(sources: [b]) { second.fulfill() }
+        await fulfillment(of: [second], timeout: 10)
+        manager.update(sources: [a], onReady: {})
+        XCTAssertEqual(manager.status, .ready, "Returning to a cached album must not enter a blank preparation phase")
+        XCTAssertFalse(manager.info.isEmpty)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(20)], ofItemAtPath: a.path)
+        let replaced = expectation(description: "Changed download prepared again")
+        manager.update(sources: [a]) { replaced.fulfill() }
+        XCTAssertEqual(manager.status, .preparing)
+        await fulfillment(of: [replaced], timeout: 10)
+        XCTAssertEqual(manager.status, .ready)
+    }
+
 }

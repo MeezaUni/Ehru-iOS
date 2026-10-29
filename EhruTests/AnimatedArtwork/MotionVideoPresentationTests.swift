@@ -56,24 +56,36 @@ final class MotionVideoPresentationTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: url) }
         let session = MotionVideoSession()
         defer { session.stop() }
-        let first = MotionVideoSurface(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let first = MotionVideoHost(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
         session.attach(first, url: url, playing: false, frozen: false)
         for _ in 0..<100 {
             if session.player.currentItem != nil { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         let item = try XCTUnwrap(session.player.currentItem)
-        let next = MotionVideoSurface(frame: first.frame)
-        session.attach(next, url: url, playing: false, frozen: false)
+        let originalLayer = session.surface.videoLayer
+        let next = MotionVideoHost(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        session.attach(next, url: url, playing: false, frozen: true)
         XCTAssertTrue(session.player.currentItem === item)
-        XCTAssertTrue(next.videoLayer.player === session.player)
-        XCTAssertNil(first.videoLayer.player)
+        XCTAssertTrue(session.surface.videoLayer === originalLayer)
+        XCTAssertTrue(session.surface.videoLayer.player === session.player)
+        XCTAssertTrue(session.surface.superview === next)
+        XCTAssertTrue(first.subviews.isEmpty)
+        XCTAssertEqual(session.surface.bounds, next.bounds)
+        XCTAssertTrue(session.surface.isFrozen)
         session.detach(first)
+        XCTAssertTrue(session.surface.superview === next)
         XCTAssertTrue(session.player.currentItem === item)
-        XCTAssertTrue(next.videoLayer.player === session.player)
+        session.attach(first, url: url, playing: false, frozen: false)
+        session.detach(next)
+        XCTAssertTrue(session.surface.superview === first)
+        XCTAssertTrue(session.surface.videoLayer === originalLayer)
+        XCTAssertTrue(session.player.currentItem === item)
+        XCTAssertFalse(session.surface.isFrozen)
         session.stop()
         XCTAssertNil(session.player.currentItem)
-        XCTAssertNil(next.videoLayer.player)
+        XCTAssertNil(session.surface.videoLayer.player)
+        XCTAssertNil(session.surface.superview)
     }
 
     private func movie() async throws -> URL {

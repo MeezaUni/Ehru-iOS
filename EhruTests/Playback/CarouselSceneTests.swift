@@ -94,10 +94,7 @@ final class CarouselSceneTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(CarouselPose.depth(distance: nearest), CarouselPose.depth(distance: distance))
             }
         }
-        var rendered = CarouselCardMotion(distance: -1, stack: 0, size: CGSize(width: 280, height: 380),
-                                          hideLeft: false, reduceMotion: false)
-        rendered.animatableData = AnimatablePair(-0.2, 0)
-        XCTAssertGreaterThan(CarouselPose.depth(distance: rendered.distance), CarouselPose.depth(distance: 0.8))
+
     }
 
     func testTwoEntryRepeatHonoursTheRequestedPreviousOccurrence() {
@@ -110,6 +107,27 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertEqual(scene.currentKey, previousKey)
         XCTAssertTrue(scene.select(CarouselSelection(previous: b, current: a, next: b), preferredDirection: 1))
         XCTAssertEqual(scene.center, 0)
+    }
+
+    func testLongDragsNeverLeaveAllAvailableCoverPagesOffscreen() {
+        for proposed in [CGFloat(-1_000_000), -10, -2, 2, 10, 1_000_000] {
+            let focus = CarouselDragLimit.focus(proposed, center: 0, canPrevious: true, canNext: true)
+            XCTAssertLessThanOrEqual(abs(focus), 1.12)
+        }
+        XCTAssertEqual(CarouselDragLimit.focus(0.4, center: 0, canPrevious: true, canNext: true), 0.4)
+        XCTAssertLessThan(abs(CarouselDragLimit.focus(-100, center: 0, canPrevious: false, canNext: true)), 0.12)
+        XCTAssertEqual(CarouselDragLimit.focus(.nan, center: 5, canPrevious: true, canNext: true), 5)
+    }
+
+    func testDepthObserverOnlyPublishesMidpointCrossings() {
+        let meter = CarouselPresentationMeter()
+        var pages: [Int] = []
+        meter.observeNearest { pages.append($0) }
+        for focus: CGFloat in [0, 0.1, 0.2, 0.49, 0.51, 0.8, 1, 0.7, 0.4, 0] { meter.record(focus) }
+        XCTAssertEqual(pages, [0, 1, 0])
+        meter.observeNearest(nil)
+        meter.record(1)
+        XCTAssertEqual(pages, [0, 1, 0])
     }
 
     func testInterruptedGestureCanReadTheActualInterpolatedFocus() {

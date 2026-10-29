@@ -9,7 +9,8 @@ final class MotionVideoSession {
     let player = AVQueuePlayer()
     private var looper: AVPlayerLooper?
     private(set) var url: URL?
-    private weak var surface: MotionVideoSurface?
+    let surface = MotionVideoSurface(frame: .zero)
+    private weak var host: MotionVideoHost?
     private var readiness: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
     private weak var outputItem: AVPlayerItem?
@@ -22,7 +23,7 @@ final class MotionVideoSession {
         player.audiovisualBackgroundPlaybackPolicy = .pauses
     }
 
-    func attach(_ next: MotionVideoSurface, url: URL, playing: Bool, frozen: Bool) {
+    func attach(_ next: MotionVideoHost, url: URL, playing: Bool, frozen: Bool) {
         if self.url != url {
             stop()
             self.url = url
@@ -33,25 +34,25 @@ final class MotionVideoSession {
                 DispatchQueue.main.async { self?.bindOutput() }
             }
         }
-        if surface !== next {
-            readiness = nil
-            surface?.videoLayer.player = nil
-            surface = next
-            next.reset()
-            next.videoLayer.player = player
-            readiness = next.videoLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self, weak next] _, _ in
-                DispatchQueue.main.async {
-                    guard let self, let next, self.surface === next else { return }
-                    next.setReady(next.videoLayer.isReadyForDisplay)
+        if host !== next {
+            host = next
+            next.mount(surface)
+            if surface.videoLayer.player !== player { surface.videoLayer.player = player }
+            if readiness == nil {
+                readiness = surface.videoLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] _, _ in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        self.surface.setReady(self.surface.videoLayer.isReadyForDisplay)
+                    }
                 }
             }
         }
-        if frozen && !next.isFrozen {
+        if frozen && !surface.isFrozen {
             player.pause()
             bindOutput()
             let buffer = output?.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
-            next.freeze(buffer)
-        } else if !frozen { next.unfreeze() }
+            surface.freeze(buffer)
+        } else if !frozen { surface.unfreeze() }
         if playing && !frozen { if player.rate == 0 { player.play() } }
         else { player.pause() }
     }
@@ -71,12 +72,12 @@ final class MotionVideoSession {
         }
     }
 
-    func detach(_ old: MotionVideoSurface) {
-        old.videoLayer.player = nil
-        guard surface === old else { return }
+    func detach(_ old: MotionVideoHost) {
+        guard host === old else { return }
         player.pause()
-        readiness = nil
-        surface = nil
+        surface.removeFromSuperview()
+        host = nil
+        // Keep the same decoded layer/frame for a card <-> flight-overlay reparent.
     }
 
     func pause() { player.pause() }
@@ -87,11 +88,33 @@ final class MotionVideoSession {
         itemObservation = nil
         if let output, let outputItem { outputItem.remove(output) }
         output = nil; outputItem = nil
-        surface?.videoLayer.player = nil
-        surface = nil
+        surface.videoLayer.player = nil
+        surface.removeFromSuperview()
+        surface.reset()
+        host = nil
         looper?.disableLooping(); looper = nil
         player.removeAllItems()
         url = nil
+    }
+}
+
+/// SwiftUI owns these lightweight hosts. The session moves its one resident video surface
+/// between them, retaining the exact AVPlayerLayer, frozen frame and readiness during flight.
+@MainActor
+final class MotionVideoHost: UIView {
+    func mount(_ surface: MotionVideoSurface) {
+        surface.removeFromSuperview()
+        addSubview(surface)
+        setNeedsLayout()
+        layoutIfNeeded()
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        subviews.first?.frame = bounds
+        subviews.first?.layoutIfNeeded()
+        CATransaction.commit()
     }
 }
 

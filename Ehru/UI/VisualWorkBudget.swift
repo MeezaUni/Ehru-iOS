@@ -32,8 +32,8 @@ extension View {
     /// Scroll visibility changes only at threshold crossings, rather than publishing geometry
     /// each frame. Older systems still use the view's normal appearance/disappearance hooks.
     @ViewBuilder
-    func reportsScrollVisibility(_ action: @escaping (Bool) -> Void) -> some View {
-        if #available(iOS 18.0, *) {
+    func reportsScrollVisibility(enabled: Bool = true, _ action: @escaping (Bool) -> Void) -> some View {
+        if #available(iOS 18.0, *), enabled {
             self.onScrollVisibilityChange(threshold: 0.15, action)
         } else { self }
     }

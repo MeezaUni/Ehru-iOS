@@ -84,13 +84,6 @@ final class PlayerArtworkLayoutTests: XCTestCase {
                     Color.clear
                         .frame(width: source.width, height: source.height)
                         .playerArtworkFrame(expanded: true)
-                        .overlay {
-                            Color.blue
-                                .background { GeometryReader { proxy in
-                                    Color.clear.preference(key: RenderKey.self, value: RenderFrames(artwork: proxy.frame(in: .named(PlayerArtworkSpace.root))))
-                                } }
-                                .modifier(PlayerArtworkFlight(isCurrent: true))
-                        }
                         .offset(x: source.minX, y: source.minY)
                     Color.green
                         .frame(width: controls.width, height: controls.height)
@@ -102,6 +95,14 @@ final class PlayerArtworkLayoutTests: XCTestCase {
                 }
                 .frame(width: 390, height: 780, alignment: .topLeading)
                 .modifier(PlayerForegroundMotion(drag: drag))
+                .overlay {
+                    PlayerArtworkOverlay(progress: drag.progress, frames: PlayerArtworkFrames(expanded: source, mini: destination)) {
+                        Color.blue
+                            .background { GeometryReader { proxy in
+                                Color.clear.preference(key: RenderKey.self, value: RenderFrames(artwork: proxy.frame(in: .named(PlayerArtworkSpace.root))))
+                            } }
+                    }
+                }
                 .environment(drag)
                 .environment(\.playerArtworkFrames, PlayerArtworkFrames(expanded: source, mini: destination))
             }

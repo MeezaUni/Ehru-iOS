@@ -14,6 +14,15 @@ struct TransitionPreviewClock: Equatable {
         tailMs = Double(timing.tailMs)
     }
 
+    /// Some routes expose sample time without a host-time flag. Positive rendered samples
+    /// are still a real clock; zero without a host timestamp cannot prove a scheduled start.
+    static func elapsed(sampleTime: Int64, sampleRate: Double, renderHost: UInt64?, scheduledHost: UInt64) -> Double? {
+        guard sampleTime >= 0, sampleRate.isFinite, sampleRate > 0 else { return nil }
+        if let renderHost, renderHost < scheduledHost { return nil }
+        guard sampleTime > 0 || renderHost != nil else { return nil }
+        return Double(sampleTime) / sampleRate * 1000
+    }
+
     func position(outgoingElapsedMs: Double?, incomingElapsedMs: Double?, latencyMs: Double) -> Double? {
         let incoming = incomingElapsedMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
         let outgoing = outgoingElapsedMs.flatMap { $0.isFinite && $0 >= 0 ? $0 - leadMs : nil }

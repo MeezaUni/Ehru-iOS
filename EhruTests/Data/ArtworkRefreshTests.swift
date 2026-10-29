@@ -18,6 +18,22 @@ final class ArtworkRefreshTests: XCTestCase {
         return data as Data
     }
 
+    func testLockScreenCanUseAnAlreadyCachedCoverSizeWithoutAnotherRead() async throws {
+        let url = TagFixtures.write(TagFixtures.mp3(v4: true), name: "cached-fallback.mp3")
+        defer { try? FileManager.default.removeItem(at: url) }
+        var edit = TagWriteRequest()
+        edit.artwork = try png(width: 16)
+        try TagWriter.write(edit, to: url)
+        let loader = ArtworkLoader.shared
+        loader.forget(path: url.path)
+        let loaded = await loader.image(for: url, maxPixels: 1200)
+        XCTAssertNotNil(loaded)
+        XCTAssertNil(loader.cachedImage(for: url, maxPixels: 600))
+        XCTAssertTrue(loader.cachedImage(for: url, maxPixels: 600, fallbackSizes: [1200, 300]) === loaded)
+        loader.forget(path: url.path)
+        XCTAssertNil(loader.cachedImage(for: url, maxPixels: 600, fallbackSizes: [1200, 300]))
+    }
+
     func testReplacingArtAtTheSameURLInvalidatesPositiveAndMissingCaches() async throws {
         let url = TagFixtures.write(TagFixtures.mp3(v4: true), name: "artwork-refresh.mp3")
         defer { try? FileManager.default.removeItem(at: url) }

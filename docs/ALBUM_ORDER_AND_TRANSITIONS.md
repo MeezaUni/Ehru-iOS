@@ -60,7 +60,7 @@ pink selects a filter knee: horizontal movement adjusts its time, vertical movem
 on the same logarithmic frequency scale as the plot. Both source endpoints retain the filter's
 original cutoff; exponential sweeps connect them through the edited knee. Optional saved knee
 fields preserve old presets exactly when absent. Picking a named filter resets its knee edits.
-All direct edits are transient until release and form one undo step. The central play/stop control auditions the draft;
+All direct edits are transient until release and form one undo step. The play/stop row below the waveforms auditions the draft;
 technical measurements and source ranges remain in an expandable analysis section.
 
 Preview schedules bounded source segments on two decks with the same
@@ -111,7 +111,10 @@ Off/Auto-with-no-default now shows actual end/start audio without inventing an o
 volume fade, bass or filter automation. Its bounded preview schedules a real back-to-back cut
 with both transition stages bypassed. Choosing a preset or a duration enables an actual fade.
 
-The green audition playhead reads each AVAudioPlayerNode's rendered sample time. Before the
+The full-height green audition playhead is drawn as one explicit path through both waveforms.
+Its playback control and current-time readout sit below the plot, keeping the curves unobstructed.
+The cursor reads each AVAudioPlayerNode's rendered sample time; positive samples remain usable
+on routes without a host-time flag. Zero without a host timestamp does not invent a start. Before the
 incoming scheduled host time the outgoing deck supplies progress; afterward incoming samples
 take over and continue through the tail even when the outgoing deck is released. The current
 output-route latency is captured at preview start and subtracted for approximate audible sync.

@@ -2,8 +2,13 @@ import Observation
 import SwiftUI
 
 private struct PlayerCoverProgressKey: EnvironmentKey { static let defaultValue: CGFloat = 1 }
+private struct PlayerArtworkInFlightKey: EnvironmentKey { static let defaultValue = false }
 private struct PlayerMotionKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
+    var playerArtworkInFlight: Bool {
+        get { self[PlayerArtworkInFlightKey.self] }
+        set { self[PlayerArtworkInFlightKey.self] = newValue }
+    }
     var playerCoverProgress: CGFloat {
         get { self[PlayerCoverProgressKey.self] }
         set { self[PlayerCoverProgressKey.self] = newValue }
@@ -84,20 +89,29 @@ struct PlayerForegroundMotion: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.playerCoverProgress, drag.progress)
+            .environment(\.playerArtworkInFlight, drag.isMoving && drag.isReady && !reduceMotion)
             .coordinateSpace(name: PlayerArtworkSpace.expanded)
             .opacity(reduceMotion ? Double(drag.progress) : 1)
     }
 }
 
-struct PlayerArtworkFlight: ViewModifier {
-    let isCurrent: Bool
-    @Environment(PlayerDragState.self) private var drag
-    @Environment(\.playerArtworkFrames) private var frames
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+/// A sibling of the scrolling foreground, so the moving artwork cannot be cropped by the
+/// carousel's projection surface or the ScrollView. Production and rendered-image tests use it.
+struct PlayerArtworkOverlay<Artwork: View>: View {
+    let progress: CGFloat
+    let frames: PlayerArtworkFrames
+    var visible = true
+    @ViewBuilder var artwork: () -> Artwork
 
-    func body(content: Content) -> some View {
-        content.modifier(PlayerArtworkTransform(progress: isCurrent && !reduceMotion ? drag.progress : 1,
-                                                source: frames.expanded, destination: frames.mini))
+    var body: some View {
+        GeometryReader { _ in
+            artwork()
+                .frame(width: frames.expanded.width, height: frames.expanded.height)
+                .modifier(PlayerArtworkTransform(progress: progress, source: frames.expanded, destination: frames.mini, visible: visible))
+                .position(x: frames.expanded.midX, y: frames.expanded.midY)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 }
 
@@ -105,12 +119,23 @@ struct PlayerArtworkTransform: GeometryEffect {
     var progress: CGFloat
     let source: CGRect
     let destination: CGRect
+    var visible = true
     var animatableData: CGFloat {
         get { progress }
         set { progress = newValue }
     }
     func effectValue(size: CGSize) -> ProjectionTransform {
-        ProjectionTransform(PlayerCoverGeometry.artworkTransform(progress: progress, source: source, destination: destination))
+        ProjectionTransform(visible ? PlayerCoverGeometry.artworkTransform(progress: progress, source: source, destination: destination)
+                            : CGAffineTransform(translationX: -10_000, y: 0))
+    }
+}
+
+/// Visibility is discrete, while the flight's progress animates. Opacity interpolation would
+/// briefly show two covers (or neither) when handing ownership to the overlay.
+struct PlayerArtworkSlotVisibility: GeometryEffect {
+    let hidden: Bool
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(hidden ? CGAffineTransform(translationX: -10_000, y: 0) : .identity)
     }
 }
 
@@ -142,7 +167,8 @@ enum PlayerCoverGeometry {
 struct PlayerChromeFade: ViewModifier {
     @Environment(PlayerDragState.self) private var drag
     func body(content: Content) -> some View {
-        content.opacity(PlayerCoverGeometry.chromeOpacity(drag.progress))
+        content.opacity(drag.isMoving ? 0 : 1)
+            .animation(.easeOut(duration: 0.12), value: drag.isMoving)
     }
 }
 

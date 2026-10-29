@@ -38,6 +38,10 @@ final class PlayerController {
     @ObservationIgnored private var loopTarget: (positionMs: Int64, onReached: () -> Void)?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var ticks = 0
+    enum VisualMotion: Hashable { case carousel, presentation }
+    @ObservationIgnored private var visualMotion: Set<VisualMotion> = []
+    @ObservationIgnored private var nowPlayingUpdate: Task<Void, Never>?
+    @ObservationIgnored private var artworkWarmup: Task<Void, Never>?
     @ObservationIgnored private var fileWarmup: Task<Void, Never>?
     @ObservationIgnored private var restoreFinished = false
     @ObservationIgnored private var consecutiveErrors = 0
@@ -337,7 +341,7 @@ final class PlayerController {
     /// Starts the current entry at [positionMs] from a fresh engine start.
     private func startCurrent(at positionMs: Int64, playing: Bool) {
         guard let entry = state.currentEntry else { return }
-        if playing { activateAudioSession() }
+        if playing && (!state.isPlaying || !engine.isRunning) { activateAudioSession() }
         do {
             try engine.play(entryId: entry.id, url: entry.song.url, positionMs: positionMs, startPlaying: playing)
             setPosition(positionMs)
@@ -411,7 +415,7 @@ final class PlayerController {
         listening.onItemChanged(song?.id, durationMs: song?.durationMs ?? 0, isPlaying: state.isPlaying)
         if history.onItemBecameCurrent(song, isPlaying: state.isPlaying) { state.history = history.entries }
         abLoop.onEntryChanged(sameEntryRepeated: sameEntryRepeated)
-        if let song, state.isPlaying { try? database.recordAlbumOfSongPlayed(song.id) }
+        if let song, state.isPlaying { recordAlbumPlayed(song.id) }
         reevaluateTransition()
         updateNowPlaying()
         persistState()
@@ -423,7 +427,7 @@ final class PlayerController {
         listening.onPlayingChanged(playing, durationMs: state.durationMs)
         if playing {
             if history.onPlaybackStarted() { state.history = history.entries }
-            if !wasPlaying, let song = state.currentSong { try? database.recordAlbumOfSongPlayed(song.id) }
+            if !wasPlaying, let song = state.currentSong { recordAlbumPlayed(song.id) }
             startTimer()
         } else {
             stopTimer()
@@ -450,6 +454,17 @@ final class PlayerController {
             return url == state.currentSong?.url ? nil : url
         }
         fileWarmup = Task { [weak self] in await self?.engine.warmFiles(urls) }
+        artworkWarmup?.cancel()
+        artworkWarmup = Task {
+            await withTaskGroup(of: Void.self) { group in
+                for url in urls {
+                    group.addTask {
+                        guard !Task.isCancelled else { return }
+                        _ = await ArtworkLoader.shared.image(for: url, maxPixels: 600)
+                    }
+                }
+            }
+        }
     }
 
     // MARK: Position polling
@@ -655,8 +670,20 @@ final class PlayerController {
                 if reason == AVAudioSession.RouteChangeReason.oldDeviceUnavailable.rawValue, self?.state.isPlaying == true { self?.pause() }
             }
         })
+        observers.append(center.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.visualMotion.removeAll()
+                self?.nowPlayingUpdate?.cancel()
+                self?.nowPlayingUpdate = nil
+                self?.publishNowPlaying()
+            }
+        })
         observers.append(center.addObserver(forName: UIApplication.didEnterBackgroundNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
+                self?.visualMotion.removeAll()
+                self?.nowPlayingUpdate?.cancel()
+                self?.nowPlayingUpdate = nil
+                self?.publishNowPlaying()
                 self?.listening.checkpoint()
                 self?.persistNow()
             }
@@ -714,7 +741,30 @@ final class PlayerController {
         }
     }
 
+    private func recordAlbumPlayed(_ songID: Int64) {
+        let database = database
+        Task.detached(priority: .utility) { try? database.recordAlbumOfSongPlayed(songID) }
+    }
+
+    func setVisualMotion(_ reason: VisualMotion, active: Bool) {
+        if active { visualMotion.insert(reason) } else { visualMotion.remove(reason) }
+        if visualMotion.isEmpty, nowPlayingUpdate != nil { updateNowPlaying() }
+    }
+
+    /// Coalesce duplicate state/artwork publications. During gestures, keep MediaPlayer IPC
+    /// off the initial input frame; a bounded delay also guarantees updates on a held drag.
     private func updateNowPlaying() {
+        nowPlayingUpdate?.cancel()
+        let delayed = !visualMotion.isEmpty && UIApplication.shared.applicationState == .active
+        nowPlayingUpdate = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(delayed ? 350 : 0)) } catch { return }
+            guard let self, !Task.isCancelled else { return }
+            self.nowPlayingUpdate = nil
+            self.publishNowPlaying()
+        }
+    }
+
+    private func publishNowPlaying() {
         guard let song = state.currentSong else {
             lockScreenMotion.update(sources: [], onReady: {})
             MPNowPlayingInfoCenter.default().playbackState = .stopped
@@ -723,7 +773,8 @@ final class PlayerController {
         }
         if artworkSongId != song.id {
             artworkSongId = song.id
-            artwork = nil
+            let cached = ArtworkLoader.shared.cachedImage(for: song.url, maxPixels: 600, fallbackSizes: [1200, 400, 300, 150, 120, 80])
+            artwork = cached.map(Self.makeArtwork)
             loadArtwork(for: song)
         }
         var info: [String: Any] = [

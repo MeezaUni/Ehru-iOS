@@ -63,7 +63,7 @@ final class LockScreenMotionAsset: @unchecked Sendable {
                 throw MotionArtworkError("This motion cover has no supported lock-screen aspect ratio.")
             }
             return LockScreenMotionAsset(url: leased, preview: image, aspect: aspect,
-                                         artworkID: "ehru-motion-v2-\(source.lastPathComponent)")
+                                         artworkID: "ehru-motion-v3-\(source.lastPathComponent)-\(leased.lastPathComponent)")
         } catch {
             try? FileManager.default.removeItem(at: leased)
             throw error
@@ -105,8 +105,19 @@ final class LockScreenMotionArtwork {
         }
     }
 
+    private struct Source: Hashable, Sendable {
+        let url: URL
+        let size: Int
+        let modified: Date?
+        init(_ url: URL) {
+            self.url = url
+            let values = try? FileManager.default.attributesOfItem(atPath: url.path)
+            size = (values?[.size] as? NSNumber)?.intValue ?? -1
+            modified = values?[.modificationDate] as? Date
+        }
+    }
     private struct Selection: Equatable, Sendable {
-        let sources: [URL]
+        let sources: [Source]
         let supported: [String]
     }
 
@@ -116,6 +127,8 @@ final class LockScreenMotionArtwork {
     @ObservationIgnored private var requestID = UUID()
     @ObservationIgnored private var pending: Task<Void, Never>?
     @ObservationIgnored private(set) var info: [String: Any] = [:]
+    @ObservationIgnored private var assets: [Source: LockScreenMotionAsset] = [:]
+    @ObservationIgnored private var assetOrder: [Source] = []
     @ObservationIgnored private let supportedKeys: () -> [String]
 
     init(supportedKeys: @escaping () -> [String] = {
@@ -128,7 +141,7 @@ final class LockScreenMotionArtwork {
     func retry() { selection = nil }
 
     func update(sources: [URL], onReady: @escaping @MainActor () -> Void) {
-        let next = Selection(sources: sources.distinct(by: { $0 }), supported: supportedKeys().sorted())
+        let next = Selection(sources: sources.distinct(by: { $0 }).map(Source.init), supported: supportedKeys().sorted())
         // Capabilities can change independently of the song; do not cache just the file URL.
         guard next != selection else { return }
         pending?.cancel()
@@ -147,6 +160,13 @@ final class LockScreenMotionArtwork {
             status = .unavailable("iOS is not accepting animated artwork on this device.")
             return
         }
+        if next.sources.allSatisfy({ assets[$0] != nil }) {
+            for source in next.sources {
+                if let asset = assets[source] { info.merge(entry(asset, supported: next.supported, requestID: requestID)) { current, _ in current } }
+            }
+            status = info.isEmpty ? .unavailable("The downloaded cover has no supported shape.") : .ready
+            return
+        }
         status = .preparing
         pending = Task { [weak self] in
             var prepared: [String: Any] = [:]
@@ -155,17 +175,16 @@ final class LockScreenMotionArtwork {
             // usable square, and each key must describe the video's actual aspect ratio.
             for source in next.sources {
                 guard !Task.isCancelled else { return }
-                let preparation = Task.detached(priority: .utility) { try await LockScreenMotionAsset.prepare(source: source) }
                 do {
-                    let asset = try await withTaskCancellationHandler(operation: { try await preparation.value }, onCancel: { preparation.cancel() })
-                    guard !Task.isCancelled else { return }
-                    let entry = asset.info(supported: next.supported) { [weak self] in
-                        Task { @MainActor [weak self] in
-                            guard let self, self.requestID == requestID else { return }
-                            self.videoRequested = true
-                        }
+                    let asset: LockScreenMotionAsset
+                    if let cached = self?.assets[source] { asset = cached }
+                    else {
+                        let preparation = Task.detached(priority: .utility) { try await LockScreenMotionAsset.prepare(source: source.url) }
+                        asset = try await withTaskCancellationHandler(operation: { try await preparation.value }, onCancel: { preparation.cancel() })
                     }
-                    prepared.merge(entry) { existing, _ in existing }
+                    guard !Task.isCancelled, let self else { return }
+                    self.remember(asset, source: source)
+                    prepared.merge(self.entry(asset, supported: next.supported, requestID: requestID)) { existing, _ in existing }
                 } catch {
                     guard !Task.isCancelled else { return }
                     lastError = error.localizedDescription
@@ -181,4 +200,21 @@ final class LockScreenMotionArtwork {
             onReady()
         }
     }
+    private func entry(_ asset: LockScreenMotionAsset, supported: [String], requestID: UUID) -> [String: Any] {
+        guard #available(iOS 26.0, *) else { return [:] }
+        return asset.info(supported: supported) { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, self.requestID == requestID else { return }
+                self.videoRequested = true
+            }
+        }
+    }
+
+    private func remember(_ asset: LockScreenMotionAsset, source: Source) {
+        assets[source] = asset
+        assetOrder.removeAll { $0 == source }
+        assetOrder.append(source)
+        while assetOrder.count > 4 { assets.removeValue(forKey: assetOrder.removeFirst()) }
+    }
+
 }

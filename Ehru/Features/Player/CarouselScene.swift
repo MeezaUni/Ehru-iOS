@@ -65,7 +65,20 @@ struct CarouselScene {
 final class CarouselPresentationMeter: @unchecked Sendable {
     private let lock = NSLock()
     private var value: CGFloat?
-    func record(_ focus: CGFloat) { lock.withLock { value = focus } }
+    private var nearest: Int?
+    private var observer: ((Int) -> Void)?
+
+    func observeNearest(_ observer: ((Int) -> Void)?) { lock.withLock { self.observer = observer } }
+    func record(_ focus: CGFloat) {
+        let callback: ((Int) -> Void)? = lock.withLock {
+            value = focus
+            let next = Int(focus.rounded())
+            guard next != nearest else { return nil }
+            nearest = next
+            return observer
+        }
+        callback?(Int(focus.rounded()))
+    }
     func read(fallback: CGFloat) -> CGFloat { lock.withLock { value ?? fallback } }
 }
 
@@ -105,22 +118,47 @@ struct CarouselFocusProbe: GeometryEffect {
     }
 }
 
-/// z-order uses the interpolated distance, not the destination distance. Neighbours remain
-/// behind the nearest card, restoring Cover Flow previews without a departing card on top.
-struct CarouselCardMotion: AnimatableModifier {
-    var distance: CGFloat
-    var stack: CGFloat
-    let size: CGSize
+/// The transforms animate natively; the z-index remains a direct trait of each ZStack child.
+/// Only crossing a page midpoint updates frontOrdinal, rather than rebuilding cards each frame.
+struct CarouselStrip<Card: View>: View {
+    let items: [CarouselScene.Item]
+    let focus: CGFloat
+    let frontOrdinal: Int
+    let stack: CGFloat
+    let viewport: CGSize
+    let cardSize: CGSize
     let hideLeft: Bool
     let reduceMotion: Bool
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(distance, stack) }
-        set { distance = newValue.first; stack = newValue.second }
+    let meter: CarouselPresentationMeter
+    @ViewBuilder var card: (CarouselScene.Item) -> Card
+
+    var body: some View {
+        ZStack {
+            ForEach(items) { item in
+                let distance = CGFloat(item.ordinal) - focus
+                let pose = CarouselPose(distance: distance, width: cardSize.width, stack: stack,
+                                        hideLeft: hideLeft, reduceMotion: reduceMotion)
+                card(item)
+                    .modifier(DepthCard(distance: distance, width: cardSize.width, stack: stack,
+                                        hideLeft: hideLeft, reduceMotion: reduceMotion))
+                    .opacity(pose.opacity)
+                    .zIndex(CarouselPose.depth(distance: CGFloat(item.ordinal - frontOrdinal)))
+            }
+            Color.clear.frame(width: 1, height: 1)
+                .modifier(CarouselFocusProbe(focus: focus, meter: meter))
+                .allowsHitTesting(false).accessibilityHidden(true)
+        }
+        .frame(width: viewport.width, height: viewport.height)
     }
-    func body(content: Content) -> some View {
-        let pose = CarouselPose(distance: distance, width: size.width, stack: stack, hideLeft: hideLeft, reduceMotion: reduceMotion)
-        let projection = DepthCard(distance: distance, width: size.width, stack: stack,
-                                   hideLeft: hideLeft, reduceMotion: reduceMotion).effectValue(size: size)
-        content.projectionEffect(projection).opacity(pose.opacity).zIndex(CarouselPose.depth(distance: distance))
+}
+
+enum CarouselDragLimit {
+    static func focus(_ proposed: CGFloat, center: Int, canPrevious: Bool, canNext: Bool) -> CGFloat {
+        let base = CGFloat(center)
+        guard proposed.isFinite else { return base }
+        let low = base - (canPrevious ? 1 : 0), high = base + (canNext ? 1 : 0)
+        let clipped = proposed.clamped(low, high)
+        let excess = proposed - clipped
+        return clipped + excess / (1 + abs(excess)) * 0.12
     }
 }

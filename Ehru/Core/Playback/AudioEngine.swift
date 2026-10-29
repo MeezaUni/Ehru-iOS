@@ -159,6 +159,18 @@ final class AudioEngine {
         guard isReady else { throw EngineError.notReady }
         guard let file = try? openFile(url) else { throw EngineError.unreadable(url) }
         previewSchedule = nil
+        if startPlaying, active.player.isPlaying, currentSegment(active)?.entryId != entryId,
+           decks.allSatisfy({ $0.stageUnit != nil }) {
+            // Prepare the idle deck while the old one is still sounding. A short render-clock
+            // handoff avoids stopping audio while a new format/decoder is scheduled.
+            var handoff = TransitionSpec()
+            handoff.curve = .linear
+            let lead = max(AVAudioSession.sharedInstance().ioBufferDuration * 2, 0.012)
+            try startCrossfade(file: file, entryId: entryId, incomingStartMs: positionMs,
+                               spec: handoff, durationMs: 20,
+                               startHostTime: mach_absolute_time() + TransitionStageKernel.hostTicks(forSeconds: lead))
+            return
+        }
         stop(other)
         stop(active)
         other.stage.cancel()
@@ -236,6 +248,12 @@ final class AudioEngine {
     func crossfade(to entryId: UUID, url: URL, incomingStartMs: Int64, spec: TransitionSpec, durationMs: Int,
                    startHostTime: UInt64) throws {
         guard let file = try? openFile(url) else { throw EngineError.unreadable(url) }
+        try startCrossfade(file: file, entryId: entryId, incomingStartMs: incomingStartMs,
+                           spec: spec, durationMs: durationMs, startHostTime: startHostTime)
+    }
+
+    private func startCrossfade(file: AVAudioFile, entryId: UUID, incomingStartMs: Int64, spec: TransitionSpec,
+                                durationMs: Int, startHostTime: UInt64) throws {
         let outgoing = active
         let incoming = other
         stop(incoming)
@@ -297,10 +315,10 @@ final class AudioEngine {
         guard let preview = previewSchedule, engine.isRunning else { return nil }
         func elapsed(_ deck: Deck, id: UUID, host: UInt64) -> Double? {
             guard deck.segments.first?.entryId == id, deck.player.isPlaying,
-                  let render = deck.player.lastRenderTime, render.isHostTimeValid, render.hostTime >= host,
-                  let sample = deck.player.playerTime(forNodeTime: render), sample.isSampleTimeValid,
-                  sample.sampleTime >= 0, sample.sampleRate > 0 else { return nil }
-            return Double(sample.sampleTime) / sample.sampleRate * 1000
+                  let render = deck.player.lastRenderTime,
+                  let sample = deck.player.playerTime(forNodeTime: render), sample.isSampleTimeValid else { return nil }
+            return TransitionPreviewClock.elapsed(sampleTime: sample.sampleTime, sampleRate: sample.sampleRate,
+                                                  renderHost: render.isHostTimeValid ? render.hostTime : nil, scheduledHost: host)
         }
         return preview.clock.position(outgoingElapsedMs: elapsed(decks[0], id: preview.outgoingID, host: preview.outgoingHost),
                                       incomingElapsedMs: elapsed(decks[1], id: preview.incomingID, host: preview.incomingHost),
