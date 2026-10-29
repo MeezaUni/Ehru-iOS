@@ -148,7 +148,7 @@ final class TransitionWaveformEditingTests: XCTestCase {
         let points = try XCTUnwrap(updated.incomingCurve).points
         let updatedTiming = try makeTiming(updated)
         XCTAssertEqual(updatedTiming.automation(.incoming).gainAt(Double(points[2].t) * Double(updatedTiming.plan.durationMs)), points[2].gain, accuracy: 1e-5)
-        XCTAssertEqual(session.moved(translation: CGSize(width: .nan, height: 0)), base)
+        XCTAssertEqual(session.moved(translation: CGSize(width: CGFloat.nan, height: 0)), base)
         var config = TransitionConfig()
         config.global.defaultChoice = .custom(base)
         var draft = EditorDraft.open(.global, config: config)
