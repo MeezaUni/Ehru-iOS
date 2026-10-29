@@ -59,6 +59,10 @@ final class TransitionAnalysisTests: XCTestCase {
         XCTAssertEqual(slice.channels, 2)
         XCTAssertEqual(slice.meanRMS, 0.5, accuracy: 1e-6)
         XCTAssertEqual(slice.peaks, [0.5, 0.5, 0.5, 0.5])
+        let detailed = try XCTUnwrap(TransitionAnalysisStore.decode(url: url, range: 1000..<2000, bins: 8192))
+        XCTAssertEqual(detailed.peaks.count, 8000)
+        XCTAssertTrue(detailed.peaks.allSatisfy { abs($0 - 0.5) < 1e-6 }, "A finer display must not invent empty bins between real samples")
+        XCTAssertEqual(detailed.meanRMS, slice.meanRMS, accuracy: 1e-6)
         XCTAssertNil(TransitionAnalysisStore.decode(url: url, range: 1500..<2500))
         XCTAssertNil(TransitionAnalysisStore.decode(url: url, range: 0..<21_000))
     }

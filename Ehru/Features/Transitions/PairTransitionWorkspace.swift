@@ -16,11 +16,22 @@ struct PairTransitionWorkspace: View {
     @State private var outgoing: TransitionAudioSlice?
     @State private var incoming: TransitionAudioSlice?
     @State private var loading = true
-    @State private var inspectedMs: Double = 0
+    @State private var inspectedMs: Double?
     @State private var preview = PairTransitionPreview()
+    @State private var timeZoom: Double = 1
+    @State private var viewFocusMs: Double?
+    @State private var waveHeight = TransitionWaveformHeight.auto
+    @State private var cueSession: TransitionWaveformDrag?
+    @State private var draggedSpec: TransitionSpec?
+    @State private var cueDisplayGain: Float?
+    @State private var pinchViewport: TransitionWaveformViewport?
+    @State private var pinchZoom: Double?
+    @GestureState private var pinching = false
+
+    private var workingSpec: TransitionSpec { draggedSpec ?? spec }
 
     private var timing: PairTransitionTiming? {
-        PairTransitionTiming(spec: spec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
+        PairTransitionTiming(spec: workingSpec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
     }
 
     private struct Request: Hashable {
@@ -33,23 +44,35 @@ struct PairTransitionWorkspace: View {
     }
 
     private var request: Request? {
-        timing.map { Request(from: pair.from.song, to: pair.to.song,
-                             outStart: $0.outgoingRange.lowerBound, outEnd: $0.outgoingRange.upperBound,
-                             inStart: $0.incomingRange.lowerBound, inEnd: $0.incomingRange.upperBound) }
+        // Only committed cues request decoding. Finger movement remaps the buffered samples.
+        PairTransitionTiming(spec: spec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs).map {
+            let out = $0.analysisRange(.outgoing, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
+            let inc = $0.analysisRange(.incoming, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
+            return Request(from: pair.from.song, to: pair.to.song, outStart: out.lowerBound, outEnd: out.upperBound,
+                           inStart: inc.lowerBound, inEnd: inc.upperBound)
+        }
     }
 
     var body: some View {
         StudioPanel {
             sourceLine("Outgoing", pair.from.song, outgoing)
             if let timing {
-                PairAudioPlot(timing: timing, outgoing: outgoing, incoming: incoming, inspectedMs: inspection(timing))
-                    .frame(height: 244)
+                waveformControls(timing)
+                waveform(timing)
+                TransitionWaveformOverview(timing: timing, viewport: viewport(timing)) { viewFocusMs = $0 }
+                    .allowsHitTesting(cueSession == nil)
                 sourceLine("Incoming", pair.to.song, incoming)
                 HStack {
-                    Text("PCM peak / RMS · white line: volume gain")
+                    Text(String(format: "Wave height +%.1f dB · display only", 20 * log10(displayGain(timing))))
                         .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
                     Spacer(minLength: 0)
                     if loading { ProgressView().controlSize(.small) }
+                }
+                Text("Drag the upper/lower waveform to move its cue. Pinch to zoom; use the strip to move the view. White lines: volume. Dimmed audio is outside playback.")
+                    .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+                if cueSession != nil {
+                    Text("Out end \(transitionTimestamp(Double(workingSpec.outgoingEndMs(pair.from.song.durationMs)))) · In start \(transitionTimestamp(Double(workingSpec.incomingStartMs)))")
+                        .font(.caption.monospacedDigit()).foregroundStyle(palette.primary)
                 }
                 if !loading && (outgoing == nil || incoming == nil) {
                     Text("Audio analysis unavailable for \(outgoing == nil && incoming == nil ? "both files" : outgoing == nil ? "the outgoing file" : "the incoming file"). Check that the file is present and readable.")
@@ -72,32 +95,143 @@ struct PairTransitionWorkspace: View {
             }
         }
         .task(id: request) {
-            outgoing = nil
-            incoming = nil
             loading = true
-            guard let timing else { loading = false; return }
+            guard let request else { outgoing = nil; incoming = nil; loading = false; return }
             // A duration/cue drag does not start a decode for every intermediate value.
             do { try await Task.sleep(for: .milliseconds(250)) } catch { return }
-            async let out = TransitionAnalysisStore.shared.slice(url: pair.from.song.url, range: timing.outgoingRange)
-            async let inc = TransitionAnalysisStore.shared.slice(url: pair.to.song.url, range: timing.incomingRange)
+            async let out = TransitionAnalysisStore.shared.slice(url: request.from.url, range: request.outStart..<request.outEnd, bins: 8192)
+            async let inc = TransitionAnalysisStore.shared.slice(url: request.to.url, range: request.inStart..<request.inEnd, bins: 8192)
             let result = await (out, inc)
             guard !Task.isCancelled else { return }
             outgoing = result.0
             incoming = result.1
             loading = false
         }
-        .onChange(of: spec) { _, _ in preview.stop() }
-        .onChange(of: scenePhase) { _, phase in if phase != .active { preview.stop(resume: false) } }
+        .onChange(of: spec) { _, _ in preview.stop(); cancelCueDrag() }
+        .onChange(of: pinching) { _, active in if !active { pinchViewport = nil; pinchZoom = nil } }
+        .onChange(of: scenePhase) { _, phase in if phase != .active { preview.stop(resume: false); cancelCueDrag() } }
         .onChange(of: player.state.isPlaying) { _, playing in
             if playing { preview.stop(resume: false) }
         }
         .onChange(of: player.state.currentEntry?.id) { _, _ in preview.stop(resume: false) }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.interruptionNotification)) { _ in preview.stop(resume: false) }
         .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in preview.stop(resume: false) }
-        .onDisappear { preview.stop(resume: scenePhase == .active) }
+        .onDisappear { preview.stop(resume: scenePhase == .active); cancelCueDrag() }
     }
 
-    private func inspection(_ timing: PairTransitionTiming) -> Double { inspectedMs.clamped(0, Double(timing.plan.durationMs)) }
+    private func inspection(_ timing: PairTransitionTiming) -> Double {
+        (inspectedMs ?? Double(timing.plan.durationMs) / 2).clamped(0, Double(timing.plan.durationMs))
+    }
+
+    private func viewport(_ timing: PairTransitionTiming) -> TransitionWaveformViewport {
+        cueSession?.viewport ?? TransitionWaveformViewport(timing: timing, zoom: timeZoom, focusMs: viewFocusMs)
+    }
+
+    private func displayGain(_ timing: PairTransitionTiming) -> Float {
+        if let cueDisplayGain { return cueDisplayGain }
+        let view = viewport(timing)
+        let outPeak = outgoing?.visiblePeak(sourceStartMs: Double(timing.plan.startAtMs), viewport: view) ?? 0
+        let inPeak = incoming?.visiblePeak(sourceStartMs: Double(timing.plan.incomingStartMs), viewport: view) ?? 0
+        return waveHeight.gain(visiblePeak: max(outPeak, inPeak))
+    }
+
+    private func waveformControls(_ timing: PairTransitionTiming) -> some View {
+        HStack(spacing: Spacing.xs) {
+            ForEach([1.0, 2, 4, 8], id: \.self) { zoom in
+                Button {
+                    timeZoom = zoom
+                    viewFocusMs = zoom == 1 ? nil : inspection(timing)
+                } label: {
+                    Text(zoom == 1 ? "Fit" : "\(Int(zoom))×")
+                        .font(.caption.weight(.semibold))
+                        .frame(minWidth: 38, minHeight: 44)
+                        .background(abs(timeZoom - zoom) < 0.05 ? palette.primary.opacity(0.18) : .clear, in: RoundedRectangle(cornerRadius: 10))
+                }
+                .accessibilityLabel(zoom == 1 ? "Fit transition in view" : "Time zoom \(Int(zoom)) times")
+                .accessibilityAddTraits(abs(timeZoom - zoom) < 0.05 ? .isSelected : [])
+            }
+            Spacer(minLength: 0)
+            Menu {
+                ForEach(TransitionWaveformHeight.allCases) { height in
+                    Button { waveHeight = height } label: {
+                        if height == waveHeight { Label(height.label, systemImage: "checkmark") }
+                        else { Text(height.label) }
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform")
+                    Text(waveHeight.label)
+                    Image(systemName: "chevron.down").font(.caption2)
+                }
+                .font(.caption).frame(minHeight: 44)
+            }
+            .menuStyle(.button).buttonStyle(.plain)
+            .accessibilityLabel("Waveform display height: \(waveHeight.label)")
+        }
+        .buttonStyle(.plain)
+        .disabled(cueSession != nil)
+    }
+
+    private func waveform(_ timing: PairTransitionTiming) -> some View {
+        GeometryReader { geometry in
+            PairAudioPlot(timing: timing, viewport: viewport(timing), outgoing: outgoing, incoming: incoming,
+                          inspectedMs: inspection(timing), displayGain: displayGain(timing), activeRole: cueSession?.role)
+                .overlay {
+                    PanInteraction(canBegin: { _, delta in !pinching && HorizontalGestureIntent.accepts(delta) },
+                                   change: { updateCueDrag($0, size: geometry.size, timing: timing) },
+                                   end: { finishCueDrag($0) }, cancel: cancelCueDrag,
+                                   tap: { inspectedMs = viewport(timing).time(at: Double($0.x / max(geometry.size.width, 1))) })
+                }
+                .simultaneousGesture(MagnifyGesture(minimumScaleDelta: 0.02)
+                    .updating($pinching) { _, active, _ in active = true }
+                    .onChanged { value in
+                        cancelCueDrag()
+                        let initial = PairTransitionTiming(spec: spec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs) ?? timing
+                        if pinchViewport == nil { pinchViewport = viewport(initial); pinchZoom = timeZoom }
+                        guard let base = pinchViewport, let zoom = pinchZoom else { return }
+                        let next = (zoom * Double(value.magnification)).clamped(1, 8)
+                        let view = base.zoomed(timing: initial, zoom: next, anchor: Double(value.startAnchor.x))
+                        timeZoom = next
+                        viewFocusMs = view.centerMs
+                    }
+                    .onEnded { _ in pinchViewport = nil; pinchZoom = nil })
+                .accessibilityAction(named: "Move outgoing cue earlier") { nudge(.outgoing, delta: 100) }
+                .accessibilityAction(named: "Move outgoing cue later") { nudge(.outgoing, delta: -100) }
+                .accessibilityAction(named: "Move incoming cue earlier") { nudge(.incoming, delta: 100) }
+                .accessibilityAction(named: "Move incoming cue later") { nudge(.incoming, delta: -100) }
+        }
+        .frame(height: 300)
+    }
+
+    private func updateCueDrag(_ gesture: PanInteraction.Sample, size: CGSize, timing: PairTransitionTiming) {
+        guard !pinching, size.width > 0 else { return }
+        if cueSession == nil {
+            preview.stop()
+            cueDisplayGain = displayGain(timing)
+            cueSession = TransitionWaveformDrag(base: spec, role: gesture.startLocation.y < size.height / 2 ? .outgoing : .incoming,
+                                                viewport: viewport(timing), width: Double(size.width))
+        }
+        guard let session = cueSession else { return }
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+        withTransaction(transaction) {
+            draggedSpec = session.shifted(points: Double(gesture.translation.width), outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
+        }
+    }
+
+    private func finishCueDrag(_ gesture: PanInteraction.Sample) {
+        guard let session = cueSession else { return }
+        let result = session.shifted(points: Double(gesture.translation.width), outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
+        cancelCueDrag()
+        if result != session.base { edit { _ in result } }
+    }
+
+    private func cancelCueDrag() { cueSession = nil; draggedSpec = nil; cueDisplayGain = nil }
+
+    private func nudge(_ role: TransitionRole, delta: Float) {
+        edit { TransitionEditing.shiftCue($0, role, deltaMs: delta, outgoingDurationMs: pair.from.song.durationMs, incomingDurationMs: pair.to.song.durationMs) }
+    }
 
     private func sourceLine(_ role: String, _ song: Song, _ slice: TransitionAudioSlice?) -> some View {
         HStack(spacing: Spacing.sm) {
@@ -135,7 +269,7 @@ struct PairTransitionWorkspace: View {
                     .background(palette.primary.opacity(0.14), in: Capsule())
             }
             .buttonStyle(.plain)
-            .disabled(loading || outgoing == nil || incoming == nil)
+            .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil)
             Text("\(transitionTimestamp(Double(timing.plan.startAtMs))) → \(transitionTimestamp(Double(timing.outgoingRange.upperBound))) out · \(transitionTimestamp(Double(timing.plan.incomingStartMs))) → \(transitionTimestamp(Double(timing.incomingRange.upperBound))) in")
                 .font(.caption2.monospacedDigit()).foregroundStyle(palette.onSurfaceVariant)
             Text("Preview uses the current equalizer and saved audio files; it pauses your music and resumes it afterward.")
@@ -162,16 +296,23 @@ struct PairTransitionWorkspace: View {
                 detailRow("Volume", gain(timing, .outgoing), gain(timing, .incoming))
                 detailRow("Bass shelf · 200 Hz", bass(timing, .outgoing), bass(timing, .incoming))
                 detailRow("Filter cutoff target", filter(timing, .outgoing), filter(timing, .incoming))
-                detailRow("Source peak", outgoing.map { TransitionAudioSlice.dbFS($0.peak) } ?? "Unavailable",
+                detailRow("Loaded audio peak", outgoing.map { TransitionAudioSlice.dbFS($0.peak) } ?? "Unavailable",
                           incoming.map { TransitionAudioSlice.dbFS($0.peak) } ?? "Unavailable")
-                detailRow("Source RMS", outgoing.map { TransitionAudioSlice.dbFS($0.meanRMS) } ?? "Unavailable",
+                detailRow("Loaded audio RMS", outgoing.map { TransitionAudioSlice.dbFS($0.meanRMS) } ?? "Unavailable",
                           incoming.map { TransitionAudioSlice.dbFS($0.meanRMS) } ?? "Unavailable")
             }
             .font(.caption2.monospacedDigit())
             .foregroundStyle(palette.onSurfaceVariant)
-            Text("Peak/RMS are measured over each displayed source window before processing. Gain, shelf and cutoff are the engine's automation targets at the inspection point. BPM is the file's tag; beatmatching and key analysis are unavailable.")
+            Text("Peak/RMS measure the loaded source audio before processing, including nearby audio for dragging. Wave height changes only the display. Gain, shelf and cutoff are the engine's automation targets at the inspection point. BPM is the file's tag; beatmatching and key analysis are unavailable.")
                 .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+            if let outgoing { loadedRange("Out", outgoing) }
+            if let incoming { loadedRange("In", incoming) }
         }
+    }
+
+    private func loadedRange(_ title: String, _ slice: TransitionAudioSlice) -> some View {
+        Text("\(title) loaded \(transitionTimestamp(slice.startMs))–\(transitionTimestamp(slice.startMs + slice.durationMs))")
+            .font(.caption2.monospacedDigit()).foregroundStyle(palette.onSurfaceVariant)
     }
 
     private func detailRow(_ label: String, _ out: String, _ inc: String) -> some View {
@@ -184,7 +325,7 @@ struct PairTransitionWorkspace: View {
     }
 
     private func bass(_ timing: PairTransitionTiming, _ role: TransitionRole) -> String {
-        spec.bassSwap ? String(format: "%.1f dB", timing.automation(role).bassDbAt(inspection(timing))) : "Bypass"
+        workingSpec.bassSwap ? String(format: "%.1f dB", timing.automation(role).bassDbAt(inspection(timing))) : "Bypass"
     }
 
     private func filter(_ timing: PairTransitionTiming, _ role: TransitionRole) -> String {
@@ -234,60 +375,4 @@ struct PairTransitionWorkspace: View {
 func transitionTimestamp(_ ms: Double) -> String {
     let safe = max(Int64(ms.rounded()), 0)
     return String(format: "%lld:%02lld.%03lld", safe / 60_000, (safe / 1000) % 60, safe % 1000)
-}
-
-private struct PairAudioPlot: View {
-    let timing: PairTransitionTiming
-    let outgoing: TransitionAudioSlice?
-    let incoming: TransitionAudioSlice?
-    let inspectedMs: Double
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        Canvas { context, size in
-            let width = size.width, height = size.height
-            let total = Double(timing.totalMs)
-            func x(_ ms: Double) -> CGFloat { CGFloat((ms + Double(timing.leadMs)) / total) * width }
-            let begin = x(0), end = x(Double(timing.plan.durationMs))
-            context.fill(Path(CGRect(x: begin, y: 0, width: end - begin, height: height)), with: .color(palette.primary.opacity(0.08)))
-            for (index, role) in [TransitionRole.outgoing, .incoming].enumerated() {
-                let center = height * (index == 0 ? 0.25 : 0.75)
-                let amplitude = height * 0.20
-                let slice = index == 0 ? outgoing : incoming
-                let color = index == 0 ? Color.orange : AutomationColors.volume
-                if let slice {
-                    let offset = Double(role == .outgoing ? timing.plan.startAtMs : timing.plan.incomingStartMs)
-                    for bin in slice.peaks.indices {
-                        let time = slice.startMs + (Double(bin) + 0.5) * slice.durationMs / Double(slice.peaks.count) - offset
-                        let position = x(time)
-                        let peak = CGFloat(min(slice.peaks[bin], 1)) * amplitude
-                        let rms = CGFloat(min(slice.rms[bin], 1)) * amplitude
-                        let barWidth = max(CGFloat(slice.durationMs / Double(slice.peaks.count) / total) * width, 0.5)
-                        context.fill(Path(CGRect(x: position - barWidth / 2, y: center - peak, width: barWidth, height: peak * 2)), with: .color(color.opacity(0.35)))
-                        context.fill(Path(CGRect(x: position - barWidth / 2, y: center - rms, width: barWidth, height: rms * 2)), with: .color(color.opacity(0.85)))
-                    }
-                } else {
-                    context.draw(Text("Source waveform unavailable").font(.caption2).foregroundColor(palette.onSurfaceVariant), at: CGPoint(x: width / 2, y: center))
-                }
-                var curve = Path()
-                for step in 0...160 {
-                    let time = Double(timing.plan.durationMs) * Double(step) / 160
-                    let gain = timing.automation(role).gainAt(time)
-                    let point = CGPoint(x: x(time), y: center + amplitude - CGFloat(gain) * amplitude * 2)
-                    if step == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
-                }
-                context.stroke(curve, with: .color(palette.onSurface), style: StrokeStyle(lineWidth: 1.5, dash: index == 0 ? [] : [4, 3]))
-            }
-            for position in [begin, end, x(inspectedMs)] {
-                var line = Path()
-                line.move(to: CGPoint(x: position, y: 0)); line.addLine(to: CGPoint(x: position, y: height))
-                context.stroke(line, with: .color(palette.onSurface.opacity(position == x(inspectedMs) ? 0.7 : 0.2)), lineWidth: 1)
-            }
-        }
-        .background(palette.background.opacity(0.35), in: RoundedRectangle(cornerRadius: 14))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .accessibilityElement()
-        .accessibilityLabel("Decoded source waveforms with volume automation")
-        .accessibilityValue("\(TransitionSpec.durationLabel(timing.plan.durationMs)) overlap. Use the inspection slider for exact values.")
-    }
 }

@@ -27,6 +27,13 @@ struct PairTransitionTiming: Equatable {
     func automation(_ role: TransitionRole) -> TransitionAutomation {
         TransitionAutomation(role: role, spec: plan.spec, durationMs: plan.durationMs)
     }
+
+    /// Nearby source audio stays in memory while a finger adjusts a cue. At most 20 seconds.
+    func analysisRange(_ role: TransitionRole, outgoingMs: Int64, incomingMs: Int64) -> Range<Int64> {
+        let start = role == .outgoing ? plan.startAtMs : plan.incomingStartMs
+        let duration = role == .outgoing ? outgoingMs : incomingMs
+        return max(start - 4000, 0)..<min(start + Int64(plan.durationMs) + 4000, duration)
+    }
 }
 
 struct TransitionAudioSlice: Equatable, Sendable {
@@ -93,16 +100,17 @@ actor TransitionAnalysisStore {
         let end: Int64
         let size: Int64
         let modified: Date
+        let bins: Int
     }
     private var cache: [Key: TransitionAudioSlice] = [:]
 
-    func slice(url: URL, range: Range<Int64>) async -> TransitionAudioSlice? {
-        guard !Task.isCancelled, range.lowerBound >= 0, range.count > 0, range.count <= 20_000,
+    func slice(url: URL, range: Range<Int64>, bins: Int = 480) async -> TransitionAudioSlice? {
+        guard !Task.isCancelled, (1...8192).contains(bins), range.lowerBound >= 0, range.count > 0, range.count <= 20_000,
               let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
               let size = attributes[.size] as? NSNumber, let date = attributes[.modificationDate] as? Date else { return nil }
-        let key = Key(url: url, start: range.lowerBound, end: range.upperBound, size: size.int64Value, modified: date)
+        let key = Key(url: url, start: range.lowerBound, end: range.upperBound, size: size.int64Value, modified: date, bins: bins)
         if let cached = cache[key] { return cached }
-        let worker = Task.detached(priority: .utility) { Self.decode(url: url, range: range) }
+        let worker = Task.detached(priority: .utility) { Self.decode(url: url, range: range, bins: bins) }
         let result = await withTaskCancellationHandler(operation: { await worker.value }, onCancel: { worker.cancel() })
         guard !Task.isCancelled, let result else { return nil }
         if cache.count >= 8 { cache.removeAll(keepingCapacity: true) }
@@ -111,7 +119,7 @@ actor TransitionAnalysisStore {
     }
 
     static func decode(url: URL, range: Range<Int64>, bins: Int = 480) -> TransitionAudioSlice? {
-        guard bins > 0, bins <= 2048, range.lowerBound >= 0, range.count > 0, range.count <= 20_000,
+        guard bins > 0, bins <= 8192, range.lowerBound >= 0, range.count > 0, range.count <= 20_000,
               let file = try? AVAudioFile(forReading: url) else { return nil }
         let format = file.processingFormat
         let rate = format.sampleRate
@@ -123,7 +131,7 @@ actor TransitionAnalysisStore {
               let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 8192) else { return nil }
         let stop = min(end, file.length)
         let frames = stop - start
-        var accumulator = TransitionSampleAccumulator(bins: bins, frames: frames)
+        var accumulator = TransitionSampleAccumulator(bins: min(bins, Int(frames)), frames: frames)
         file.framePosition = start
         var read: Int64 = 0
         while read < frames {

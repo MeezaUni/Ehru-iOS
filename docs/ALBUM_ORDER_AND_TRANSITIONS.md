@@ -27,24 +27,42 @@ does not cancel the measurement. Missing/truncated/unsupported audio is marked u
 The timing comes directly from `TransitionPlanner`, including effective duration limits and cues.
 White volume curves sample `TransitionAutomation`, also used by the engine. The inspection slider
 shows source times, volume dB, 200 Hz bass-shelf dB and filter cutoff targets at millisecond
-precision. Source peak/RMS measurements are dBFS over each displayed window before processing;
+precision. Source peak/RMS measurements are dBFS over each loaded audio window before processing
+(its exact range is listed beside the measurements, independently of the visible zoom);
 filter values are automation targets rather than measured output spectra. BPM is explicitly a
 file tag; there is no fabricated key, tempo estimate, beatmatching, effect or looping display.
 
 Cue sliders and ±100 ms controls edit the actual outgoing-end/incoming-start settings, with undo,
-reset, Save and Cancel. Preview schedules bounded source segments on two decks with the same
+reset, Save and Cancel. Each waveform also accepts a horizontal drag: the upper lane shifts only
+the outgoing cue and the lower lane only the incoming cue. Each drag captures its initial lane,
+cue and time scale, updates locally under the finger, then commits one undoable edit on release.
+Cancellation leaves the draft alone. Vertical gestures remain available for scrolling.
+
+Fit fills most of the plot with the overlap. Fit/2×/4×/8× buttons and anchored pinch zoom control
+the time scale; a separate overview strip moves the view without changing either cue. A ruler
+and source-time labels show the actual scale. Auto/1×/4×/16× height controls amplify the drawing
+with an explicit display-gain label. Both lanes share the same display gain, frozen during a cue
+drag, and silence stays silent. These controls never change audio volume or raw peak/RMS values.
+Dimmed source samples are outside the playback interval; missing source data is left empty.
+
+Preview schedules bounded source segments on two decks with the same
 transition DSP and current equalizer as playback. The incoming start uses the render clock.
 The existing queue and seek position are retained; music pauses for the preview and resumes when
 it finishes/stops. Backgrounding, interruptions and route changes stop preview without automatic
 resumption; changing the queued song or resuming normal playback also stops preview.
 
-Analysis decodes at most 13.5 seconds per track on demand, off the main thread, after a 250 ms
-debounce. Cancellation stops obsolete work; an eight-window cache uses path, file size and mtime.
+Analysis buffers up to four seconds on either side of the overlap (at most 20 seconds per track)
+off the main thread after a 250 ms debounce. Fine-grained bins retain detail while zooming. Cue
+drags reuse the real buffered samples; zoom/height/view navigation do not start decoding. A cue
+commit loads its new context. At most two screen columns per point are drawn as batched paths.
+Cancellation stops obsolete work; an eight-window cache uses path, file size, mtime and resolution.
 No continuous FFT, whole-library analysis, background animation, or full-track PCM allocation is
-needed. Native waveform dragging and automatic beat/key analysis are not implemented.
+needed. Automatic beat/key analysis is not implemented.
 
 CI checks album ordering, all-fields migration, provider positions, safe numbering plans, disc
 tag round-trips, real PCM window measurements, opposite-phase channels, planner/automation parity,
-and bounded preview scheduling. On a phone, verify preview sound, independent source formats,
+bounded preview scheduling, zoom anchors, independent cue dragging, limits, undo and view gain.
+On a phone, verify pinch zoom, both drag directions, lane locking, cancelled drags, vertical scroll,
+preview sound, independent source formats,
 headphone/route changes, Save/Cancel/Undo, rapid cue changes, unavailable files, large text, and
 normal playback resumption. Device heat and touch feel still require a physical device.
