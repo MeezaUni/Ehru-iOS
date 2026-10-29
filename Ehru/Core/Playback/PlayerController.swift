@@ -38,6 +38,7 @@ final class PlayerController {
     @ObservationIgnored private var loopTarget: (positionMs: Int64, onReached: () -> Void)?
     @ObservationIgnored private var timer: Timer?
     @ObservationIgnored private var ticks = 0
+    @ObservationIgnored private var fileWarmup: Task<Void, Never>?
     @ObservationIgnored private var restoreFinished = false
     @ObservationIgnored private var consecutiveErrors = 0
     @ObservationIgnored private var plannedTransition: (entryId: UUID, nextEntryId: UUID, plan: Planned)?
@@ -405,6 +406,7 @@ final class PlayerController {
     }
 
     private func currentEntryChanged(sameEntryRepeated: Bool) {
+        warmAdjacentFiles()
         let song = state.currentSong
         listening.onItemChanged(song?.id, durationMs: song?.durationMs ?? 0, isPlaying: state.isPlaying)
         if history.onItemBecameCurrent(song, isPlaying: state.isPlaying) { state.history = history.entries }
@@ -432,9 +434,22 @@ final class PlayerController {
     }
 
     private func queueChanged() {
+        warmAdjacentFiles()
         if state.currentEntry == nil { state.currentIndex = state.queue.isEmpty ? -1 : 0 }
         reevaluateTransition()
         persistState()
+    }
+
+    private func warmAdjacentFiles() {
+        fileWarmup?.cancel()
+        let previous = PlayOrder.previous(before: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode)
+        let next = PlayOrder.next(after: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode, userSkip: true)
+        let urls = [next, previous].compactMap { index -> URL? in
+            guard let index, state.queue.indices.contains(index) else { return nil }
+            let url = state.queue[index].song.url
+            return url == state.currentSong?.url ? nil : url
+        }
+        fileWarmup = Task { [weak self] in await self?.engine.warmFiles(urls) }
     }
 
     // MARK: Position polling

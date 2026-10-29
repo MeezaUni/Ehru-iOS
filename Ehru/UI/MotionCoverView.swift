@@ -18,6 +18,8 @@ struct MotionCoverView: View {
     var rendersVideo = true
     var maxPixels = 1200
     var animateStill = false
+    var suspended = false
+    var videoSession: MotionVideoSession? = nil
     @Environment(AnimatedArtworkStore.self) private var store
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.motionCoverVisible) private var sectionVisible
@@ -30,10 +32,12 @@ struct MotionCoverView: View {
         let url = song.flatMap { store.url(for: $0) }
         ZStack {
             SongArtworkView(song: song, maxPixels: maxPixels)
-                .modifier(MovingArtwork(isPlaying: animateStill && playing && url == nil))
+                .modifier(MovingArtwork(isPlaying: animateStill && playing && !suspended && url == nil))
             if rendersVideo, visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url {
                 // Pause the existing decoder instead of destroying/recreating it on every pause.
-                LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion)
+                LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion && !suspended,
+                                   frozen: playerInMotion || suspended, session: videoSession)
+                    .modifier(MotionVideoDissolve())
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -48,60 +52,36 @@ struct MotionCoverView: View {
 private struct LoopingMotionVideo: UIViewRepresentable {
     let url: URL
     let isPlaying: Bool
-    final class Surface: UIView {
-        override class var layerClass: AnyClass { AVPlayerLayer.self }
-        var videoLayer: AVPlayerLayer { layer as! AVPlayerLayer }
-    }
+    let frozen: Bool
+    let session: MotionVideoSession?
+
+    @MainActor
     final class Coordinator {
-        let player = AVQueuePlayer()
-        var looper: AVPlayerLooper?
-        var url: URL?
-        var observation: NSKeyValueObservation?
-        init() {
-            player.isMuted = true
-            player.volume = 0
-            player.preventsDisplaySleepDuringVideoPlayback = false
-            player.audiovisualBackgroundPlaybackPolicy = .pauses
-        }
-        func load(_ url: URL, surface: Surface, playing: Bool) {
-            guard self.url != url else { setPlaying(playing); return }
-            stop()
-            self.url = url
-            let item = AVPlayerItem(url: url)
-            item.preferredForwardBufferDuration = 3
-            looper = AVPlayerLooper(player: player, templateItem: item)
-            // Keep the still visible until the first decoded frame is ready (also on failure).
-            surface.videoLayer.opacity = 0.02
-            observation = surface.videoLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { layer, _ in
-                DispatchQueue.main.async { surface.videoLayer.opacity = layer.isReadyForDisplay ? 1 : 0.02 }
-            }
-            setPlaying(playing)
-        }
-        private func setPlaying(_ playing: Bool) {
-            if playing { if player.rate == 0 { player.play() } }
-            else { player.pause() }
-        }
-        func stop() {
-            player.pause()
-            observation = nil
-            looper?.disableLooping()
-            looper = nil
-            player.removeAllItems()
-            url = nil
+        let session: MotionVideoSession
+        let ownsSession: Bool
+        init(_ supplied: MotionVideoSession?) {
+            ownsSession = supplied == nil
+            session = supplied ?? MotionVideoSession()
         }
     }
-    func makeCoordinator() -> Coordinator { Coordinator() }
-    func makeUIView(context: Context) -> Surface {
-        let surface = Surface()
-        surface.backgroundColor = .clear
-        surface.videoLayer.videoGravity = .resizeAspectFill
-        surface.videoLayer.player = context.coordinator.player
-        context.coordinator.load(url, surface: surface, playing: isPlaying)
+    func makeCoordinator() -> Coordinator { Coordinator(session) }
+    func makeUIView(context: Context) -> MotionVideoSurface {
+        let surface = MotionVideoSurface()
+        context.coordinator.session.attach(surface, url: url, playing: isPlaying, frozen: frozen)
         return surface
     }
-    func updateUIView(_ surface: Surface, context: Context) { context.coordinator.load(url, surface: surface, playing: isPlaying) }
-    static func dismantleUIView(_ surface: Surface, coordinator: Coordinator) {
-        coordinator.stop()
-        surface.videoLayer.player = nil
+    func updateUIView(_ surface: MotionVideoSurface, context: Context) {
+        context.coordinator.session.attach(surface, url: url, playing: isPlaying, frozen: frozen)
     }
+    static func dismantleUIView(_ surface: MotionVideoSurface, coordinator: Coordinator) {
+        coordinator.session.detach(surface)
+        if coordinator.ownsSession { coordinator.session.stop() }
+    }
+}
+
+/// The frozen video frame blends into the same poster the mini-player will show. Native
+/// opacity animation follows the cover transform, without resizing or restarting the decoder.
+private struct MotionVideoDissolve: ViewModifier {
+    @Environment(\.playerCoverProgress) private var progress
+    func body(content: Content) -> some View { content.opacity(Double(progress.clamped(0, 1))) }
 }

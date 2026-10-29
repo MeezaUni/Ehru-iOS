@@ -1,0 +1,36 @@
+import AVFoundation
+import XCTest
+@testable import Ehru
+
+final class AudioFilePreloaderTests: XCTestCase {
+    private func file() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
+        let format = AVAudioFormat(standardFormatWithSampleRate: 8000, channels: 1)!
+        let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 800)!
+        buffer.frameLength = 800
+        for i in 0..<800 { buffer.floatChannelData![0][i] = 0 }
+        let file = try AVAudioFile(forWriting: url, settings: format.settings)
+        try file.write(from: buffer)
+        return url
+    }
+
+    @MainActor
+    func testBoundedReadAheadConsumesEachReaderOnceAndRejectsReplacedFiles() async throws {
+        let a = try file(), b = try file(), c = try file()
+        defer { for url in [a, b, c] { try? FileManager.default.removeItem(at: url) } }
+        let loader = AudioFilePreloader()
+        await loader.warm([a, a, b, c])
+        XCTAssertNil(loader.take(c))
+        let first = try XCTUnwrap(loader.take(a))
+        XCTAssertEqual(first.length, 800)
+        XCTAssertNil(loader.take(a), "An active reader must not be reused by another deck")
+        XCTAssertNotNil(loader.take(b))
+        await loader.warm([a, b])
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(10)], ofItemAtPath: a.path)
+        XCTAssertNil(loader.take(a))
+        try FileManager.default.removeItem(at: b)
+        XCTAssertNil(loader.take(b))
+        await loader.warm([])
+        XCTAssertNil(loader.take(a))
+    }
+}

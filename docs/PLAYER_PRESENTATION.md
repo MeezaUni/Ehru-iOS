@@ -21,3 +21,36 @@ CI checks destination geometry for both chrome layouts, interpolation, invalid/e
 cancelled pulls and interrupted opening/dismissal state. Verify touch feel, rapid open/close,
 header and cover pulls, rotation, text sizes and animated covers on a device. These checks do
 not establish a device frame-rate or thermal measurement.
+
+## Animated covers and interrupted swipes
+
+Motion video lives in an ordinary UIKit container with an AVPlayerLayer sublayer; layout disables
+implicit layer resizing. Gesture start pauses the current decoder and copies its current decoded
+pixel buffer once, converting a bounded image off the main thread. That flat frozen frame follows
+the same cover transform as static artwork, and the video surface fades into the poster used by
+the mini-player. If a decoded buffer is not ready, the paused native frame remains as fallback.
+There is no continuous snapshot polling, second video decode, or screen-sized rendering capture.
+Cancelled motion restores the existing layer; obsolete snapshot callbacks are ignored.
+
+The carousel owns one motion session. An adjacent song from the same album rebinds that session
+without recreating its looper or resetting its position. The moving scene retains its original
+video host until settlement, and enables the newly current video's host after the slide finishes.
+Old-surface teardown checks ownership and cannot pause a newly rebound host. Background, Reduce
+Motion, offscreen, low-power and thermal restrictions retain their existing behavior.
+
+The strip uses stable page ordinals and entry-occurrence keys instead of rebasing by a page on
+a later main-loop turn. Shared cards keep their loaded artwork and identity when the queue moves.
+Departing cards are retained through settlement and then pruned. A compositor meter lets a rapid
+new touch pick up the visible interpolated position. Generation tokens discard stale completions.
+Side-by-side page spacing keeps projected card surfaces separated; intentional stack mode gathers
+neighbours only at rest. Expanded artwork geometry is not republished on every horizontal frame.
+
+Playback opens up to two adjacent file headers at user-initiated priority off the main thread.
+Each prepared AVAudioFile reader is consumed once and checked against file size/mtime, so decks
+never share an active reader and replaced/deleted files cannot reuse stale data. Warming does not
+predecode audio, change skip behavior, alter paused state, or replace the real audio engine clock.
+
+CI checks continuous page identities across forward/reverse/repeat changes, projected spacing,
+interrupted focus, implicit-layer-resize suppression, real-pixel frame freezing and cancellation,
+same-asset session reuse, stale-host teardown, and bounded single-use file preparation/invalidation.
+Device video compositing and frame pacing still require verification on an iPhone.

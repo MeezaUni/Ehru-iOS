@@ -51,6 +51,7 @@ final class AudioEngine {
     let tap = AudioTap()
 
     private let engine = AVAudioEngine()
+    private let filePreloader = AudioFilePreloader()
     private let mixer = AVAudioMixerNode()
     private var eqUnit: AVAudioUnit?
     private let decks = [Deck(), Deck()]
@@ -144,12 +145,19 @@ final class AudioEngine {
         set { mixer.outputVolume = newValue.clamped(0, 1) }
     }
 
+    func warmFiles(_ urls: [URL]) async { await filePreloader.warm(urls) }
+
+    private func openFile(_ url: URL) throws -> AVAudioFile {
+        if let ready = filePreloader.take(url) { return ready }
+        return try AVAudioFile(forReading: url)
+    }
+
     // MARK: Playing
 
     /// Stops both decks and starts [url] (entry [entryId]) at [positionMs] on the active deck.
     func play(entryId: UUID, url: URL, positionMs: Int64, startPlaying: Bool) throws {
         guard isReady else { throw EngineError.notReady }
-        guard let file = try? AVAudioFile(forReading: url) else { throw EngineError.unreadable(url) }
+        guard let file = try? openFile(url) else { throw EngineError.unreadable(url) }
         previewSchedule = nil
         stop(other)
         stop(active)
@@ -171,7 +179,7 @@ final class AudioEngine {
     func queueGapless(entryId: UUID, url: URL) -> Bool {
         let deck = active
         guard deck.segments.count == 1, deck.segments[0].entryId != entryId,
-              let file = try? AVAudioFile(forReading: url),
+              let file = try? openFile(url),
               file.processingFormat.sampleRate == deck.format?.sampleRate,
               file.processingFormat.channelCount == deck.format?.channelCount
         else { return false }
@@ -227,7 +235,7 @@ final class AudioEngine {
     /// fades out from the same moment. The other deck becomes the active one.
     func crossfade(to entryId: UUID, url: URL, incomingStartMs: Int64, spec: TransitionSpec, durationMs: Int,
                    startHostTime: UInt64) throws {
-        guard let file = try? AVAudioFile(forReading: url) else { throw EngineError.unreadable(url) }
+        guard let file = try? openFile(url) else { throw EngineError.unreadable(url) }
         let outgoing = active
         let incoming = other
         stop(incoming)

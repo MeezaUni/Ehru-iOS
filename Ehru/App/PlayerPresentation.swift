@@ -1,8 +1,13 @@
 import Observation
 import SwiftUI
 
+private struct PlayerCoverProgressKey: EnvironmentKey { static let defaultValue: CGFloat = 1 }
 private struct PlayerMotionKey: EnvironmentKey { static let defaultValue = false }
 extension EnvironmentValues {
+    var playerCoverProgress: CGFloat {
+        get { self[PlayerCoverProgressKey.self] }
+        set { self[PlayerCoverProgressKey.self] = newValue }
+    }
     var playerInMotion: Bool {
         get { self[PlayerMotionKey.self] }
         set { self[PlayerMotionKey.self] = newValue }
@@ -80,6 +85,7 @@ struct PlayerForegroundMotion: ViewModifier {
 
     func body(content: Content) -> some View {
         content
+            .environment(\.playerCoverProgress, drag.progress)
             .coordinateSpace(name: PlayerArtworkSpace.expanded)
             .modifier(PlayerCoverTransform(progress: reduceMotion ? 1 : drag.progress,
                                            source: frames.expanded, destination: frames.mini))
