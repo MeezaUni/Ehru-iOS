@@ -1,21 +1,23 @@
 # Cover-led player presentation
 
-The expanded foreground scales and translates around the actual current artwork rectangle to
-the mini-player artwork rectangle. Both expanded and compact navigation layouts supply the
+Only the current artwork scales and translates from its expanded rectangle to the mini-player
+artwork rectangle. The header, controls and lyrics stay in place and fade; they never shrink
+or travel with the cover. Both expanded and compact navigation layouts supply the
 real destination frame. Drag progress follows the finger; opening, dismissal and a cancelled
 pull settle with the same geometry. The backdrop fades separately, and header, controls,
 neighbours and card metadata fade before the cover reaches the bar. The mini artwork becomes
 visible when the expanded presentation finishes. The expanded view stays mounted until the
 animation completion, so dismissal cannot strand a header at the bottom.
 
-Expanded artwork is measured in a named coordinate space inside the foreground transform.
+Expanded artwork is measured using an untransformed placeholder in a named player coordinate
+space. The painted cover is an overlay with its own local-to-destination transform.
 Measuring its transformed frame would feed motion back into the next frame and cause jitter.
 Each opening waits for a fresh measured source frame, with the mini cover visible until ready.
 A generation token prevents an interrupted animation completion from removing a reopened player.
 There is one live cover throughout the morph: no screenshot, second video or per-frame decode.
 Existing decorative-motion suspension remains in effect. Lightweight modifiers observe progress;
 the library, waveform seek position and carousel layout do not drive the presentation animation.
-Reduce Motion uses a fade without scaling the player.
+Reduce Motion uses a fade without flying the artwork.
 
 CI checks destination geometry for both chrome layouts, interpolation, invalid/empty frames,
 cancelled pulls and interrupted opening/dismissal state. Verify touch feel, rapid open/close,
@@ -44,15 +46,23 @@ a later main-loop turn. Shared cards keep their loaded artwork and identity when
 Departing cards are retained through settlement and then pruned, with at most seven nearby
 occurrences even during repeatedly interrupted swipes. A compositor meter lets a rapid
 new touch pick up the visible interpolated position. Generation tokens discard stale completions.
-Side-by-side page spacing keeps projected card surfaces separated; intentional stack mode gathers
-neighbours only at rest. Expanded artwork geometry is not republished on every horizontal frame.
+Cover Flow spacing leaves a visible previous/next preview at both edges. The nearest card
+always draws in front: depth is computed from the interpolated presentation distance, so a
+departing card cannot jump in front of the newly centered card. Stack mode gathers neighbours
+only at rest. Expanded artwork geometry is not republished on every horizontal frame.
 
 Playback opens up to two adjacent file headers at user-initiated priority off the main thread.
 Each prepared AVAudioFile reader is consumed once and checked against file size/mtime, so decks
 never share an active reader and replaced/deleted files cannot reuse stale data. Warming does not
 predecode audio, change skip behavior, alter paused state, or replace the real audio engine clock.
 
-CI checks continuous page identities across forward/reverse/repeat changes, projected spacing,
+A released swipe finishes its visual slide before invoking transport and lock-screen updates.
+Audio continues during that slide. A generation guard cancels superseded skip requests; a
+rejected switch settles back to the actual queue item. A two-entry repeat honours the requested
+previous/next occurrence even when both neighbours refer to the same queue entry.
+
+CI checks continuous page identities across forward/reverse/repeat changes, visible side previews
+and interpolated depth order, cover-only geometry with stationary controls,
 interrupted focus, implicit-layer-resize suppression, real-pixel frame freezing and cancellation,
 same-asset session reuse, stale-host teardown, and bounded single-use file preparation/invalidation.
 Device video compositing and frame pacing still require verification on an iPhone.

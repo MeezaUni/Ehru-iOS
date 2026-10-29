@@ -75,25 +75,33 @@ extension EnvironmentValues {
     }
 }
 
-/// Keeps the expanded artwork's centre and size on the path to the real mini-player artwork.
-/// The named expanded coordinate space is inside this transform, so measuring never feeds
-/// the transformed frame back into the next animation frame.
+/// The player stays in place. Only its current artwork is allowed to fly to the mini-player.
+/// Keeping this named space outside the art slot lets an untransformed placeholder measure it.
 struct PlayerForegroundMotion: ViewModifier {
     let drag: PlayerDragState
-    @Environment(\.playerArtworkFrames) private var frames
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content
             .environment(\.playerCoverProgress, drag.progress)
             .coordinateSpace(name: PlayerArtworkSpace.expanded)
-            .modifier(PlayerCoverTransform(progress: reduceMotion ? 1 : drag.progress,
-                                           source: frames.expanded, destination: frames.mini))
             .opacity(reduceMotion ? Double(drag.progress) : 1)
     }
 }
 
-struct PlayerCoverTransform: GeometryEffect {
+struct PlayerArtworkFlight: ViewModifier {
+    let isCurrent: Bool
+    @Environment(PlayerDragState.self) private var drag
+    @Environment(\.playerArtworkFrames) private var frames
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.modifier(PlayerArtworkTransform(progress: isCurrent && !reduceMotion ? drag.progress : 1,
+                                                source: frames.expanded, destination: frames.mini))
+    }
+}
+
+struct PlayerArtworkTransform: GeometryEffect {
     var progress: CGFloat
     let source: CGRect
     let destination: CGRect
@@ -101,9 +109,8 @@ struct PlayerCoverTransform: GeometryEffect {
         get { progress }
         set { progress = newValue }
     }
-
     func effectValue(size: CGSize) -> ProjectionTransform {
-        ProjectionTransform(PlayerCoverGeometry.transform(progress: progress, source: source, destination: destination))
+        ProjectionTransform(PlayerCoverGeometry.artworkTransform(progress: progress, source: source, destination: destination))
     }
 }
 
@@ -119,7 +126,16 @@ enum PlayerCoverGeometry {
                                  tx: x - source.midX * scale, ty: y - source.midY * scale)
     }
 
-    static func chromeOpacity(_ progress: CGFloat) -> Double { Double(((progress - 0.45) / 0.55).clamped(0, 1)) }
+    /// An artwork view has its own local origin; conjugate the root-space transform so its
+    /// placeholder remains fixed while the painted pixels travel to the measured destination.
+    static func artworkTransform(progress: CGFloat, source: CGRect, destination: CGRect) -> CGAffineTransform {
+        let root = transform(progress: progress, source: source, destination: destination)
+        return CGAffineTransform(translationX: source.minX, y: source.minY)
+            .concatenating(root)
+            .concatenating(CGAffineTransform(translationX: -source.minX, y: -source.minY))
+    }
+
+    static func chromeOpacity(_ progress: CGFloat) -> Double { Double(((progress - 0.65) / 0.35).clamped(0, 1)) }
 }
 
 /// Header, controls, neighbours and card chrome disappear before the cover reaches the bar.

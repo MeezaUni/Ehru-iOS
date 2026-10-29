@@ -60,7 +60,7 @@ struct RootView: View {
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
         .coordinateSpace(name: PlayerArtworkSpace.root)
         .onPreferenceChange(PlayerArtworkFrameKey.self) { next in
-            // Frames are measured inside the foreground transform to avoid drag feedback.
+            // The expanded placeholder stays fixed while its artwork overlay flies to the mini-player.
             if next.mini.width > 0 { artworkFrames.mini = next.mini }
             if next.expanded.width > 0 { artworkFrames.expanded = next.expanded }
         }

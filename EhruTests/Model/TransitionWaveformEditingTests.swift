@@ -183,4 +183,101 @@ final class TransitionWaveformEditingTests: XCTestCase {
                                                         timeMs: .nan, gainDb: 0, silence: false), base)
     }
 
+    func testDirectLineHitsUseTheRenderedVolumeEQAndFilterGeometry() throws {
+        var spec = TransitionSpec.preset(.blend)
+        spec.bassSwap = true
+        spec.filter = .highPassInLowPassOut
+        let timing = try makeTiming(spec)
+        let layout = TransitionCurveLayout(viewport: TransitionWaveformViewport(timing: timing, zoom: 1),
+                                           durationMs: Double(timing.plan.durationMs), size: CGSize(width: 300, height: 320))
+        // Hit segments, not just existing dots; this works independently of the selected tool.
+        let volume = layout.position(time: 0.23, level: spec.gain(.outgoing, 0.23), role: .outgoing)
+        XCTAssertEqual(layout.nearestLine(volume, spec: spec, showsEQ: false, showsFilter: false), .volume(.outgoing))
+        let bass = try XCTUnwrap(layout.effectHandle(.bass(.incoming), spec: spec))
+        XCTAssertEqual(layout.nearestLine(bass, spec: spec, showsEQ: true, showsFilter: true), .bass(.incoming))
+        let cutoff = try XCTUnwrap(spec.filterSetting(.outgoing, 0.75))
+        let filter = layout.position(time: 0.75, level: TransitionCurveLayout.frequencyLevel(cutoff.hz), role: .outgoing)
+        XCTAssertEqual(layout.nearestLine(filter, spec: spec, showsEQ: true, showsFilter: true), .filter(.outgoing))
+        XCTAssertNotEqual(layout.nearestLine(filter, spec: spec, showsEQ: true, showsFilter: false), .filter(.outgoing))
+        XCTAssertNil(layout.nearestLine(CGPoint(x: 5, y: 5), spec: spec, showsEQ: true, showsFilter: true))
+        let inactive = TransitionSpec()
+        XCTAssertNil(layout.effectHandle(.filter(.outgoing), spec: inactive))
+        XCTAssertNotEqual(layout.nearestLine(bass, spec: inactive, showsEQ: true, showsFilter: true), .bass(.incoming))
+    }
+
+    func testEffectDragsChangeRealAutomationWithoutMovingAudioOrTheOtherFilter() throws {
+        var base = TransitionSpec.preset(.blend)
+        base.bassSwap = true
+        base.outgoingCutMs = 3000
+        base.incomingStartMs = 4000
+        let timing = try makeTiming(base)
+        let layout = TransitionCurveLayout(viewport: TransitionWaveformViewport(timing: timing, zoom: 1),
+                                           durationMs: Double(timing.plan.durationMs), size: CGSize(width: 300, height: 320))
+        let eqSession = TransitionEffectDrag(base: base, target: .bass(.incoming), layout: layout)
+        let eq = eqSession.moved(translation: CGSize(width: 24, height: -30))
+        XCTAssertEqual(eq.bassSwapAt, 0.6, accuracy: 1e-6)
+        XCTAssertNotEqual(try makeTiming(eq).automation(.incoming).bassDbAt(1000), timing.automation(.incoming).bassDbAt(1000))
+        let session = TransitionEffectDrag(base: base, target: .filter(.incoming), layout: layout)
+        XCTAssertEqual(session.moved(translation: .zero), base)
+        XCTAssertEqual(session.moved(translation: CGSize(width: CGFloat.nan, height: 0)), base)
+        let movement = CGSize(width: 24, height: -24)
+        let updated = session.moved(translation: movement)
+        XCTAssertEqual(updated, session.moved(translation: movement))
+        XCTAssertEqual(updated.incomingFilterAt ?? 0, 0.6, accuracy: 1e-6)
+        XCTAssertGreaterThan(try XCTUnwrap(updated.incomingFilterHz), 20)
+        let automation = try makeTiming(updated).automation(.incoming)
+        XCTAssertEqual(try XCTUnwrap(automation.filterAt(1200)).hz, try XCTUnwrap(updated.incomingFilterHz), accuracy: 0.01)
+        XCTAssertEqual(try XCTUnwrap(automation.filterAt(2000)).hz, 20, accuracy: 0.001)
+        XCTAssertEqual(updated.outgoingFilterAt, base.outgoingFilterAt)
+        XCTAssertEqual(updated.outgoingFilterHz, base.outgoingFilterHz)
+        for step in 0...20 {
+            let t = Float(step) / 20
+            XCTAssertEqual(updated.filterSetting(.outgoing, t), base.filterSetting(.outgoing, t))
+        }
+        XCTAssertEqual(updated.outgoingCutMs, 3000)
+        XCTAssertEqual(updated.incomingStartMs, 4000)
+        XCTAssertEqual(updated.bassSwapAt, base.bassSwapAt)
+        XCTAssertEqual(updated.outgoingCurve, base.outgoingCurve)
+        XCTAssertEqual(updated.incomingCurve, base.incomingCurve)
+        var config = TransitionConfig()
+        config.global.defaultChoice = .custom(base)
+        var draft = EditorDraft.open(.global, config: config)
+        XCTAssertFalse(draft.isDirty)
+        draft.edit { _ in updated }
+        XCTAssertEqual(draft.undo.count, 1)
+        draft.undoLast()
+        XCTAssertEqual(draft.spec, base)
+    }
+
+    func testSavedFilterKneesRoundTripAndOlderPresetsRetainTheirExactAutomation() throws {
+        for filter in TransitionFilter.allCases {
+            var legacy = TransitionSpec()
+            legacy.filter = filter
+            let data = try JSONEncoder().encode(legacy)
+            let fields = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertNil(fields["incomingFilterAt"])
+            XCTAssertNil(fields["outgoingFilterHz"])
+            let decoded = try JSONDecoder().decode(TransitionSpec.self, from: data)
+            for role in [TransitionRole.outgoing, .incoming] {
+                for step in -1...21 {
+                    let t = Float(step) / 20
+                    XCTAssertEqual(decoded.filterSetting(role, t), filter.settingAt(role, t))
+                }
+            }
+        }
+        let custom = TransitionEditing.setFilterKnee(TransitionSpec.preset(.melt), role: .outgoing, t: 0.7, hz: 2400)
+        XCTAssertEqual(custom.preset, .custom)
+        XCTAssertEqual(try JSONDecoder().decode(TransitionSpec.self, from: JSONEncoder().encode(custom)), custom)
+        XCTAssertEqual(try XCTUnwrap(custom.filterSetting(.outgoing, 0.7)).hz, 2400, accuracy: 0.01)
+        let reset = TransitionEditing.setFilter(custom, .lowPassOut)
+        XCTAssertNil(reset.outgoingFilterAt)
+        XCTAssertNil(reset.outgoingFilterHz)
+        XCTAssertEqual(reset.filterSetting(.outgoing, 0.7), TransitionFilter.lowPassOut.settingAt(.outgoing, 0.7))
+        var invalid = custom
+        invalid.outgoingFilterAt = .nan
+        invalid.outgoingFilterHz = .infinity
+        XCTAssertNil(invalid.sanitized().outgoingFilterAt)
+        XCTAssertNil(invalid.sanitized().outgoingFilterHz)
+    }
+
 }

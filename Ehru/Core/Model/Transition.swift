@@ -285,6 +285,11 @@ struct TransitionSpec: Equatable, Codable {
     var bassSwapAt: Float = TransitionSpec.defaultBassSwapAt
     /// Filter sweep on one or both tracks.
     var filter: TransitionFilter = .none
+    /// Optional direct-manipulation overrides. Missing fields preserve every existing preset.
+    var incomingFilterAt: Float?
+    var outgoingFilterAt: Float?
+    var incomingFilterHz: Float?
+    var outgoingFilterHz: Float?
     /// Cue points (per pair): how much of the outgoing track's end is skipped, and where the incoming track starts.
     var outgoingCutMs = 0
     var incomingStartMs = 0
@@ -329,6 +334,24 @@ struct TransitionSpec: Equatable, Codable {
         return role == .outgoing ? Self.bassCutDb * ramp : Self.bassCutDb * (1 - ramp)
     }
 
+    func filterKnee(_ role: TransitionRole) -> (t: Float, hz: Float)? {
+        guard filter.affects(role), let start = filter.settingAt(role, 0), let end = filter.settingAt(role, 1) else { return nil }
+        let at = role == .incoming ? incomingFilterAt : outgoingFilterAt
+        let hz = role == .incoming ? incomingFilterHz : outgoingFilterHz
+        return ((at ?? 0.5).clamped(0.05, 0.95), (hz ?? (role == .incoming ? end.hz : start.hz)).clamped(20, 18_000))
+    }
+
+    func filterSetting(_ role: TransitionRole, _ t: Float) -> FilterSetting? {
+        let at = role == .incoming ? incomingFilterAt : outgoingFilterAt
+        let hz = role == .incoming ? incomingFilterHz : outgoingFilterHz
+        guard at != nil || hz != nil else { return filter.settingAt(role, t) }
+        guard let knee = filterKnee(role), let start = filter.settingAt(role, 0), let end = filter.settingAt(role, 1) else { return nil }
+        let value = t <= knee.t
+            ? TransitionFilter.sweep(start.hz, knee.hz, t / knee.t)
+            : TransitionFilter.sweep(knee.hz, end.hz, (t - knee.t) / (1 - knee.t))
+        return FilterSetting(type: start.type, hz: value)
+    }
+
     /// A valid version of this spec: duration clamped and rounded, broken custom curves replaced.
     func sanitized() -> TransitionSpec {
         var clean = self
@@ -336,6 +359,10 @@ struct TransitionSpec: Equatable, Codable {
         clean.bassSwapAt = bassSwapAt.isFinite ? bassSwapAt.clamped(Self.minBassSwapAt, Self.maxBassSwapAt) : Self.defaultBassSwapAt
         clean.outgoingCutMs = outgoingCutMs.clamped(0, Self.maxCueMs)
         clean.incomingStartMs = incomingStartMs.clamped(0, Self.maxCueMs)
+        clean.incomingFilterAt = incomingFilterAt.flatMap { $0.isFinite ? $0.clamped(0.05, 0.95) : nil }
+        clean.outgoingFilterAt = outgoingFilterAt.flatMap { $0.isFinite ? $0.clamped(0.05, 0.95) : nil }
+        clean.incomingFilterHz = incomingFilterHz.flatMap { $0.isFinite ? $0.clamped(20, 18_000) : nil }
+        clean.outgoingFilterHz = outgoingFilterHz.flatMap { $0.isFinite ? $0.clamped(20, 18_000) : nil }
         let customValid = curve == .custom
             && outgoingCurve?.isValid(.outgoing) == true
             && incomingCurve?.isValid(.incoming) == true

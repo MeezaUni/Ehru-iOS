@@ -91,6 +91,16 @@ enum TransitionEditing {
     static func setFilter(_ spec: TransitionSpec, _ filter: TransitionFilter) -> TransitionSpec {
         var out = spec
         out.filter = filter
+        out.incomingFilterAt = nil; out.outgoingFilterAt = nil
+        out.incomingFilterHz = nil; out.outgoingFilterHz = nil
+        return relabel(out)
+    }
+
+    static func setFilterKnee(_ spec: TransitionSpec, role: TransitionRole, t: Float, hz: Float) -> TransitionSpec {
+        guard t.isFinite, hz.isFinite, spec.filter.affects(role) else { return spec }
+        var out = spec
+        if role == .incoming { out.incomingFilterAt = t.clamped(0.05, 0.95); out.incomingFilterHz = hz.clamped(20, 18_000) }
+        else { out.outgoingFilterAt = t.clamped(0.05, 0.95); out.outgoingFilterHz = hz.clamped(20, 18_000) }
         return relabel(out)
     }
 

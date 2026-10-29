@@ -29,6 +29,7 @@ struct PanInteraction: UIViewRepresentable {
     let end: (Sample) -> Void
     let cancel: () -> Void
     let tap: (CGPoint) -> Void
+    var touchDown: ((CGPoint) -> Void)? = nil
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var owner: PanInteraction
@@ -54,6 +55,16 @@ struct PanInteraction: UIViewRepresentable {
             guard recognizer is UIPanGestureRecognizer, let view = recognizer.view,
                   let scroll = other.view as? UIScrollView else { return false }
             return view.isDescendant(of: scroll)
+        }
+
+        func gestureRecognizer(_ recognizer: UIGestureRecognizer,
+                               shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            (recognizer as? UILongPressGestureRecognizer)?.minimumPressDuration == 0
+                || (other as? UILongPressGestureRecognizer)?.minimumPressDuration == 0
+        }
+
+        @objc func press(_ recognizer: UILongPressGestureRecognizer) {
+            if recognizer.state == .began { owner.touchDown?(recognizer.location(in: recognizer.view)) }
         }
 
         @objc func pan(_ recognizer: UIPanGestureRecognizer) {
@@ -83,6 +94,13 @@ struct PanInteraction: UIViewRepresentable {
         tap.require(toFail: pan)
         view.addGestureRecognizer(pan)
         view.addGestureRecognizer(tap)
+        if touchDown != nil {
+            let press = UILongPressGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.press(_:)))
+            press.minimumPressDuration = 0
+            press.cancelsTouchesInView = false
+            press.delegate = context.coordinator
+            view.addGestureRecognizer(press)
+        }
         return view
     }
 

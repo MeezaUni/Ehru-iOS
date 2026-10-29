@@ -30,6 +30,8 @@ struct PairTransitionWorkspace: View {
     @State private var showsInspector = false
     @State private var showsCues = false
     @State private var showsPointEditor = false
+    @State private var selectedLine: TransitionLineTarget?
+    @State private var effectSession: TransitionEffectDrag?
     @State private var curveSession: TransitionCurveDrag?
     @State private var selectedHandle: TransitionCurveHandle?
     @State private var pinchViewport: TransitionWaveformViewport?
@@ -112,9 +114,21 @@ struct PairTransitionWorkspace: View {
                 }
             }
         }
-        .onChange(of: spec) { _, _ in preview.stop(); cancelCueDrag() }
+        .onChange(of: spec) { _, value in
+            preview.stop(); cancelCueDrag()
+            if let selectedLine {
+                switch selectedLine {
+                case .bass where !value.bassSwap: self.selectedLine = .volume(selectedLine.role)
+                case .filter where !value.filter.affects(selectedLine.role): self.selectedLine = .volume(selectedLine.role)
+                default: break
+                }
+            }
+        }
         .onChange(of: transitionEnabled) { _, _ in preview.stop(); cancelCueDrag(); selectedHandle = nil }
-        .onChange(of: editingVolume) { _, _ in cancelCueDrag(); selectedHandle = nil }
+        .onChange(of: editingVolume) { _, active in
+            if !active { cancelCueDrag(); selectedHandle = nil; selectedLine = nil }
+            else if selectedLine == nil { selectedLine = .volume(.outgoing) }
+        }
         .onChange(of: pinching) { _, active in if !active { pinchViewport = nil; pinchZoom = nil } }
         .onChange(of: scenePhase) { _, phase in if phase != .active { preview.stop(resume: false); cancelCueDrag() } }
         .onChange(of: player.state.isPlaying) { _, playing in
@@ -135,7 +149,7 @@ struct PairTransitionWorkspace: View {
                 if transitionEnabled {
                     Picker("Waveform tool", selection: $editingVolume) {
                         Text("Move audio").tag(false)
-                        Text("Edit fade").tag(true)
+                        Text("Edit curves").tag(true)
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 240)
@@ -148,10 +162,10 @@ struct PairTransitionWorkspace: View {
                                           choose: { ms in edit { TransitionEditing.setDuration($0, ms) } })
                 waveformTools(timing)
             }
-            .disabled(cueSession != nil || curveSession != nil)
+            .disabled(cueSession != nil || curveSession != nil || effectSession != nil)
             if timeZoom > 1.01 || viewFocusMs != nil {
                 TransitionWaveformOverview(timing: timing, viewport: viewport(timing)) { viewFocusMs = $0 }
-                    .allowsHitTesting(cueSession == nil && curveSession == nil)
+                    .allowsHitTesting(cueSession == nil && curveSession == nil && effectSession == nil)
             }
             stageStatus(timing)
             if loading { ProgressView().controlSize(.small).frame(maxWidth: .infinity, alignment: .leading) }
@@ -168,11 +182,11 @@ struct PairTransitionWorkspace: View {
             if preview.isPlaying || preview.isPreparing {
                 TransitionPreviewReadout(preview: preview, durationMs: timing.plan.durationMs)
             } else if transitionEnabled {
-                Text(editingVolume ? "Drag points · tap a lane to add" : "Drag either waveform · pinch to zoom")
+                Text(editingHint)
                     .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
             }
             Spacer(minLength: 0)
-            if let selected = selectedHandle, editingVolume, transitionEnabled {
+            if let selected = selectedHandle, editingVolume, transitionEnabled, effectSession == nil, isEditingGain {
                 selectedPointMenu(selected)
             }
             if transitionEnabled {
@@ -272,24 +286,82 @@ struct PairTransitionWorkspace: View {
     private func waveformPlot(_ timing: PairTransitionTiming) -> some View {
         PairAudioPlot(timing: timing, viewport: viewport(timing), outgoing: outgoing, incoming: incoming,
                       inspectedMs: preview.isPlaying ? nil : inspectedMs, displayGain: displayGain(timing),
-                      activeRole: cueSession?.role ?? curveSession?.handle.role,
-                      showsEQ: showsEQ, showsFilter: showsFilter, editingVolume: editingVolume && transitionEnabled, selectedHandle: selectedHandle)
+                      activeRole: cueSession?.role ?? curveSession?.handle.role ?? effectSession?.target.role,
+                      showsEQ: showsEQ, showsFilter: showsFilter, editingVolume: editingVolume && transitionEnabled, selectedHandle: selectedHandle,
+                      selectedLine: editingVolume ? selectedLine : nil)
     }
 
     private func waveformInteraction(_ timing: PairTransitionTiming, size: CGSize) -> some View {
         PanInteraction(canBegin: { start, delta in
             guard !pinching, transitionEnabled else { return false }
-            return editingVolume ? curveLayout(timing, size).nearest(start, spec: workingSpec) != nil : HorizontalGestureIntent.accepts(delta)
+            let layout = curveLayout(timing, size)
+            return layout.nearestLine(start, spec: workingSpec, showsEQ: showsEQ, showsFilter: showsFilter,
+                                      selected: selectedLine) != nil || HorizontalGestureIntent.accepts(delta)
         }, change: { gesture in
-            if editingVolume { updateCurveDrag(gesture, size: size, timing: timing) }
-            else { updateCueDrag(gesture, size: size, timing: timing) }
+            if cueSession != nil { updateCueDrag(gesture, size: size, timing: timing); return }
+            if curveSession != nil { updateCurveDrag(gesture, size: size, timing: timing); return }
+            if effectSession != nil { updateEffectDrag(gesture); return }
+            let layout = curveLayout(timing, size)
+            if let line = layout.nearestLine(gesture.startLocation, spec: spec, showsEQ: showsEQ, showsFilter: showsFilter,
+                                             selected: selectedLine) {
+                selectLine(line, at: gesture.startLocation, timing: timing, size: size)
+                if case .volume = line { updateCurveDrag(gesture, size: size, timing: timing) }
+                else {
+                    preview.stop()
+                    effectSession = TransitionEffectDrag(base: spec, target: line, layout: layout)
+                    updateEffectDrag(gesture)
+                }
+            } else { updateCueDrag(gesture, size: size, timing: timing) }
         }, end: { gesture in
-            if editingVolume { finishCurveDrag(gesture) } else { finishCueDrag(gesture) }
+            if curveSession != nil { finishCurveDrag(gesture) }
+            else if let session = effectSession {
+                let result = session.moved(translation: gesture.translation)
+                cancelCueDrag()
+                if result != spec { edit { _ in result } }
+            } else { finishCueDrag(gesture) }
         }, cancel: cancelCueDrag, tap: { location in
             guard transitionEnabled else { return }
-            if editingVolume { selectOrAddPoint(location, size: size, timing: timing) }
+            let layout = curveLayout(timing, size)
+            if let line = layout.nearestLine(location, spec: spec, showsEQ: showsEQ, showsFilter: showsFilter, selected: selectedLine) {
+                selectLine(line, at: location, timing: timing, size: size)
+            } else if editingVolume && isEditingGain { selectOrAddPoint(location, size: size, timing: timing) }
             else { inspectedMs = viewport(timing).time(at: Double(location.x / max(size.width, 1))) }
+        }, touchDown: { location in
+            guard transitionEnabled, !pinching else { return }
+            if let line = curveLayout(timing, size).nearestLine(location, spec: spec, showsEQ: showsEQ, showsFilter: showsFilter,
+                                                               selected: selectedLine) {
+                selectLine(line, at: location, timing: timing, size: size)
+            }
         })
+    }
+
+    private var isEditingGain: Bool {
+        if let selectedLine { if case .volume = selectedLine { return true }; return false }
+        return true
+    }
+
+    private var editingHint: String {
+        guard editingVolume, let selectedLine else { return "Touch a curve to edit · drag audio to move cues" }
+        switch selectedLine {
+        case .volume: return "Volume · drag points · tap a lane to add"
+        case .bass: return "EQ · drag the yellow handle to move the handover"
+        case .filter: return "Filter · drag the pink handle for time and cutoff"
+        }
+    }
+
+    private func selectLine(_ line: TransitionLineTarget, at location: CGPoint, timing: PairTransitionTiming, size: CGSize) {
+        selectedLine = line
+        editingVolume = true
+        if case .volume(let role) = line {
+            selectedHandle = curveLayout(timing, size).nearest(location, spec: workingSpec)
+            if selectedHandle?.role != role { selectedHandle = nil }
+        } else { selectedHandle = nil }
+    }
+
+    private func updateEffectDrag(_ sample: PanInteraction.Sample) {
+        guard let session = effectSession else { return }
+        var transaction = Transaction(); transaction.disablesAnimations = true
+        withTransaction(transaction) { draggedSpec = session.moved(translation: sample.translation) }
     }
 
     private func magnification(_ timing: PairTransitionTiming) -> some Gesture {
@@ -316,7 +388,7 @@ struct PairTransitionWorkspace: View {
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(.white.opacity(0.16)))
         }
         .buttonStyle(.plain)
-        .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil || curveSession != nil)
+        .disabled(loading || outgoing == nil || incoming == nil || cueSession != nil || curveSession != nil || effectSession != nil)
         .accessibilityLabel(preview.isPreparing || preview.isPlaying ? "Stop transition preview" : "Audition this transition")
     }
 
@@ -349,7 +421,7 @@ struct PairTransitionWorkspace: View {
         if result != session.base { edit { _ in result } }
     }
 
-    private func cancelCueDrag() { cueSession = nil; curveSession = nil; draggedSpec = nil; cueDisplayGain = nil }
+    private func cancelCueDrag() { cueSession = nil; curveSession = nil; effectSession = nil; draggedSpec = nil; cueDisplayGain = nil }
 
     private func curveLayout(_ timing: PairTransitionTiming, _ size: CGSize) -> TransitionCurveLayout {
         TransitionCurveLayout(viewport: viewport(timing), durationMs: Double(timing.plan.durationMs), size: size)
@@ -358,10 +430,21 @@ struct PairTransitionWorkspace: View {
     private func updateCurveDrag(_ gesture: PanInteraction.Sample, size: CGSize, timing: PairTransitionTiming) {
         if curveSession == nil {
             let layout = curveLayout(timing, size)
-            guard let handle = layout.nearest(gesture.startLocation, spec: spec) else { return }
+            let role = selectedLine?.role ?? layout.role(at: gesture.startLocation)
+            var base = spec
+            var handle = layout.nearest(gesture.startLocation, spec: base)
+            if handle?.role != role { handle = nil }
+            if handle == nil {
+                let t = layout.value(at: gesture.startLocation, role: role).t
+                base = TransitionEditing.addPoint(spec, role, t: t)
+                if let index = TransitionEditing.curveOf(base, role).points.firstIndex(where: { abs($0.t - t) < 1e-6 }) {
+                    handle = TransitionCurveHandle(role: role, index: index)
+                }
+            }
+            guard let handle else { return }
             preview.stop()
             selectedHandle = handle
-            curveSession = TransitionCurveDrag(base: spec, handle: handle, layout: layout)
+            curveSession = TransitionCurveDrag(base: base, handle: handle, layout: layout)
         }
         guard let session = curveSession else { return }
         var transaction = Transaction(); transaction.disablesAnimations = true
@@ -372,7 +455,7 @@ struct PairTransitionWorkspace: View {
         guard let session = curveSession else { return }
         let result = session.moved(translation: gesture.translation)
         cancelCueDrag()
-        if result != session.base { edit { _ in result } }
+        if result != spec { edit { _ in result } }
     }
 
     private func selectOrAddPoint(_ location: CGPoint, size: CGSize, timing: PairTransitionTiming) {

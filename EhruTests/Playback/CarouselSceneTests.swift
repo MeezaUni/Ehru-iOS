@@ -69,18 +69,47 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertFalse(pair.canMove(0))
     }
 
-    func testProjectedCardsRemainSeparatedThroughoutBothSwipeDirections() {
+    func testBothNeighbourPreviewsAreVisibleBehindTheCenteredCard() {
         for width in [CGFloat(160), 260, 320, 480] {
             let size = CGSize(width: width, height: width + 100)
+            // CardMetrics gives the current card 80% of the available viewport width.
+            let viewport = CGRect(x: -width * 0.125, y: 0, width: width * 1.25, height: size.height)
             for reduced in [false, true] {
-                for step in 0...40 {
-                    let focus = CGFloat(step) / 40
-                    let left = bounds(ordinal: 0, focus: focus, size: size, reduced: reduced)
-                    let right = bounds(ordinal: 1, focus: focus, size: size, reduced: reduced)
-                    XCTAssertLessThanOrEqual(left.maxX + 4, right.minX, "Cards intersect at width \(width), focus \(focus), reduced \(reduced)")
-                }
+                let left = bounds(ordinal: -1, focus: 0, size: size, reduced: reduced)
+                let right = bounds(ordinal: 1, focus: 0, size: size, reduced: reduced)
+                XCTAssertGreaterThan(min(left.maxX, 0) - max(left.minX, viewport.minX), 10)
+                XCTAssertGreaterThan(min(right.maxX, viewport.maxX) - max(right.minX, width), 10)
+                XCTAssertLessThan(CarouselPose.depth(distance: -1), CarouselPose.depth(distance: 0))
+                XCTAssertLessThan(CarouselPose.depth(distance: 1), CarouselPose.depth(distance: 0))
             }
         }
+    }
+
+    func testTheNearestCardStaysInFrontThroughForwardAndReverseSlides() {
+        for step in -40...40 {
+            let focus = CGFloat(step) / 40
+            let distances = (-2...2).map { CGFloat($0) - focus }
+            let nearest = distances.min { abs($0) < abs($1) }!
+            for distance in distances {
+                XCTAssertGreaterThanOrEqual(CarouselPose.depth(distance: nearest), CarouselPose.depth(distance: distance))
+            }
+        }
+        var rendered = CarouselCardMotion(distance: -1, stack: 0, size: CGSize(width: 280, height: 380),
+                                          hideLeft: false, reduceMotion: false)
+        rendered.animatableData = AnimatablePair(-0.2, 0)
+        XCTAssertGreaterThan(CarouselPose.depth(distance: rendered.distance), CarouselPose.depth(distance: 0.8))
+    }
+
+    func testTwoEntryRepeatHonoursTheRequestedPreviousOccurrence() {
+        let a = QueueEntry(song: testSong(1)), b = QueueEntry(song: testSong(2))
+        var scene = CarouselScene()
+        scene.select(CarouselSelection(previous: b, current: a, next: b))
+        let previousKey = scene.items.first { $0.ordinal == -1 }?.id
+        XCTAssertTrue(scene.select(CarouselSelection(previous: a, current: b, next: a), preferredDirection: -1))
+        XCTAssertEqual(scene.center, -1)
+        XCTAssertEqual(scene.currentKey, previousKey)
+        XCTAssertTrue(scene.select(CarouselSelection(previous: b, current: a, next: b), preferredDirection: 1))
+        XCTAssertEqual(scene.center, 0)
     }
 
     func testInterruptedGestureCanReadTheActualInterpolatedFocus() {

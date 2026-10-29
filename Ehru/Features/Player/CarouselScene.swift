@@ -28,10 +28,11 @@ struct CarouselScene {
 
     /// True for an adjacent change; unrelated jumps can replace the scene without sliding.
     @discardableResult
-    mutating func select(_ next: CarouselSelection) -> Bool {
+    mutating func select(_ next: CarouselSelection, preferredDirection: Int? = nil) -> Bool {
         let changed = next.current?.id != selection.current?.id
         let direction: Int
-        if changed, let id = next.current?.id, id == selection.next?.id { direction = 1 }
+        if changed, preferredDirection == -1, let id = next.current?.id, id == selection.previous?.id { direction = -1 }
+        else if changed, let id = next.current?.id, id == selection.next?.id { direction = 1 }
         else if changed, let id = next.current?.id, id == selection.previous?.id { direction = -1 }
         else { direction = 0 }
         if changed && direction == 0 { items = []; center = 0 }
@@ -74,7 +75,8 @@ struct CarouselPose {
     let turn: Double
     let opacity: Double
 
-    static func page(width: CGFloat) -> CGFloat { width * 0.94 + 12 }
+    static func page(width: CGFloat) -> CGFloat { width * 0.66 }
+    static func depth(distance: CGFloat) -> Double { 2 - Double(abs(distance)) }
 
     init(distance: CGFloat, width: CGFloat, stack: CGFloat, hideLeft: Bool, reduceMotion: Bool) {
         let away = abs(distance), near = min(abs(distance), 1)
@@ -100,5 +102,25 @@ struct CarouselFocusProbe: GeometryEffect {
     func effectValue(size: CGSize) -> ProjectionTransform {
         meter.record(focus)
         return ProjectionTransform(CGAffineTransform.identity)
+    }
+}
+
+/// z-order uses the interpolated distance, not the destination distance. Neighbours remain
+/// behind the nearest card, restoring Cover Flow previews without a departing card on top.
+struct CarouselCardMotion: AnimatableModifier {
+    var distance: CGFloat
+    var stack: CGFloat
+    let size: CGSize
+    let hideLeft: Bool
+    let reduceMotion: Bool
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(distance, stack) }
+        set { distance = newValue.first; stack = newValue.second }
+    }
+    func body(content: Content) -> some View {
+        let pose = CarouselPose(distance: distance, width: size.width, stack: stack, hideLeft: hideLeft, reduceMotion: reduceMotion)
+        let projection = DepthCard(distance: distance, width: size.width, stack: stack,
+                                   hideLeft: hideLeft, reduceMotion: reduceMotion).effectValue(size: size)
+        content.projectionEffect(projection).opacity(pose.opacity).zIndex(CarouselPose.depth(distance: distance))
     }
 }

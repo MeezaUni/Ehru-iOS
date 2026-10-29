@@ -31,7 +31,7 @@ struct TransitionAutomation: Equatable {
 
     /// The filter sweep on this track at [ms], or nil when this track is not filtered.
     func filterAt(_ ms: Double) -> FilterSetting? {
-        spec.filter.settingAt(role, progress(ms))
+        spec.filterSetting(role, progress(ms))
     }
 
     /// True once an incoming automation is over and the audio plays unchanged again.

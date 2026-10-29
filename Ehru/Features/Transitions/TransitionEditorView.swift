@@ -649,7 +649,7 @@ private struct TransitionLanes: View {
                 var path = Path()
                 for step in 0...48 {
                     let t = Float(step) / 48
-                    guard let setting = spec.filter.settingAt(role, t) else { continue }
+                    guard let setting = spec.filterSetting(role, t) else { continue }
                     let amount = CGFloat(Self.filteredAmount(setting))
                     let p = CGPoint(x: box.minX + CGFloat(t) * box.width, y: box.maxY - amount * box.height)
                     if step == 0 { path.move(to: p) } else { path.addLine(to: p) }

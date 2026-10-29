@@ -36,7 +36,8 @@ Cue sliders and ±100 ms controls edit the actual outgoing-end/incoming-start se
 reset, Save and Cancel. Each waveform also accepts a horizontal drag: the upper lane shifts only
 the outgoing cue and the lower lane only the incoming cue. Each drag captures its initial lane,
 cue and time scale, updates locally under the finger, then commits one undoable edit on release.
-Cancellation leaves the draft alone. Vertical gestures remain available for scrolling.
+Cancellation leaves the draft alone. Vertical gestures away from automation remain available
+for scrolling; touches on a curve can adjust it vertically.
 
 Fit fills most of the plot with the overlap. Fit/2×/4×/8× menu choices and anchored pinch zoom control
 the time scale; a separate overview strip moves the view without changing either cue. A ruler
@@ -46,12 +47,20 @@ drag, and silence stays silent. These controls never change audio volume or raw 
 Dimmed source samples are outside the playback interval; missing source data is left empty.
 
 The pair workspace puts the outgoing track above the waveforms and incoming track below.
-Move audio shifts each lane independently; Edit fade exposes volume handles directly over the
-source audio. Handles use the same time/gain geometry as the drawn engine curves. Dragging a
+Move audio shifts each lane independently; touching any active automation line immediately
+selects its editor and reveals its handles, without requiring the Edit curves tool first.
+A zero-delay touch observer selects the line without blocking pan, tap, scroll or pinch gestures. Handles use the same time/gain geometry as the drawn engine curves. Dragging a
 handle preserves its initial finger offset, keeps the other lane and both cues intact, and
 commits one undoable edit on release; cancellation discards the transient edit. Tapping a lane
 adds a point on its current curve; selecting an interior point allows removal. Fixed endpoint
-levels and point-order limits still apply. The central play/stop control auditions the draft;
+levels and point-order limits still apply. Dragging a volume segment without a nearby handle
+inserts a point on the actual curve before moving it. Touching yellow EQ selects its handover
+handle, whose horizontal movement adjusts the real 200 Hz/-24 dB bass swap timing. Touching
+pink selects a filter knee: horizontal movement adjusts its time, vertical movement its cutoff
+on the same logarithmic frequency scale as the plot. Both source endpoints retain the filter's
+original cutoff; exponential sweeps connect them through the edited knee. Optional saved knee
+fields preserve old presets exactly when absent. Picking a named filter resets its knee edits.
+All direct edits are transient until release and form one undo step. The central play/stop control auditions the draft;
 technical measurements and source ranges remain in an expandable analysis section.
 
 Preview schedules bounded source segments on two decks with the same

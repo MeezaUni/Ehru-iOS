@@ -39,4 +39,29 @@ final class GestureIntentTests: XCTestCase {
         XCTAssertEqual(changes, 0)
         XCTAssertEqual(commits, 0)
     }
+    @MainActor
+    func testImmediateLineSelectionDoesNotTakeOverThePanOrScrollRecognizer() {
+        var edits = 0
+        var selections = 0
+        let interaction = PanInteraction(canBegin: { _, movement in HorizontalGestureIntent.accepts(movement) },
+                                         change: { _ in edits += 1 }, end: { _ in edits += 1 },
+                                         cancel: {}, tap: { _ in edits += 1 }, touchDown: { _ in selections += 1 })
+        let coordinator = PanInteraction.Coordinator(interaction)
+        let observer = ImmediatePress()
+        observer.minimumPressDuration = 0
+        let pan = UIPanGestureRecognizer()
+        let scroll = UIScrollView().panGestureRecognizer
+        XCTAssertTrue(coordinator.gestureRecognizer(observer, shouldRecognizeSimultaneouslyWith: pan))
+        XCTAssertTrue(coordinator.gestureRecognizer(observer, shouldRecognizeSimultaneouslyWith: scroll))
+        XCTAssertTrue(coordinator.gestureRecognizer(pan, shouldRecognizeSimultaneouslyWith: observer))
+        XCTAssertFalse(coordinator.gestureRecognizer(pan, shouldRecognizeSimultaneouslyWith: scroll))
+        coordinator.press(observer)
+        XCTAssertEqual(selections, 1)
+        XCTAssertEqual(edits, 0)
+    }
+
+    private final class ImmediatePress: UILongPressGestureRecognizer {
+        override var state: UIGestureRecognizer.State { get { .began } set {} }
+    }
+
 }

@@ -160,3 +160,85 @@ enum TransitionPointPrecision {
         return updated
     }
 }
+
+/// Direct hits use the same gain/frequency geometry as rendering; only visible, active lines
+/// participate. Tapping a segment reveals its editor even when the tool is Move audio.
+enum TransitionLineTarget: Equatable {
+    case volume(TransitionRole), bass(TransitionRole), filter(TransitionRole)
+    var role: TransitionRole {
+        switch self { case .volume(let role), .bass(let role), .filter(let role): role }
+    }
+}
+
+extension TransitionCurveLayout {
+    func position(time: Float, level: Float, role: TransitionRole) -> CGPoint {
+        position(CurvePoint(t: time, gain: level), role: role)
+    }
+
+    static func frequencyLevel(_ hz: Float) -> Float { (log(hz.clamped(20, 18_000) / 20) / log(Float(900))).clamped(0, 1) }
+    static func frequency(_ level: Float) -> Float { 20 * pow(900, level.clamped(0, 1)) }
+
+    func nearestLine(_ location: CGPoint, spec: TransitionSpec, showsEQ: Bool, showsFilter: Bool,
+                     selected: TransitionLineTarget? = nil, radius: CGFloat = 18) -> TransitionLineTarget? {
+        var targets: [TransitionLineTarget] = []
+        for role in [TransitionRole.outgoing, .incoming] {
+            targets.append(.volume(role))
+            if showsEQ && spec.bassSwap { targets.append(.bass(role)) }
+            if showsFilter && spec.filter.affects(role) { targets.append(.filter(role)) }
+        }
+        var best: TransitionLineTarget?
+        var bestGap = radius
+        for target in targets {
+            var previous: CGPoint?
+            for step in 0...160 {
+                let t = Float(step) / 160
+                let level: Float
+                switch target {
+                case .volume(let role): level = spec.gain(role, t)
+                case .bass(let role): level = pow(10, spec.bassDb(role, t) / 20)
+                case .filter(let role):
+                    guard let setting = spec.filterSetting(role, t) else { continue }
+                    level = Self.frequencyLevel(setting.hz)
+                }
+                let p = position(time: t, level: level, role: target.role)
+                defer { previous = p }
+                guard p.x >= -radius, p.x <= size.width + radius, let a = previous else { continue }
+                let dx = p.x - a.x, dy = p.y - a.y
+                let length = dx * dx + dy * dy
+                let u = length > 0 ? (((location.x - a.x) * dx + (location.y - a.y) * dy) / length).clamped(0, 1) : 0
+                let gap = hypot(location.x - a.x - u * dx, location.y - a.y - u * dy)
+                if gap < bestGap - 0.25 || (gap <= bestGap + 0.25 && target == selected) {
+                    bestGap = gap; best = target
+                }
+            }
+        }
+        return best
+    }
+
+    func effectHandle(_ target: TransitionLineTarget, spec: TransitionSpec) -> CGPoint? {
+        switch target {
+        case .bass(let role):
+            return position(time: spec.bassSwapAt, level: pow(10, spec.bassDb(role, spec.bassSwapAt) / 20), role: role)
+        case .filter(let role):
+            return spec.filterKnee(role).map { position(time: $0.t, level: Self.frequencyLevel($0.hz), role: role) }
+        case .volume: return nil
+        }
+    }
+}
+
+struct TransitionEffectDrag {
+    let base: TransitionSpec
+    let target: TransitionLineTarget
+    let layout: TransitionCurveLayout
+
+    func moved(translation: CGSize) -> TransitionSpec {
+        guard translation != .zero, translation.width.isFinite, translation.height.isFinite,
+              let start = layout.effectHandle(target, spec: base) else { return base }
+        let value = layout.value(at: CGPoint(x: start.x + translation.width, y: start.y + translation.height), role: target.role)
+        switch target {
+        case .bass: return TransitionEditing.setBassSwapAt(base, value.t)
+        case .filter(let role): return TransitionEditing.setFilterKnee(base, role: role, t: value.t, hz: TransitionCurveLayout.frequency(value.gain))
+        case .volume: return base
+        }
+    }
+}
