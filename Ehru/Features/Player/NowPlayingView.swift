@@ -61,7 +61,6 @@ struct NowPlayingView: View {
                         }
                     }
                     .scrollIndicators(.hidden)
-                    .scrollClipDisabled()
                 }
             } else {
                 Spacer()
