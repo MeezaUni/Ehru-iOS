@@ -104,7 +104,6 @@ final class PlayerArtworkLayoutTests: XCTestCase {
                 .modifier(PlayerForegroundMotion(drag: drag))
                 .environment(drag)
                 .environment(\.playerArtworkFrames, PlayerArtworkFrames(expanded: source, mini: destination))
-                .environment(\.accessibilityReduceMotion, false)
             }
             .frame(width: 390, height: 780, alignment: .topLeading)
             .coordinateSpace(name: PlayerArtworkSpace.root)
