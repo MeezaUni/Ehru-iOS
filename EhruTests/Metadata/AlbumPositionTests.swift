@@ -6,7 +6,7 @@ final class AlbumPositionTests: XCTestCase {
         let body: String
         private(set) var requests = 0
         init(_ body: String) { self.body = body }
-        func request(_ url: URL, headers: [String: String]) async throws -> (Data, HTTPURLResponse) {
+        func get(_ url: URL, headers: [String: String]) async throws -> (Data, HTTPURLResponse) {
             requests += 1
             return (Data(body.utf8), HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: nil)!)
         }
