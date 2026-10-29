@@ -87,9 +87,19 @@ jobs:
             2>&1 | tee build/tests.log; then
             python3 - <<'PY'
           import os
+          import re
           from pathlib import Path
           lines = Path('build/tests.log').read_text(errors='replace').splitlines()
-          failures = [line for line in lines if 'error:' in line.lower() or 'failed' in line.lower() or 'XCTAssert' in line]
+          def is_failure(line):
+              # Malformed-media fixtures intentionally produce CoreAudio/ImageIO diagnostics.
+              # Report compiler and XCTest failures without turning those system logs into errors.
+              return (re.search(r'\.(?:swift|m|mm|h):\d+(?::\d+)?:\s*(?:fatal )?error:', line) is not None
+                      or line.lstrip().startswith(('error:', 'fatal error:', 'xcodebuild: error:', 'Testing failed:'))
+                      or ('XCTAssert' in line and 'failed' in line)
+                      or (line.startswith('Test Case ') and ' failed (' in line)
+                      or (line.startswith('Test Suite ') and ' failed at ' in line)
+                      or '** TEST FAILED **' in line)
+          failures = [line for line in lines if is_failure(line)]
           for failure in failures[:20]:
               escaped = failure.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
               print('::error::' + escaped, flush=True)

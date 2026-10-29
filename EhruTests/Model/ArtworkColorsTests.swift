@@ -48,8 +48,8 @@ final class ArtworkColorsTests: XCTestCase {
     }
 
     func testIncompleteTracksAreFoundForFixTags() {
-        func song(_ id: Int64, _ title: String, _ artist: String, _ album: String) -> Song {
-            Song(id: id, title: title, artist: artist, album: album, durationMs: 1, path: "\(id).mp3")
+        func song(_ id: Int64, _ title: String, _ artist: String, _ album: String, trackNumber: Int = 1) -> Song {
+            Song(id: id, title: title, artist: artist, album: album, durationMs: 1, path: "\(id).mp3", trackNumber: trackNumber)
         }
         let songs = [
             song(1, "Fine", "Artist", "Album"),
@@ -57,7 +57,8 @@ final class ArtworkColorsTests: XCTestCase {
             song(3, "Song", "Artist", ""),
             song(4, "Song (www.site.com)", "Artist", "Album"),
             song(5, "song.mp3", "Unknown Artist", "Album"),
+            song(6, "Fine", "Artist", "Album", trackNumber: 0),
         ]
-        XCTAssertEqual(FixTagsStore.incomplete(songs).map(\.id), [2, 3, 4, 5])
+        XCTAssertEqual(FixTagsStore.incomplete(songs).map(\.id), [2, 3, 4, 5, 6])
     }
 }
