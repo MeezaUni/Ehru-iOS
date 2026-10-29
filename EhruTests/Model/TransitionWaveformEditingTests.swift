@@ -158,4 +158,29 @@ final class TransitionWaveformEditingTests: XCTestCase {
         XCTAssertEqual(draft.spec, base)
     }
 
+
+    func testTechnicalPointValuesConvertDecibelsToTheActualEngineCurve() throws {
+        var base = TransitionEditing.setCurve(TransitionSpec(), .custom)
+        base.outgoingCutMs = 2000
+        base.incomingStartMs = 3000
+        let handle = TransitionCurveHandle(role: .incoming, index: 2)
+        let updated = TransitionPointPrecision.updated(base, handle: handle, durationMs: 2000,
+                                                       timeMs: 1100, gainDb: -6, silence: false)
+        let point = try XCTUnwrap(updated.incomingCurve).points[2]
+        XCTAssertEqual(point.t, 0.55, accuracy: 1e-6)
+        XCTAssertEqual(point.gain, 0.5011872, accuracy: 1e-6)
+        XCTAssertEqual(try makeTiming(updated).automation(.incoming).gainAt(1100), point.gain, accuracy: 1e-6)
+        XCTAssertEqual(updated.outgoingCurve, base.outgoingCurve)
+        XCTAssertEqual(updated.outgoingCutMs, 2000)
+        XCTAssertEqual(updated.incomingStartMs, 3000)
+        let silent = TransitionPointPrecision.updated(base, handle: handle, durationMs: 2000,
+                                                      timeMs: 1100, gainDb: -6, silence: true)
+        XCTAssertEqual(try XCTUnwrap(silent.incomingCurve).points[2].gain, 0)
+        let fixed = TransitionPointPrecision.updated(base, handle: TransitionCurveHandle(role: .outgoing, index: 0),
+                                                     durationMs: 2000, timeMs: 1000, gainDb: -6, silence: true)
+        XCTAssertEqual(try XCTUnwrap(fixed.outgoingCurve).points.first, CurvePoint(t: 0, gain: 1))
+        XCTAssertEqual(TransitionPointPrecision.updated(base, handle: handle, durationMs: 2000,
+                                                        timeMs: .nan, gainDb: 0, silence: false), base)
+    }
+
 }

@@ -2,16 +2,19 @@ import Foundation
 
 /// Transition-relative milliseconds. Fit gives the overlap most of the screen, with a little context.
 struct TransitionWaveformViewport: Equatable {
+    let includesPreviewContext: Bool
     let startMs: Double
     let durationMs: Double
     var endMs: Double { startMs + durationMs }
     var centerMs: Double { startMs + durationMs / 2 }
 
-    init(timing: PairTransitionTiming, zoom: Double, focusMs: Double? = nil) {
+    init(timing: PairTransitionTiming, zoom: Double, focusMs: Double? = nil, includesPreviewContext: Bool = false) {
         let bounds = Self.bounds(timing)
-        let fit = min(bounds.upperBound - bounds.lowerBound, Double(timing.plan.durationMs) * 1.25)
+        self.includesPreviewContext = includesPreviewContext || !timing.hasOverlap
+        let fit = self.includesPreviewContext ? bounds.upperBound - bounds.lowerBound
+            : min(bounds.upperBound - bounds.lowerBound, Double(timing.plan.durationMs) * 1.25)
         durationMs = fit / (zoom.isFinite ? zoom.clamped(1, 8) : 1)
-        let center = focusMs.flatMap { $0.isFinite ? $0 : nil } ?? Double(timing.plan.durationMs) / 2
+        let center = focusMs.flatMap { $0.isFinite ? $0 : nil } ?? (self.includesPreviewContext ? (bounds.lowerBound + bounds.upperBound) / 2 : Double(timing.plan.durationMs) / 2)
         startMs = (center - durationMs / 2).clamped(bounds.lowerBound, bounds.upperBound - durationMs)
     }
 
@@ -25,9 +28,9 @@ struct TransitionWaveformViewport: Equatable {
     /// Keep the time under the fingers fixed while pinching, except at the available edges.
     func zoomed(timing: PairTransitionTiming, zoom: Double, anchor: Double) -> TransitionWaveformViewport {
         let fraction = anchor.isFinite ? anchor.clamped(0, 1) : 0.5
-        let span = TransitionWaveformViewport(timing: timing, zoom: zoom).durationMs
+        let span = TransitionWaveformViewport(timing: timing, zoom: zoom, includesPreviewContext: includesPreviewContext).durationMs
         let center = time(at: fraction) + (0.5 - fraction) * span
-        return TransitionWaveformViewport(timing: timing, zoom: zoom, focusMs: center)
+        return TransitionWaveformViewport(timing: timing, zoom: zoom, focusMs: center, includesPreviewContext: includesPreviewContext)
     }
 }
 
@@ -138,5 +141,22 @@ struct TransitionCurveDrag {
         let start = layout.position(points[handle.index], role: handle.role)
         let value = layout.value(at: CGPoint(x: start.x + translation.width, y: start.y + translation.height), role: handle.role)
         return TransitionEditing.movePoint(base, handle.role, index: handle.index, t: value.t, gain: value.gain)
+    }
+}
+
+/// Conversion of the technical editor's values to the engine's linear-gain points.
+enum TransitionPointPrecision {
+    static func updated(_ spec: TransitionSpec, handle: TransitionCurveHandle, durationMs: Int,
+                        timeMs: Double, gainDb: Double, silence: Bool) -> TransitionSpec {
+        guard durationMs > 0, timeMs.isFinite, gainDb.isFinite else { return spec }
+        let gain: Float = silence ? 0 : Float(pow(10, gainDb.clamped(-96, 0) / 20))
+        let points = TransitionEditing.curveOf(spec, handle.role).points
+        guard points.indices.contains(handle.index) else { return spec }
+        let updated = TransitionEditing.movePoint(spec, handle.role, index: handle.index,
+                                                  t: Float((timeMs / Double(durationMs)).clamped(0, 1)), gain: gain)
+        let original = points[handle.index]
+        let result = TransitionEditing.curveOf(updated, handle.role).points[handle.index]
+        if abs(original.t - result.t) < 1e-7 && abs(original.gain - result.gain) < 1e-7 { return spec }
+        return updated
     }
 }

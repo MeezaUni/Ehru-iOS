@@ -5,9 +5,11 @@ struct PairAudioPlot: View {
     let viewport: TransitionWaveformViewport
     let outgoing: TransitionAudioSlice?
     let incoming: TransitionAudioSlice?
-    let inspectedMs: Double
+    let inspectedMs: Double?
     let displayGain: Float
     let activeRole: TransitionRole?
+    var showsEQ = true
+    var showsFilter = true
     var editingVolume = false
     var selectedHandle: TransitionCurveHandle?
     @Environment(\.palette) private var palette
@@ -43,26 +45,30 @@ struct PairAudioPlot: View {
                 var zero = Path()
                 zero.move(to: CGPoint(x: 0, y: center)); zero.addLine(to: CGPoint(x: width, y: center))
                 context.stroke(zero, with: .color(palette.onSurface.opacity(0.1)), lineWidth: 0.5)
-                var curve = Path()
-                for step in 0...160 {
-                    let time = Double(timing.plan.durationMs) * Double(step) / 160
-                    let gain = timing.automation(role).gainAt(time)
-                    let point = CGPoint(x: x(time), y: center + amplitude - CGFloat(gain) * amplitude * 2)
-                    if step == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
-                }
-                context.stroke(curve, with: .color(AutomationColors.volume), style: StrokeStyle(lineWidth: 2.5, lineJoin: .round, dash: index == 0 ? [] : [4, 3]))
-                if editingVolume {
-                    for (pointIndex, control) in TransitionEditing.curveOf(timing.plan.spec, role).points.enumerated() {
-                        let point = layout.position(control, role: role)
-                        guard point.x >= 0, point.x <= width else { continue }
-                        let selected = selectedHandle == TransitionCurveHandle(role: role, index: pointIndex)
-                        let radius: CGFloat = selected ? 8 : 6
-                        let dot = Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
-                        context.fill(dot, with: .color(index == 0 ? AutomationColors.volume : palette.surface))
-                        context.stroke(dot, with: .color(AutomationColors.volume), lineWidth: 2)
+                if timing.hasOverlap {
+                    var curve = Path()
+                    for step in 0...160 {
+                        let time = Double(timing.plan.durationMs) * Double(step) / 160
+                        let gain = timing.automation(role).gainAt(time)
+                        let point = CGPoint(x: x(time), y: center + amplitude - CGFloat(gain) * amplitude * 2)
+                        if step == 0 { curve.move(to: point) } else { curve.addLine(to: point) }
                     }
+                    context.stroke(curve, with: .color(.black.opacity(0.45)), lineWidth: 4.5)
+                    context.stroke(curve, with: .color(AutomationColors.volume), style: StrokeStyle(lineWidth: 2.5, lineJoin: .round, dash: index == 0 ? [] : [4, 3]))
+                    if editingVolume {
+                        for (pointIndex, control) in TransitionEditing.curveOf(timing.plan.spec, role).points.enumerated() {
+                            let point = layout.position(control, role: role)
+                            guard point.x >= 0, point.x <= width else { continue }
+                            let selected = selectedHandle == TransitionCurveHandle(role: role, index: pointIndex)
+                            let radius: CGFloat = selected ? 8 : 6
+                            let dot = Path(ellipseIn: CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2))
+                            context.fill(dot, with: .color(index == 0 ? AutomationColors.volume : palette.surface))
+                            context.stroke(dot, with: .color(AutomationColors.volume), lineWidth: 2)
+                        }
+                    }
+                    drawEffects(role: role, center: center, amplitude: amplitude, width: width, context: context)
                 }
-                let title = (role == .outgoing ? "OUT" : "IN") + (editingVolume ? " · volume" : " · drag audio")
+                let title = (role == .outgoing ? "OUT" : "IN") + (timing.hasOverlap ? (editingVolume ? " · volume" : " · audio") : "")
                 context.draw(Text(title).font(.caption2.weight(.semibold)).foregroundColor(color),
                              at: CGPoint(x: 8, y: lane.minY + 13), anchor: .leading)
                 let times = "\(sourceTimeLabel(sourceStart + viewport.startMs)) – \(sourceTimeLabel(sourceStart + viewport.endMs))"
@@ -72,23 +78,52 @@ struct PairAudioPlot: View {
             var divider = Path()
             divider.move(to: CGPoint(x: 0, y: height / 2)); divider.addLine(to: CGPoint(x: width, y: height / 2))
             context.stroke(divider, with: .color(palette.outline.opacity(0.4)), lineWidth: 1)
-            for time in [0.0, Double(timing.plan.durationMs)] where (0...1).contains(viewport.fraction(at: time)) {
+            for time in (timing.hasOverlap ? [0.0, Double(timing.plan.durationMs)] : [0.0]) where (0...1).contains(viewport.fraction(at: time)) {
                 var line = Path()
                 line.move(to: CGPoint(x: x(time), y: 26)); line.addLine(to: CGPoint(x: x(time), y: height - 20))
                 context.stroke(line, with: .color(palette.onSurface.opacity(0.25)), lineWidth: 1)
             }
-            if (0...1).contains(viewport.fraction(at: inspectedMs)) {
+            if let inspectedMs, (0...1).contains(viewport.fraction(at: inspectedMs)) {
                 var line = Path()
                 line.move(to: CGPoint(x: x(inspectedMs), y: 26)); line.addLine(to: CGPoint(x: x(inspectedMs), y: height - 20))
                 context.stroke(line, with: .color(palette.primary.opacity(0.8)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
             }
         }
-        .background(palette.background.opacity(0.45), in: RoundedRectangle(cornerRadius: 14))
+        .background(palette.onSurface.opacity(0.025), in: RoundedRectangle(cornerRadius: 14))
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .accessibilityElement()
         .accessibilityLabel("Outgoing and incoming audio waveforms")
-        .accessibilityValue("\(TransitionSpec.durationLabel(timing.plan.durationMs)) overlap. \(String(format: "%.2f", viewport.durationMs / 1000)) seconds visible.")
+        .accessibilityValue("\(timing.hasOverlap ? TransitionSpec.durationLabel(timing.plan.durationMs) + " overlap" : "No crossfade"). \(String(format: "%.2f", viewport.durationMs / 1000)) seconds visible.")
         .accessibilityHint("Drag each waveform horizontally to move its cue, or choose Edit fade to change volume points. Pinch to zoom.")
+    }
+
+    private func drawEffects(role: TransitionRole, center: CGFloat, amplitude: CGFloat,
+                             width: CGFloat, context: GraphicsContext) {
+        let spec = timing.plan.spec
+        if showsEQ, spec.bassSwap {
+            var path = Path()
+            for step in 0...120 {
+                let time = Double(timing.plan.durationMs) * Double(step) / 120
+                let gain = pow(10, timing.automation(role).bassDbAt(time) / 20)
+                let p = CGPoint(x: CGFloat(viewport.fraction(at: time)) * width,
+                                y: center + amplitude - CGFloat(gain) * 2 * amplitude)
+                if step == 0 { path.move(to: p) } else { path.addLine(to: p) }
+            }
+            context.stroke(path, with: .color(AutomationColors.eq), style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
+        }
+        if showsFilter, spec.filter.affects(role) {
+            var path = Path()
+            for step in 0...120 {
+                let time = Double(timing.plan.durationMs) * Double(step) / 120
+                guard let setting = timing.automation(role).filterAt(time) else { continue }
+                // Cutoff uses a log-frequency scale, never a fake amplitude or spectrum.
+                let fraction = (log(setting.hz / 20) / log(Float(18_000) / 20)).clamped(0, 1)
+                let p = CGPoint(x: CGFloat(viewport.fraction(at: time)) * width,
+                                y: center + amplitude - CGFloat(fraction) * 2 * amplitude)
+                if step == 0 { path.move(to: p) } else { path.addLine(to: p) }
+            }
+            context.stroke(path, with: .color(AutomationColors.filter), lineWidth: 1.5)
+        }
     }
 
     private func sourceTimeLabel(_ ms: Double) -> String {

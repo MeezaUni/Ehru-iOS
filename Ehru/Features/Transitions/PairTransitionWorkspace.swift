@@ -5,7 +5,8 @@ import SwiftUI
 struct PairTransitionWorkspace: View {
     let pair: StudioPair
     let spec: TransitionSpec
-    let masterEnabled: Bool
+    let transitionEnabled: Bool
+    @Binding var editingVolume: Bool
     let beginDrag: () -> Void
     let drag: ((TransitionSpec) -> TransitionSpec) -> Void
     let edit: ((TransitionSpec) -> TransitionSpec) -> Void
@@ -24,7 +25,11 @@ struct PairTransitionWorkspace: View {
     @State private var cueSession: TransitionWaveformDrag?
     @State private var draggedSpec: TransitionSpec?
     @State private var cueDisplayGain: Float?
-    @State private var editingVolume = false
+    @State private var showsEQ = true
+    @State private var showsFilter = true
+    @State private var showsInspector = false
+    @State private var showsCues = false
+    @State private var showsPointEditor = false
     @State private var curveSession: TransitionCurveDrag?
     @State private var selectedHandle: TransitionCurveHandle?
     @State private var pinchViewport: TransitionWaveformViewport?
@@ -34,7 +39,7 @@ struct PairTransitionWorkspace: View {
     private var workingSpec: TransitionSpec { draggedSpec ?? spec }
 
     private var timing: PairTransitionTiming? {
-        PairTransitionTiming(spec: workingSpec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
+        PairTransitionTiming(spec: transitionEnabled ? workingSpec : nil, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
     }
 
     private struct Request: Hashable {
@@ -48,7 +53,7 @@ struct PairTransitionWorkspace: View {
 
     private var request: Request? {
         // Only committed cues request decoding. Finger movement remaps the buffered samples.
-        PairTransitionTiming(spec: spec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs).map {
+        PairTransitionTiming(spec: transitionEnabled ? spec : nil, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs).map {
             let out = $0.analysisRange(.outgoing, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
             let inc = $0.analysisRange(.incoming, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs)
             return Request(from: pair.from.song, to: pair.to.song, outStart: out.lowerBound, outEnd: out.upperBound,
@@ -57,54 +62,15 @@ struct PairTransitionWorkspace: View {
     }
 
     var body: some View {
-        StudioPanel {
-            sourceLine("Outgoing", pair.from.song, outgoing)
-            if let timing {
-                waveform(timing)
-                sourceLine("Incoming", pair.to.song, incoming)
-                waveformControls(timing)
-                TransitionWaveformOverview(timing: timing, viewport: viewport(timing)) { viewFocusMs = $0 }
-                    .allowsHitTesting(cueSession == nil && curveSession == nil)
-                HStack {
-                    Text(String(format: "Wave height +%.1f dB · display only", 20 * log10(displayGain(timing))))
-                        .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
-                    Spacer(minLength: 0)
-                    if loading { ProgressView().controlSize(.small) }
-                }
-                Text(editingVolume ? "Drag a blue point to shape the fade. Tap a lane to add a point; select an inner point to remove it." : "Drag either waveform to choose where that song joins the mix. Pinch to zoom; the strip below moves the view.")
-                    .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
-                if let selected = selectedHandle, editingVolume,
-                   selected.index > 0, selected.index < TransitionEditing.curveOf(workingSpec, selected.role).points.count - 1 {
-                    Button(role: .destructive) {
-                        edit { TransitionEditing.removePoint($0, selected.role, index: selected.index) }
-                        selectedHandle = nil
-                    } label: { Label("Remove selected point", systemImage: "minus.circle") }
-                    .font(.caption).frame(minHeight: 44)
-                }
-                if cueSession != nil {
-                    Text("Out end \(transitionTimestamp(Double(workingSpec.outgoingEndMs(pair.from.song.durationMs)))) · In start \(transitionTimestamp(Double(workingSpec.incomingStartMs)))")
-                        .font(.caption.monospacedDigit()).foregroundStyle(palette.primary)
-                }
-                if !loading && (outgoing == nil || incoming == nil) {
-                    Text("Audio analysis unavailable for \(outgoing == nil && incoming == nil ? "both files" : outgoing == nil ? "the outgoing file" : "the incoming file"). Check that the file is present and readable.")
-                        .font(.caption).foregroundStyle(palette.onSurfaceVariant)
-                }
-                DisclosureGroup("Analysis & automation") {
-                    audition(timing)
-                    inspector(timing)
-                }
-                .font(.subheadline)
-                DisclosureGroup("Cue points · precise editing") { cues(timing) }
-                    .font(.subheadline)
-                if !masterEnabled {
-                    Text("Automatic crossfades are off. This draft can be auditioned, but saved transitions will play only when the master switch is on.")
-                        .font(.caption).foregroundStyle(palette.onSurfaceVariant)
-                }
-            } else {
-                sourceLine("Incoming", pair.to.song, nil)
-                Text("No playable overlap: the track durations or cue points leave less than 0.3 seconds. Adjust the cues or use longer tracks.")
+        VStack(spacing: Spacing.sm) {
+            sourceLine("Outgoing", pair.from.song)
+            if let timing { stage(timing) }
+            else {
+                Text("No playable overlap. Adjust the cue points or choose a shorter transition.")
                     .font(.caption).foregroundStyle(palette.onSurfaceVariant)
-                cues(nil)
+                    .frame(maxWidth: .infinity, minHeight: 180)
+                Button("Edit cue points") { showsCues = true }
+                sourceLine("Incoming", pair.to.song)
             }
         }
         .task(id: request) {
@@ -120,7 +86,34 @@ struct PairTransitionWorkspace: View {
             incoming = result.1
             loading = false
         }
+        .sheet(isPresented: $showsInspector) {
+            TransitionDetailsSheet(title: "Analysis & automation") {
+                if let timing {
+                    TimelineView(.animation(minimumInterval: 0.1, paused: !preview.isPlaying)) { _ in
+                        inspector(timing)
+                    }
+                    audition(timing)
+                    Text("BPM is read from file tags. Beat grid, musical key analysis, beatmatching, reverb, echo and looping are not available for this transition.")
+                        .font(.caption).foregroundStyle(palette.onSurfaceVariant)
+                }
+            }
+        }
+        .sheet(isPresented: $showsCues) {
+            TransitionDetailsSheet(title: "Source cues") {
+                cues(timing)
+                    .disabled(!transitionEnabled)
+                if !transitionEnabled { Text("Choose a transition preset to enable cue trimming. Off plays the full outgoing track and the incoming track from its beginning.").font(.caption) }
+            }
+        }
+        .sheet(isPresented: $showsPointEditor) {
+            if let handle = selectedHandle, let timing {
+                TransitionPointEditor(spec: spec, handle: handle, durationMs: timing.plan.durationMs) { result in
+                    edit { _ in result }
+                }
+            }
+        }
         .onChange(of: spec) { _, _ in preview.stop(); cancelCueDrag() }
+        .onChange(of: transitionEnabled) { _, _ in preview.stop(); cancelCueDrag(); selectedHandle = nil }
         .onChange(of: editingVolume) { _, _ in cancelCueDrag(); selectedHandle = nil }
         .onChange(of: pinching) { _, active in if !active { pinchViewport = nil; pinchZoom = nil } }
         .onChange(of: scenePhase) { _, phase in if phase != .active { preview.stop(resume: false); cancelCueDrag() } }
@@ -133,12 +126,92 @@ struct PairTransitionWorkspace: View {
         .onDisappear { preview.stop(resume: scenePhase == .active); cancelCueDrag() }
     }
 
+    private func stage(_ timing: PairTransitionTiming) -> some View {
+        VStack(spacing: 6) {
+            waveform(timing)
+            sourceLine("Incoming", pair.to.song)
+                .padding(.vertical, Spacing.xs)
+            HStack(spacing: Spacing.sm) {
+                if transitionEnabled {
+                    Picker("Waveform tool", selection: $editingVolume) {
+                        Text("Move audio").tag(false)
+                        Text("Edit fade").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 240)
+                } else {
+                    Text("No crossfade").font(.caption).foregroundStyle(palette.onSurfaceVariant)
+                    Spacer(minLength: 0)
+                }
+                TransitionDurationControl(spec: spec, enabled: transitionEnabled, pair: pair,
+                                          beginDrag: beginDrag, drag: { ms in drag { TransitionEditing.setDuration($0, ms) } },
+                                          choose: { ms in edit { TransitionEditing.setDuration($0, ms) } })
+                waveformTools(timing)
+            }
+            .disabled(cueSession != nil || curveSession != nil)
+            if timeZoom > 1.01 || viewFocusMs != nil {
+                TransitionWaveformOverview(timing: timing, viewport: viewport(timing)) { viewFocusMs = $0 }
+                    .allowsHitTesting(cueSession == nil && curveSession == nil)
+            }
+            stageStatus(timing)
+            if loading { ProgressView().controlSize(.small).frame(maxWidth: .infinity, alignment: .leading) }
+            if !loading && (outgoing == nil || incoming == nil) {
+                Text("A source waveform is unavailable. Check that both audio files are readable.")
+                    .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+            }
+            if let error = preview.error { Text(error).font(.caption2).foregroundStyle(palette.onSurfaceVariant) }
+        }
+    }
+
+    private func stageStatus(_ timing: PairTransitionTiming) -> some View {
+        HStack(spacing: Spacing.sm) {
+            if preview.isPlaying || preview.isPreparing {
+                TransitionPreviewReadout(preview: preview, durationMs: timing.plan.durationMs)
+            } else if transitionEnabled {
+                Text(editingVolume ? "Drag points · tap a lane to add" : "Drag either waveform · pinch to zoom")
+                    .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+            }
+            Spacer(minLength: 0)
+            if let selected = selectedHandle, editingVolume, transitionEnabled {
+                selectedPointMenu(selected)
+            }
+            if transitionEnabled {
+                HStack(spacing: 4) {
+                    legend("Vol", AutomationColors.volume)
+                    if showsEQ && workingSpec.bassSwap { legend("200 Hz", AutomationColors.eq) }
+                    if showsFilter && workingSpec.filter != .none { legend("Cutoff", AutomationColors.filter) }
+                }
+            }
+        }
+        .frame(minHeight: 22)
+    }
+
+    private func legend(_ title: String, _ color: Color) -> some View {
+        HStack(spacing: 3) {
+            Capsule().fill(color).frame(width: 8, height: 2)
+            Text(title).font(.system(size: 9)).foregroundStyle(palette.onSurfaceVariant)
+        }
+    }
+
+    private func selectedPointMenu(_ handle: TransitionCurveHandle) -> some View {
+        Menu {
+            Button("Edit exact time & gain") { showsPointEditor = true }
+            Button(role: .destructive) {
+                edit { TransitionEditing.removePoint($0, handle.role, index: handle.index) }
+                selectedHandle = nil
+            } label: { Label("Remove point", systemImage: "minus.circle") }
+            .disabled(handle.index == 0 || handle.index >= TransitionEditing.curveOf(spec, handle.role).points.count - 1)
+            Button("Deselect") { selectedHandle = nil }
+        } label: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").frame(width: 36, height: 28) }
+        .accessibilityLabel("Selected volume point")
+    }
+
     private func inspection(_ timing: PairTransitionTiming) -> Double {
-        (inspectedMs ?? Double(timing.plan.durationMs) / 2).clamped(0, Double(timing.plan.durationMs))
+        (preview.positionMs() ?? inspectedMs ?? Double(timing.plan.durationMs) / 2).clamped(0, Double(timing.plan.durationMs))
     }
 
     private func viewport(_ timing: PairTransitionTiming) -> TransitionWaveformViewport {
-        cueSession?.viewport ?? TransitionWaveformViewport(timing: timing, zoom: timeZoom, focusMs: viewFocusMs)
+        cueSession?.viewport ?? TransitionWaveformViewport(timing: timing, zoom: timeZoom, focusMs: viewFocusMs, includesPreviewContext: true)
     }
 
     private func displayGain(_ timing: PairTransitionTiming) -> Float {
@@ -149,44 +222,36 @@ struct PairTransitionWorkspace: View {
         return waveHeight.gain(visiblePeak: max(outPeak, inPeak))
     }
 
-    private func waveformControls(_ timing: PairTransitionTiming) -> some View {
-        HStack(spacing: Spacing.xs) {
-            Picker("Waveform tool", selection: $editingVolume) {
-                Text("Move audio").tag(false)
-                Text("Edit fade").tag(true)
-            }
-            .pickerStyle(.segmented)
-            Menu {
+    private func waveformTools(_ timing: PairTransitionTiming) -> some View {
+        Menu {
+            Section("Time zoom") {
                 ForEach([1.0, 2, 4, 8], id: \.self) { zoom in
-                    Button(zoom == 1 ? "Fit overlap" : "\(Int(zoom))× time zoom") {
+                    Button(zoom == 1 ? "Fit preview" : "\(Int(zoom))×") {
                         timeZoom = zoom
                         viewFocusMs = zoom == 1 ? nil : inspection(timing)
                     }
                 }
-            } label: {
-                Text(timeZoom <= 1 ? "Fit" : String(format: "%.1f×", timeZoom))
-                    .font(.caption.weight(.semibold)).frame(minWidth: 40, minHeight: 44)
             }
-            .accessibilityLabel("Time zoom")
-            Menu {
+            Section("Waveform height · display only") {
                 ForEach(TransitionWaveformHeight.allCases) { height in
                     Button { waveHeight = height } label: {
                         if height == waveHeight { Label(height.label, systemImage: "checkmark") }
                         else { Text(height.label) }
                     }
                 }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "waveform")
-                    Image(systemName: "chevron.down").font(.caption2)
-                }
-                .font(.caption).frame(minHeight: 44)
             }
-            .menuStyle(.button).buttonStyle(.plain)
-            .accessibilityLabel("Waveform display height: \(waveHeight.label)")
+            Section("Automation overlays") {
+                Toggle("Bass shelf gain · 200 Hz", isOn: $showsEQ)
+                Toggle("Filter cutoff · logarithmic", isOn: $showsFilter)
+            }
+            Divider()
+            Button { showsCues = true } label: { Label("Precise source cues", systemImage: "arrow.left.and.right") }
+            Button { showsInspector = true } label: { Label("Analysis & automation", systemImage: "waveform.path.ecg") }
+        } label: {
+            Image(systemName: "slider.horizontal.3").font(.subheadline).frame(width: 40, height: 44)
         }
-        .buttonStyle(.plain)
-        .disabled(cueSession != nil || curveSession != nil)
+        .menuStyle(.button).buttonStyle(.plain)
+        .accessibilityLabel("Zoom, overlays & technical controls")
     }
 
     private func waveform(_ timing: PairTransitionTiming) -> some View {
@@ -194,25 +259,26 @@ struct PairTransitionWorkspace: View {
             waveformPlot(timing)
                 .overlay { waveformInteraction(timing, size: geometry.size) }
                 .simultaneousGesture(magnification(timing))
+                .overlay { TransitionPreviewPlayhead(preview: preview, viewport: viewport(timing)) }
                 .overlay { auditionButton(timing) }
                 .accessibilityAction(named: "Move outgoing cue earlier") { nudge(.outgoing, delta: 100) }
                 .accessibilityAction(named: "Move outgoing cue later") { nudge(.outgoing, delta: -100) }
                 .accessibilityAction(named: "Move incoming cue earlier") { nudge(.incoming, delta: 100) }
                 .accessibilityAction(named: "Move incoming cue later") { nudge(.incoming, delta: -100) }
         }
-        .frame(height: 320)
+        .frame(height: 280)
     }
 
     private func waveformPlot(_ timing: PairTransitionTiming) -> some View {
         PairAudioPlot(timing: timing, viewport: viewport(timing), outgoing: outgoing, incoming: incoming,
-                      inspectedMs: inspection(timing), displayGain: displayGain(timing),
+                      inspectedMs: preview.isPlaying ? nil : inspectedMs, displayGain: displayGain(timing),
                       activeRole: cueSession?.role ?? curveSession?.handle.role,
-                      editingVolume: editingVolume, selectedHandle: selectedHandle)
+                      showsEQ: showsEQ, showsFilter: showsFilter, editingVolume: editingVolume && transitionEnabled, selectedHandle: selectedHandle)
     }
 
     private func waveformInteraction(_ timing: PairTransitionTiming, size: CGSize) -> some View {
         PanInteraction(canBegin: { start, delta in
-            guard !pinching else { return false }
+            guard !pinching, transitionEnabled else { return false }
             return editingVolume ? curveLayout(timing, size).nearest(start, spec: workingSpec) != nil : HorizontalGestureIntent.accepts(delta)
         }, change: { gesture in
             if editingVolume { updateCurveDrag(gesture, size: size, timing: timing) }
@@ -220,6 +286,7 @@ struct PairTransitionWorkspace: View {
         }, end: { gesture in
             if editingVolume { finishCurveDrag(gesture) } else { finishCueDrag(gesture) }
         }, cancel: cancelCueDrag, tap: { location in
+            guard transitionEnabled else { return }
             if editingVolume { selectOrAddPoint(location, size: size, timing: timing) }
             else { inspectedMs = viewport(timing).time(at: Double(location.x / max(size.width, 1))) }
         })
@@ -230,7 +297,7 @@ struct PairTransitionWorkspace: View {
             .updating($pinching) { _, active, _ in active = true }
             .onChanged { value in
                 cancelCueDrag()
-                let initial = PairTransitionTiming(spec: spec, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs) ?? timing
+                let initial = PairTransitionTiming(spec: transitionEnabled ? spec : nil, outgoingMs: pair.from.song.durationMs, incomingMs: pair.to.song.durationMs) ?? timing
                 if pinchViewport == nil { pinchViewport = viewport(initial); pinchZoom = timeZoom }
                 guard let base = pinchViewport, let zoom = pinchZoom else { return }
                 let next = (zoom * Double(value.magnification)).clamped(1, 8)
@@ -318,35 +385,33 @@ struct PairTransitionWorkspace: View {
     }
 
     private func toggleAudition(_ timing: PairTransitionTiming) {
+        inspectedMs = nil
         if preview.isPlaying || preview.isPreparing { preview.stop() }
         else { preview.play(pair: pair, timing: timing, player: player, sound: sound.settings) }
     }
 
     private func nudge(_ role: TransitionRole, delta: Float) {
+        guard transitionEnabled else { return }
         edit { TransitionEditing.shiftCue($0, role, deltaMs: delta, outgoingDurationMs: pair.from.song.durationMs, incomingDurationMs: pair.to.song.durationMs) }
     }
 
-    private func sourceLine(_ role: String, _ song: Song, _ slice: TransitionAudioSlice?) -> some View {
+    private func sourceLine(_ role: String, _ song: Song) -> some View {
         HStack(spacing: Spacing.sm) {
             SongArtworkView(song: song, maxPixels: 120)
-                .frame(width: 44, height: 44).clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: 36, height: 36).clipShape(RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 2) {
-                Text(role.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(palette.onSurfaceVariant)
-                Text(song.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                Text(song.title).font(.subheadline.weight(.medium)).lineLimit(1)
                 Text(song.artist).font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
                 Text(role == "Outgoing"
-                     ? "Hands over at \(transitionTimestamp(Double(workingSpec.outgoingEndMs(song.durationMs))))"
-                     : "Starts at \(transitionTimestamp(Double(workingSpec.incomingStartMs)))")
+                     ? "Hands over at \(transitionTimestamp(Double(transitionEnabled ? workingSpec.outgoingEndMs(song.durationMs) : song.durationMs)))"
+                     : "Starts at \(transitionTimestamp(Double(transitionEnabled ? workingSpec.incomingStartMs : 0)))")
                     .font(.caption2.monospacedDigit()).foregroundStyle(palette.primary).lineLimit(1)
             }
             Spacer(minLength: 0)
             VStack(alignment: .trailing, spacing: 2) {
-                Text(song.bpm.map { "\($0) BPM · tag" } ?? "BPM untagged").font(.caption)
+                Text((role == "Outgoing" ? "OUT · " : "IN · ") + (song.bpm.map { "\($0) BPM tag" } ?? "BPM —")).font(.caption2)
                 Text(transitionTimestamp(Double(song.durationMs))).font(.caption2.monospacedDigit())
-                if let slice {
-                    Text(String(format: "%.1f kHz · %d ch", slice.sampleRate / 1000, slice.channels))
-                        .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
-                }
+
             }
         }
         .foregroundStyle(palette.onSurface)
@@ -359,7 +424,8 @@ struct PairTransitionWorkspace: View {
                 .font(.caption2.monospacedDigit()).foregroundStyle(palette.onSurfaceVariant)
             Text("Preview uses the current equalizer and saved audio files; it pauses your music and resumes it afterward.")
                 .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
-            if let error = preview.error { Text(error).font(.caption).foregroundStyle(palette.onSurfaceVariant) }
+            Text("The green playhead follows rendered audio samples with output-route latency compensation. Filter lines show cutoff targets on a logarithmic frequency scale, not a measured spectrum.")
+                .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
         }
     }
 
@@ -371,11 +437,13 @@ struct PairTransitionWorkspace: View {
                 Text(String(format: "%.3f / %.3f s", inspection(timing) / 1000, Double(timing.plan.durationMs) / 1000))
                     .font(.caption.monospacedDigit())
             }
-            Slider(value: Binding(get: { inspection(timing) }, set: { inspectedMs = $0 }), in: 0...Double(timing.plan.durationMs), step: 1)
+            Slider(value: Binding(get: { inspection(timing) }, set: { inspectedMs = $0 }), in: 0...Double(max(timing.plan.durationMs, 1)), step: 1)
+                .disabled(!timing.hasOverlap || preview.isPlaying)
                 .accessibilityLabel("Inspection position in the overlap")
                 .tint(palette.primary)
             Grid(alignment: .leading, horizontalSpacing: Spacing.md, verticalSpacing: Spacing.xs) {
                 GridRow { Text(""); Text("Out"); Text("In") }.fontWeight(.semibold)
+                detailRow("Decoded format", audioFormat(outgoing), audioFormat(incoming))
                 detailRow("Source time", transitionTimestamp(timing.sourceTime(.outgoing, elapsedMs: inspection(timing))),
                           transitionTimestamp(timing.sourceTime(.incoming, elapsedMs: inspection(timing))))
                 detailRow("Volume", gain(timing, .outgoing), gain(timing, .incoming))
@@ -390,9 +458,15 @@ struct PairTransitionWorkspace: View {
             .foregroundStyle(palette.onSurfaceVariant)
             Text("Peak/RMS measure the loaded source audio before processing, including nearby audio for dragging. Wave height changes only the display. Gain, shelf and cutoff are the engine's automation targets at the inspection point. BPM is the file's tag; beatmatching and key analysis are unavailable.")
                 .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+            Text(String(format: "Wave height +%.1f dB · display only", 20 * log10(displayGain(timing))))
+                .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
             if let outgoing { loadedRange("Out", outgoing) }
             if let incoming { loadedRange("In", incoming) }
         }
+    }
+
+    private func audioFormat(_ slice: TransitionAudioSlice?) -> String {
+        slice.map { String(format: "%.1f kHz · %d ch", $0.sampleRate / 1000, $0.channels) } ?? "Unavailable"
     }
 
     private func loadedRange(_ title: String, _ slice: TransitionAudioSlice) -> some View {
@@ -405,16 +479,16 @@ struct PairTransitionWorkspace: View {
     }
 
     private func gain(_ timing: PairTransitionTiming, _ role: TransitionRole) -> String {
-        let value = timing.automation(role).gainAt(inspection(timing))
+        let value = timing.gainAt(role, elapsedMs: inspection(timing))
         return value > 0 ? String(format: "%.1f dB", 20 * log10(value)) : "−∞ dB"
     }
 
     private func bass(_ timing: PairTransitionTiming, _ role: TransitionRole) -> String {
-        workingSpec.bassSwap ? String(format: "%.1f dB", timing.automation(role).bassDbAt(inspection(timing))) : "Bypass"
+        transitionEnabled && workingSpec.bassSwap ? String(format: "%.1f dB", timing.automation(role).bassDbAt(inspection(timing))) : "Bypass"
     }
 
     private func filter(_ timing: PairTransitionTiming, _ role: TransitionRole) -> String {
-        guard let setting = timing.automation(role).filterAt(inspection(timing)) else { return "Bypass" }
+        guard transitionEnabled, let setting = timing.automation(role).filterAt(inspection(timing)) else { return "Bypass" }
         return "\(setting.type == .highPass ? "HP" : "LP") \(Int(setting.hz.rounded())) Hz"
     }
 

@@ -55,6 +55,15 @@ final class AudioEngine {
     private var eqUnit: AVAudioUnit?
     private let decks = [Deck(), Deck()]
     private var activeIndex = 0
+    private struct PreviewSchedule {
+        let outgoingID: UUID
+        let incomingID: UUID
+        let outgoingHost: UInt64
+        let incomingHost: UInt64
+        let clock: TransitionPreviewClock
+        let latencyMs: Double
+    }
+    private var previewSchedule: PreviewSchedule?
     private(set) var isReady = false
     private var configurationObserver: NSObjectProtocol?
 
@@ -141,6 +150,7 @@ final class AudioEngine {
     func play(entryId: UUID, url: URL, positionMs: Int64, startPlaying: Bool) throws {
         guard isReady else { throw EngineError.notReady }
         guard let file = try? AVAudioFile(forReading: url) else { throw EngineError.unreadable(url) }
+        previewSchedule = nil
         stop(other)
         stop(active)
         other.stage.cancel()
@@ -196,6 +206,7 @@ final class AudioEngine {
     }
 
     func stopAll() {
+        previewSchedule = nil
         stop(other)
         stop(active)
         engine.pause()
@@ -247,20 +258,45 @@ final class AudioEngine {
         let out = decks[0], inc = decks[1]
         ensureFormat(out, outFile.processingFormat)
         ensureFormat(inc, inFile.processingFormat)
-        schedule(out, entryId: UUID(), file: outFile, from: frame(timing.outgoingRange.lowerBound, outFile),
+        let outgoingID = UUID(), incomingID = UUID()
+        schedule(out, entryId: outgoingID, file: outFile, from: frame(timing.outgoingRange.lowerBound, outFile),
                  to: frame(timing.outgoingRange.upperBound, outFile))
-        schedule(inc, entryId: UUID(), file: inFile, from: frame(timing.incomingRange.lowerBound, inFile),
+        schedule(inc, entryId: incomingID, file: inFile, from: frame(timing.incomingRange.lowerBound, inFile),
                  to: frame(timing.incomingRange.upperBound, inFile))
         let host = mach_absolute_time() + TransitionStageKernel.hostTicks(forSeconds: 0.12)
         let incomingHost = host + TransitionStageKernel.hostTicks(forSeconds: Double(timing.leadMs) / 1000)
-        var outgoingAutomation = timing.automation(.outgoing)
-        outgoingAutomation.leadInMs = Int(timing.leadMs)
-        out.stage.arm(outgoingAutomation, startHostTime: host)
-        inc.stage.arm(timing.automation(.incoming), startHostTime: incomingHost)
+        if timing.hasOverlap {
+            var outgoingAutomation = timing.automation(.outgoing)
+            outgoingAutomation.leadInMs = Int(timing.leadMs)
+            out.stage.arm(outgoingAutomation, startHostTime: host)
+            inc.stage.arm(timing.automation(.incoming), startHostTime: incomingHost)
+        } else {
+            out.stage.cancel()
+            inc.stage.cancel()
+        }
         activeIndex = 1
         try startEngineIfNeeded()
         out.player.play(at: AVAudioTime(hostTime: host))
         inc.player.play(at: AVAudioTime(hostTime: incomingHost))
+        previewSchedule = PreviewSchedule(outgoingID: outgoingID, incomingID: incomingID,
+                                          outgoingHost: host, incomingHost: incomingHost,
+                                          clock: TransitionPreviewClock(timing: timing), latencyMs: outputLatency * 1000)
+    }
+
+    /// Actual rendered sample time, adjusted for the current output route's latency.
+    /// Nil before the scheduled audio starts, after Stop, or if the render clock is unavailable.
+    func previewPositionMs() -> Double? {
+        guard let preview = previewSchedule, engine.isRunning else { return nil }
+        func elapsed(_ deck: Deck, id: UUID, host: UInt64) -> Double? {
+            guard deck.segments.first?.entryId == id, deck.player.isPlaying,
+                  let render = deck.player.lastRenderTime, render.isHostTimeValid, render.hostTime >= host,
+                  let sample = deck.player.playerTime(forNodeTime: render), sample.isSampleTimeValid,
+                  sample.sampleTime >= 0, sample.sampleRate > 0 else { return nil }
+            return Double(sample.sampleTime) / sample.sampleRate * 1000
+        }
+        return preview.clock.position(outgoingElapsedMs: elapsed(decks[0], id: preview.outgoingID, host: preview.outgoingHost),
+                                      incomingElapsedMs: elapsed(decks[1], id: preview.incomingID, host: preview.incomingHost),
+                                      latencyMs: preview.latencyMs)
     }
 
     /// The outgoing deck of a crossfade, once its fade is over (or it ended), is stopped.

@@ -7,15 +7,26 @@ struct PairTransitionTiming: Equatable {
     let leadMs: Int64
     let tailMs: Int64
 
-    init?(spec: TransitionSpec, outgoingMs: Int64, incomingMs: Int64) {
-        guard let plan = TransitionPlanner.plan(BoundaryInfo(spec: spec, nextIndex: 1, repeatMode: .off,
-                                                           abLoopEnabled: false, outgoingDurationMs: outgoingMs,
-                                                           incomingDurationMs: incomingMs)).planned else { return nil }
+    init?(spec: TransitionSpec?, outgoingMs: Int64, incomingMs: Int64) {
+        guard outgoingMs > 0, incomingMs > 0 else { return nil }
+        let plan: Planned
+        if let spec {
+            guard let resolved = TransitionPlanner.plan(BoundaryInfo(spec: spec, nextIndex: 1, repeatMode: .off,
+                                                                    abLoopEnabled: false, outgoingDurationMs: outgoingMs,
+                                                                    incomingDurationMs: incomingMs)).planned else { return nil }
+            plan = resolved
+        } else {
+            // Off/Auto-with-no-default previews the actual end-to-start cut: no invented overlap
+            // and no cue trimming or effect automation borrowed from an inactive draft.
+            plan = Planned(nextIndex: 1, startAtMs: outgoingMs, durationMs: 0,
+                           spec: TransitionSpec(), incomingStartMs: 0)
+        }
         self.plan = plan
         leadMs = min(1_500, plan.startAtMs)
         tailMs = min(1_500, max(incomingMs - plan.incomingStartMs - Int64(plan.durationMs), 0))
     }
 
+    var hasOverlap: Bool { plan.durationMs > 0 }
     var totalMs: Int64 { leadMs + Int64(plan.durationMs) + tailMs }
     var outgoingRange: Range<Int64> { (plan.startAtMs - leadMs)..<(plan.startAtMs + Int64(plan.durationMs)) }
     var incomingRange: Range<Int64> { plan.incomingStartMs..<(plan.incomingStartMs + Int64(plan.durationMs) + tailMs) }
@@ -26,6 +37,11 @@ struct PairTransitionTiming: Equatable {
 
     func automation(_ role: TransitionRole) -> TransitionAutomation {
         TransitionAutomation(role: role, spec: plan.spec, durationMs: plan.durationMs)
+    }
+
+    func gainAt(_ role: TransitionRole, elapsedMs: Double) -> Float {
+        if hasOverlap { return automation(role).gainAt(elapsedMs) }
+        return role == .outgoing ? (elapsedMs < 0 ? 1 : 0) : (elapsedMs < 0 ? 0 : 1)
     }
 
     /// Nearby source audio stays in memory while a finger adjusts a cue. At most 20 seconds.

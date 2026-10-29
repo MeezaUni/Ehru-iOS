@@ -75,3 +75,45 @@ On a phone, verify pinch zoom, both drag directions, lane locking, cancelled dra
 preview sound, independent source formats,
 headphone/route changes, Save/Cancel/Undo, rapid cue changes, unavailable files, large text, and
 normal playback resumption. Device heat and touch feel still require a physical device.
+
+## Compact pair workspace and preview cursor
+
+Individual pairs now use one waveform workspace with compact track rows, a horizontally
+scrolling preset strip, and Volume/EQ/Filter menus. The full-screen duplicate automation graph,
+permanent duration card and in-page diagnostics are removed from this pair flow. Collection
+and global editors retain their shared automation controls. Overlap duration opens a popover
+with existing presets, a slider and exact requested milliseconds in 100 ms steps. EQ handover
+has a popover with the actual swap time, 200 Hz shelf, -24 dB attenuation and ramp duration.
+
+Selecting a volume handle opens a menu for precise time/gain editing, removal or deselection.
+Numeric edits convert dB to linear amplitude, preserve fixed endpoints and neighbouring times,
+and use one undo step. Silence is exactly zero; the dB field supports -96 through 0 dB.
+Unchanged numeric edits do not convert a built-in curve to an approximated custom one.
+
+Tools holds time zoom, waveform display height, overlay switches, precise source cues, and
+Analysis & automation. The latter retains decoded sample rate/channels, raw source peak/RMS,
+exact source windows and live automation target inspection during preview. Active bass shelf
+curves show their actual linear gain; filter curves show target cutoff on a logarithmic
+20–18000 Hz scale. These are explicitly control targets, not processed spectra or multi-band
+waveforms. BPM remains a file tag. Unsupported beat/key/effect features are not offered as
+working controls, and durations are seconds rather than unverified musical bars.
+
+Off/Auto-with-no-default now shows actual end/start audio without inventing an overlap, trim,
+volume fade, bass or filter automation. Its bounded preview schedules a real back-to-back cut
+with both transition stages bypassed. Choosing a preset or a duration enables an actual fade.
+
+The green audition playhead reads each AVAudioPlayerNode's rendered sample time. Before the
+incoming scheduled host time the outgoing deck supplies progress; afterward incoming samples
+take over and continue through the tail even when the outgoing deck is released. The current
+output-route latency is captured at preview start and subtracted for approximate audible sync.
+No Date-based progress or timer starts audio. Missing render time leaves the cursor absent.
+Stop, interruptions, backgrounding, route changes and edits retain the existing preview cleanup.
+
+Only the thin playhead refreshes at 30 Hz while playing, with a separate 10 Hz readout; the
+waveform Canvas and source decoding are not tied to those ticks. Closed diagnostics do no
+periodic work. Fit includes the entire lead-in/overlap/tail, so the line is visible throughout;
+zoomed views show an edge direction marker if playback leaves the visible interval.
+
+CI covers no-clock/no-progress, deck handover, route latency, bounds, cut timing and bypassed
+stages, render-clock availability/cleanup, full-preview fit, and exact dB/time point edits.
+Verify audible alignment on wired, Bluetooth and speaker routes and touch feel on a device.

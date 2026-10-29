@@ -49,6 +49,8 @@ final class PairTransitionPreview {
         }
     }
 
+    func positionMs() -> Double? { isPlaying ? engine?.previewPositionMs() : nil }
+
     func stop(resume: Bool = true) {
         task?.cancel()
         task = nil

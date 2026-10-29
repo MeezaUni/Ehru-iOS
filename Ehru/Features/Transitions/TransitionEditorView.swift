@@ -8,6 +8,8 @@ struct TransitionEditorView: View {
     @Environment(TransitionSettingsStore.self) private var transitions
     @Environment(\.palette) private var palette
     @Environment(AppSettings.self) private var settings
+    @State private var pairEditingVolume = false
+    @State private var showsBassControls = false
 
     var body: some View {
         NavigationStack {
@@ -31,44 +33,72 @@ struct TransitionEditorView: View {
         let pair = current.pair
         return ScrollView {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                if let pair, let shown = current.shown {
-                    PairTransitionWorkspace(pair: pair, spec: shown, masterEnabled: transitions.config.global.masterEnabled,
-                                            beginDrag: { draft?.beginDrag() }, drag: { draft?.drag($0) }, edit: { draft?.edit($0) })
-                } else if let pair {
-                    EditorTrackLine(role: "Outgoing", song: pair.from.song, cue: outgoingCue(base, pair))
-                    EditorTrackLine(role: "Incoming", song: pair.to.song, cue: incomingCue(base))
-                }
-                PresetCards(current: current) { draft?.choose($0) }
-                Text(statusLine(current)).font(.caption).foregroundStyle(palette.onSurfaceVariant)
-                if current.shown != nil {
-                    StudioPanel {
-                        DurationBlock(spec: current.shown, base: current.editBase, pair: pair,
-                                      beginDrag: { draft?.beginDrag() },
-                                      drag: { ms in draft?.drag { TransitionEditing.setDuration($0, ms) } },
-                                      choose: { ms in draft?.edit { TransitionEditing.setDuration($0, ms) } })
-                    }
-                    StudioPanel {
-                        if pair != nil {
-                            DisclosureGroup("Edit volume, EQ and filter automation") {
-                                automationLanes(base).padding(.top, Spacing.md)
-                            }
-                            .font(.subheadline.weight(.semibold))
-                        } else { automationLanes(base) }
-                    }
-                    sections(current)
+                if let pair {
+                    pairContent(current, pair: pair)
                 } else {
-                    StudioPanel {
-                        Label("No crossfade", systemImage: "waveform.path")
-                            .font(.headline).foregroundStyle(palette.onSurface)
-                        Text("Choose Fade or another preset above to blend these tracks.")
-                            .font(.subheadline).foregroundStyle(palette.onSurfaceVariant)
-                    }
+                    collectionContent(current, base: base)
                 }
             }
             .padding(Spacing.lg)
             .padding(.bottom, Spacing.lg)
         }
         .buttonStyle(.plain)
+    }
+
+    private func pairContent(_ current: EditorDraft, pair: StudioPair) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            PairTransitionWorkspace(pair: pair, spec: current.shown ?? current.editBase,
+                                    transitionEnabled: current.shown != nil, editingVolume: $pairEditingVolume,
+                                    beginDrag: { draft?.beginDrag() }, drag: { draft?.drag($0) }, edit: { draft?.edit($0) })
+            PresetCards(current: current, compact: true) { draft?.choose($0) }
+            Text(statusLine(current)).font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+            settingsRows(current)
+            if !transitions.config.global.masterEnabled {
+                Text("Automatic crossfades are off in Transition Studio. Preview is available; enable crossfades there to hear saved transitions in your queue.")
+                    .font(.caption2).foregroundStyle(palette.onSurfaceVariant)
+            }
+        }
+        .popover(isPresented: $showsBassControls) { bassControls(current) }
+    }
+
+    private func collectionContent(_ current: EditorDraft, base: TransitionSpec) -> some View {
+        VStack(alignment: .leading, spacing: Spacing.md) {
+            PresetCards(current: current) { draft?.choose($0) }
+            Text(statusLine(current)).font(.caption).foregroundStyle(palette.onSurfaceVariant)
+            if current.shown != nil {
+                StudioPanel {
+                    DurationBlock(spec: current.shown, base: current.editBase, pair: nil,
+                                  beginDrag: { draft?.beginDrag() },
+                                  drag: { ms in draft?.drag { TransitionEditing.setDuration($0, ms) } },
+                                  choose: { ms in draft?.edit { TransitionEditing.setDuration($0, ms) } })
+                }
+                StudioPanel { automationLanes(base) }
+                StudioPanel { settingsRows(current) }
+            } else {
+                StudioPanel {
+                    Label("No crossfade", systemImage: "waveform.path").font(.headline)
+                    Text("Choose Fade or another preset to blend tracks.").font(.subheadline)
+                }
+            }
+        }
+    }
+
+    private func bassControls(_ current: EditorDraft) -> some View {
+        let spec = current.editBase
+        let duration = current.pair.map {
+            spec.effectiveDurationMs(outgoingDurationMs: $0.from.song.durationMs, incomingDurationMs: $0.to.song.durationMs)
+        } ?? spec.durationMs
+        return VStack(alignment: .leading, spacing: Spacing.md) {
+            Text("Bass handover").font(.headline)
+            BassSwapSlider(value: spec.bassSwapAt, begin: { draft?.beginDrag() },
+                           change: { at in draft?.drag { TransitionEditing.setBassSwapAt($0, at) } })
+            LabeledContent("Handover time", value: "\(Int((Float(duration) * spec.bassSwapAt).rounded())) ms")
+            LabeledContent("Low shelf", value: "\(Int(TransitionSpec.bassShelfHz)) Hz")
+            LabeledContent("Attenuation", value: "\(Int(TransitionSpec.bassCutDb)) dB")
+            LabeledContent("Ramp length", value: "\(Int((Float(duration) * TransitionSpec.bassRamp).rounded())) ms")
+        }
+        .font(.caption).padding(Spacing.lg).frame(idealWidth: 310)
+        .presentationCompactAdaptation(.popover)
     }
 
     private func automationLanes(_ spec: TransitionSpec) -> some View {
@@ -145,18 +175,10 @@ struct TransitionEditorView: View {
         }
     }
 
-    private func outgoingCue(_ spec: TransitionSpec, _ pair: StudioPair) -> String? {
-        spec.outgoingCutMs > 0 ? "Hands over at \(formatDuration(spec.outgoingEndMs(pair.from.song.durationMs)))" : nil
-    }
-
-    private func incomingCue(_ spec: TransitionSpec) -> String? {
-        spec.incomingStartMs > 0 ? "Starts at \(formatDuration(Int64(spec.incomingStartMs)))" : nil
-    }
-
-    private func sections(_ current: EditorDraft) -> some View {
+    private func settingsRows(_ current: EditorDraft) -> some View {
         let shown = current.shown
         let base = current.editBase
-        return StudioPanel {
+        return VStack(spacing: 0) {
             Menu {
                 ForEach(VolumeShape.allCases, id: \.self) { shape in
                     Button { draft?.edit { TransitionEditing.setVolumeShape($0, shape) } } label: {
@@ -164,12 +186,15 @@ struct TransitionEditorView: View {
                     }
                 }
                 Divider()
-                Button { draft?.edit { TransitionEditing.setCurve($0, .custom) } } label: {
+                Button {
+                    pairEditingVolume = true
+                    draft?.edit { TransitionEditing.setCurve($0, .custom) }
+                } label: {
                     Label("Customize curve", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                 }
             } label: {
                 SectionRow(title: "Volume", color: AutomationColors.volume,
-                           value: shown.map { VolumeShape.of($0)?.label ?? "Custom curve" } ?? "None")
+                           value: shown.map { VolumeShape.of($0)?.label ?? "Custom curve" } ?? "None", compact: current.pair != nil)
             }
             .menuStyle(.button).buttonStyle(.plain)
             Divider()
@@ -179,12 +204,16 @@ struct TransitionEditorView: View {
                         checked(move.label, shown.flatMap { EqMove.of($0) } == move)
                     }
                 }
+                if base.bassSwap && shown != nil && current.pair != nil {
+                    Divider()
+                    Button("Adjust bass handover…") { showsBassControls = true }
+                }
             } label: {
                 SectionRow(title: "EQ", color: AutomationColors.eq,
-                           value: shown.map { EqMove.of($0)?.label ?? "Bass swap at \(percent($0.bassSwapAt)) %" } ?? "None")
+                           value: shown.map { EqMove.of($0)?.label ?? "Bass swap at \(percent($0.bassSwapAt)) %" } ?? "None", compact: current.pair != nil)
             }
             .menuStyle(.button).buttonStyle(.plain)
-            if base.bassSwap && shown != nil {
+            if base.bassSwap && shown != nil && current.pair == nil {
                 BassSwapSlider(value: base.bassSwapAt,
                                begin: { draft?.beginDrag() },
                                change: { at in draft?.drag { TransitionEditing.setBassSwapAt($0, at) } })
@@ -198,7 +227,7 @@ struct TransitionEditorView: View {
                     }
                 }
             } label: {
-                SectionRow(title: "Filter", color: AutomationColors.filter, value: shown?.filter.label ?? "None")
+                SectionRow(title: "Filter", color: AutomationColors.filter, value: shown?.filter.label ?? "None", compact: current.pair != nil)
             }
             .menuStyle(.button).buttonStyle(.plain)
         }
@@ -216,6 +245,7 @@ private struct SectionRow: View {
     let title: String
     let color: Color
     let value: String
+    var compact = false
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -226,7 +256,8 @@ private struct SectionRow: View {
             Text(value).font(.subheadline).foregroundStyle(palette.onSurfaceVariant).lineLimit(1)
             Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(palette.onSurfaceVariant)
         }
-        .padding(.vertical, Spacing.md)
+        .padding(.vertical, compact ? Spacing.xs : Spacing.md)
+        .frame(minHeight: compact ? 44 : 0)
         .contentShape(Rectangle())
         .accessibilityElement(children: .combine)
         .accessibilityHint("Change \(title)")
@@ -253,29 +284,8 @@ private struct BassSwapSlider: View {
     }
 }
 
-private struct EditorTrackLine: View {
-    let role: String
-    let song: Song
-    let cue: String?
-    @Environment(\.palette) private var palette
-
-    var body: some View {
-        HStack(spacing: Spacing.sm) {
-            SongArtworkView(song: song, maxPixels: 96)
-                .frame(width: 36, height: 36)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            VStack(alignment: .leading, spacing: 1) {
-                Text(role.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(palette.onSurfaceVariant)
-                Text(song.title).font(.subheadline).lineLimit(1)
-            }
-            Spacer(minLength: 0)
-            if let cue { Text(cue).font(.caption).foregroundStyle(palette.onSurfaceVariant) }
-        }
-    }
-}
-
 /// Duration: the requested length, what these two tracks allow, quick choices and fine control.
-private struct DurationBlock: View {
+struct DurationBlock: View {
     let spec: TransitionSpec?
     let base: TransitionSpec
     let pair: StudioPair?
@@ -329,36 +339,55 @@ private struct DurationBlock: View {
 /// The preset cards: Auto (or Default), Off, every preset, and Custom when that is what is edited.
 private struct PresetCards: View {
     let current: EditorDraft
+    var compact = false
     let onChoose: (PresetChoice) -> Void
     @Environment(\.palette) private var palette
 
     var body: some View {
-        let selected = current.selectedCard
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Text("Presets").font(.subheadline.weight(.semibold)).foregroundStyle(palette.onSurfaceVariant)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: Spacing.sm)], spacing: Spacing.sm) {
-                ForEach(cards) { card in
-                    let isSelected = card.choice == selected
-                    Button {
-                        if card.choice != .preset(.custom) || !isSelected { onChoose(card.choice) }
-                    } label: {
-                        HStack(spacing: Spacing.xs) {
-                            if card.choice == .auto { Image(systemName: "sparkles").font(.footnote) }
-                            Text(card.label).font(.subheadline.weight(.semibold)).lineLimit(2).minimumScaleFactor(0.85)
-                        }
-                        .padding(.horizontal, Spacing.sm)
-                        .frame(maxWidth: .infinity, minHeight: 44)
-                        .foregroundStyle(isSelected ? palette.primary : palette.onSurface)
-                        .background(isSelected ? palette.primary.opacity(0.16) : palette.onSurface.opacity(0.05),
-                                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
-                            .strokeBorder(isSelected ? palette.primary.opacity(0.6) : palette.outline.opacity(0.2), lineWidth: 1))
-                    }
-                    .buttonStyle(PressScaleStyle())
-                    .accessibilityAddTraits(isSelected ? .isSelected : [])
+            Text("Presets").font(compact ? .caption : .subheadline.weight(.semibold)).foregroundStyle(palette.onSurfaceVariant)
+            if compact { presetStrip }
+            else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: Spacing.sm)], spacing: Spacing.sm) {
+                    ForEach(cards) { card in presetButton(card) }
                 }
             }
         }
+    }
+
+    private var presetStrip: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal) {
+                HStack(spacing: 6) {
+                    ForEach(cards) { card in presetButton(card).id(card.choice) }
+                }
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: current.selectedCard, initial: true) { _, selected in
+                withAnimation(.easeInOut(duration: 0.2)) { proxy.scrollTo(selected, anchor: .center) }
+            }
+        }
+    }
+
+    private func presetButton(_ card: Card) -> some View {
+        let selected = current.selectedCard == card.choice
+        return Button {
+            if card.choice != .preset(.custom) || !selected { onChoose(card.choice) }
+        } label: {
+            HStack(spacing: Spacing.xs) {
+                if card.choice == .auto { Image(systemName: "sparkles").font(.caption) }
+                Text(card.label).font(compact ? .footnote.weight(.semibold) : .subheadline.weight(.semibold)).lineLimit(1)
+            }
+            .padding(.horizontal, Spacing.md)
+            .frame(minWidth: compact ? 68 : nil, maxWidth: compact ? nil : .infinity, minHeight: 44)
+            .foregroundStyle(selected ? palette.onPrimary : palette.onSurface)
+            .background(selected ? palette.primary : palette.onSurface.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: compact ? 10 : 14, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: compact ? 10 : 14, style: .continuous)
+                .strokeBorder(palette.outline.opacity(selected ? 0 : 0.2), lineWidth: 1))
+        }
+        .buttonStyle(PressScaleStyle())
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     private struct Card: Identifiable {

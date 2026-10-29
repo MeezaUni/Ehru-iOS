@@ -45,10 +45,29 @@ final class AudioEngineTests: XCTestCase {
         XCTAssertEqual(inc.fileStartFrame, 24_000)
         XCTAssertEqual(inc.frameCount, 96_000)
         XCTAssertTrue(engine.isRunning)
+        var rendered: Double?
+        for _ in 0..<40 {
+            rendered = engine.previewPositionMs()
+            if rendered != nil { break }
+            try await Task.sleep(for: .milliseconds(25))
+        }
+        let position = try XCTUnwrap(rendered, "The preview playhead must expose the actual render clock")
+        XCTAssertGreaterThanOrEqual(position, -Double(timing.leadMs))
+        XCTAssertLessThanOrEqual(position, Double(timing.plan.durationMs) + Double(timing.tailMs))
         engine.stopAll()
+        XCTAssertNil(engine.previewPositionMs())
         XCTAssertFalse(engine.isRunning)
         XCTAssertTrue(engine.active.segments.isEmpty)
         XCTAssertTrue(engine.other.segments.isEmpty)
+
+        let cut = try XCTUnwrap(PairTransitionTiming(spec: nil, outgoingMs: 3000, incomingMs: 3000))
+        try engine.previewTransition(outgoing: url, incoming: incomingURL, timing: cut)
+        XCTAssertFalse(engine.other.stage.isEngaged)
+        XCTAssertFalse(engine.active.stage.isEngaged)
+        XCTAssertEqual(try XCTUnwrap(engine.other.segments.first).fileStartFrame, 66_150)
+        XCTAssertEqual(try XCTUnwrap(engine.other.segments.first).frameCount, 66_150)
+        XCTAssertEqual(try XCTUnwrap(engine.active.segments.first).fileStartFrame, 0)
+        XCTAssertEqual(try XCTUnwrap(engine.active.segments.first).frameCount, 72_000)
     }
 
     @MainActor
