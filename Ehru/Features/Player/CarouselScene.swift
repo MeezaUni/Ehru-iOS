@@ -30,7 +30,7 @@ struct CarouselScene {
 
     /// True for an adjacent change; unrelated jumps can replace the scene without sliding.
     @discardableResult
-    mutating func select(_ next: CarouselSelection, preferredDirection: Int? = nil) -> Bool {
+    mutating func select(_ next: CarouselSelection, preferredDirection: Int? = nil, deferFarPages: Bool = false) -> Bool {
         let changed = next.current?.id != selection.current?.id
         let direction: Int
         if changed, preferredDirection == -1, let id = next.current?.id, id == selection.previous?.id { direction = -1 }
@@ -45,7 +45,12 @@ struct CarouselScene {
         // seven nearby pages even if the user interrupts every settlement with another swipe.
         var nearby: [Int: Item] = [:]
         for item in items where abs(item.ordinal - center) <= 3 { nearby[item.ordinal] = item }
-        for item in fresh { nearby[item.ordinal] = item }
+        for item in fresh {
+            // The approaching card and its next neighbour are already mounted. Defer creation
+            // of the newly exposed far card until settlement, outside the release frame.
+            if deferFarPages, direction != 0, abs(item.ordinal - center) > 1, nearby[item.ordinal] == nil { continue }
+            nearby[item.ordinal] = item
+        }
         items = nearby.values.sorted { $0.ordinal < $1.ordinal }
         return direction != 0
     }

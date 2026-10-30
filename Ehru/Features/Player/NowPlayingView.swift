@@ -81,12 +81,11 @@ struct NowPlayingView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .modifier(PlayerForegroundMotion(drag: drag))
         .overlay {
-            if !reduceMotion, let song = state.currentSong {
-                PlayerArtworkOverlay(progress: drag.progress, frames: artworkFrames, visible: drag.isMoving && drag.isReady) {
+            if let song = state.currentSong {
+                PlayerArtworkFlight(drag: drag, frames: artworkFrames) {
                     MotionCoverView(song: song, rendersVideo: videoSession != nil && drag.isMoving && drag.isReady, animateStill: false, suspended: true, videoSession: videoSession, tracksScrollVisibility: false)
                         .modifier(PlayerArtworkClip(isCurrent: true, side: artworkFrames.expanded.width))
                 }
-                .environment(\.playerCoverProgress, drag.progress)
             }
         }
         .onChange(of: drag.isMoving, initial: true) { _, active in player.setVisualMotion(.presentation, active: active) }
@@ -124,14 +123,14 @@ struct NowPlayingView: View {
 
     private func pullEnded(_ distance: CGFloat, _ predicted: CGFloat) {
         if distance > 140 || predicted > 420 {
-            close()
+            close(velocity: (predicted - distance) * 4)
         } else {
-            drag.restore()
+            drag.restore(reduceMotion: reduceMotion)
         }
     }
 
-    private func close() {
-        drag.beginDismissal()
+    private func close(velocity: CGFloat? = nil) {
+        drag.beginDismissal(reduceMotion: reduceMotion, velocity: velocity)
         withAnimation(.smooth(duration: 0.32)) { router.showsNowPlaying = false }
     }
 
@@ -176,13 +175,13 @@ struct NowPlayingView: View {
 
     private var header: some View {
         HStack(spacing: Spacing.xs) {
-            Button(action: close) {
+            Button { close() } label: {
                 Image(systemName: "chevron.down").font(.title3.weight(.semibold)).frame(width: 48, height: 48).contentShape(Rectangle())
             }
             .accessibilityLabel("Close")
             Button {
                 guard let source = player.state.currentEntry?.source else { return }
-                drag.beginDismissal()
+                drag.beginDismissal(reduceMotion: reduceMotion)
                 withAnimation(.smooth(duration: 0.32)) { router.reveal(source) }
             } label: {
                 Text(playbackSourceTitle)

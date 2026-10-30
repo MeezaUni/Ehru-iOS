@@ -1,3 +1,4 @@
+import Foundation
 import Observation
 import SwiftUI
 
@@ -101,13 +102,14 @@ struct PlayerArtworkOverlay<Artwork: View>: View {
     let progress: CGFloat
     let frames: PlayerArtworkFrames
     var visible = true
+    var meter: PlayerProgressMeter? = nil
     @ViewBuilder var artwork: () -> Artwork
 
     var body: some View {
         GeometryReader { _ in
             artwork()
                 .frame(width: frames.expanded.width, height: frames.expanded.height)
-                .modifier(PlayerArtworkTransform(progress: progress, source: frames.expanded, destination: frames.mini, visible: visible))
+                .modifier(PlayerArtworkTransform(progress: progress, source: frames.expanded, destination: frames.mini, visible: visible, meter: meter))
                 .position(x: frames.expanded.midX, y: frames.expanded.midY)
         }
         .allowsHitTesting(false)
@@ -120,9 +122,10 @@ struct PlayerArtworkTransform: GeometryEffect {
     let source: CGRect
     let destination: CGRect
     var visible = true
+    var meter: PlayerProgressMeter? = nil
     var animatableData: CGFloat {
         get { progress }
-        set { progress = newValue }
+        set { progress = newValue; meter?.record(progress) }
     }
     func effectValue(size: CGSize) -> ProjectionTransform {
         ProjectionTransform(visible ? PlayerCoverGeometry.artworkTransform(progress: progress, source: source, destination: destination)
@@ -223,10 +226,48 @@ struct MiniArtworkVisibility: ViewModifier {
     func body(content: Content) -> some View { content.opacity(drag.isPresented && drag.isReady ? 0 : 1) }
 }
 
+/// The progress observer stays below NowPlayingView: dragging must not rebuild its lyrics,
+/// transport, queue neighbourhood or artwork content on every touch event.
+struct PlayerArtworkFlight<Artwork: View>: View {
+    let drag: PlayerDragState
+    let frames: PlayerArtworkFrames
+    @ViewBuilder var artwork: () -> Artwork
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var endpoints = PlayerArtworkFrames()
+
+    var body: some View {
+        if !reduceMotion {
+            let fixed = endpoints.expanded.width > 0 && endpoints.mini.width > 0 ? endpoints : frames
+            PlayerArtworkOverlay(progress: drag.progress, frames: fixed, visible: drag.isMoving && drag.isReady,
+                                 meter: drag.meter, artwork: artwork)
+                .environment(\.playerCoverProgress, drag.progress)
+                .onChange(of: frames, initial: true) { _, next in
+                    if !drag.isMoving || endpoints.expanded.width == 0 || endpoints.mini.width == 0 { endpoints = next }
+                }
+                .onChange(of: drag.isMoving) { _, _ in endpoints = frames }
+        }
+    }
+}
+
+/// Sampled only by native interpolation, never by target/layout evaluation.
+final class PlayerProgressMeter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: CGFloat?
+    func record(_ progress: CGFloat) { lock.withLock { value = progress } }
+    func read(fallback: CGFloat) -> CGFloat { lock.withLock { value ?? fallback } }
+    func reset() { lock.withLock { value = nil } }
+}
+
 enum PlayerMotionTiming {
     static let duration: TimeInterval = 0.40
-    static func presentation(reduceMotion: Bool) -> Animation {
-        .timingCurve(0.25, 0.1, 0.25, 1, duration: reduceMotion ? 0.16 : duration)
+    static func presentation(reduceMotion: Bool, duration: TimeInterval = PlayerMotionTiming.duration,
+                             delta: CGFloat = 1, velocity: CGFloat? = nil) -> Animation {
+        guard !reduceMotion else { return .linear(duration: 0.16) }
+        guard let velocity, abs(delta) > 0.001 else {
+            return .timingCurve(0.25, 0.1, 0.25, 1, duration: duration)
+        }
+        let slope = velocity.isFinite ? max(velocity / delta, 0) : 0
+        return .timingCurve(0.25, (Double(slope) * duration * 0.25).clamped(0, 0.9), 0.6, 1, duration: duration)
     }
 }
 
@@ -239,17 +280,25 @@ final class PlayerDragState {
     private(set) var isReady = false
     private(set) var isMoving = true
     private(set) var isCollapsing = false
+    private(set) var acceptsInput = false
+    @ObservationIgnored let meter = PlayerProgressMeter()
     @ObservationIgnored private var animationID = UUID()
     @ObservationIgnored private var settlement: Task<Void, Never>?
     @ObservationIgnored private var wantsPresented = false
+    @ObservationIgnored private var dragOrigin: CGFloat?
     @ObservationIgnored var travel: CGFloat = 500
 
-    func setPresented(_ presented: Bool, reduceMotion: Bool) {
+    func setPresented(_ presented: Bool, reduceMotion: Bool, velocity: CGFloat? = nil) {
+        // Router notifications and a second close gesture must not restart/cancel removal.
+        guard wantsPresented != presented else { return }
         wantsPresented = presented
+        acceptsInput = presented
         isCollapsing = !presented
+        dragOrigin = nil
         if presented && !isPresented {
             settlement?.cancel(); settlement = nil
             animationID = UUID()
+            meter.reset()
             var instant = Transaction(); instant.disablesAnimations = true
             withTransaction(instant) {
                 progress = 0
@@ -258,48 +307,62 @@ final class PlayerDragState {
                 isReady = false
                 isPresented = true
             }
-            // The measured expanded artwork starts the entrance after both endpoints are mounted.
         } else {
-            animate(to: presented ? 1 : 0, reduceMotion: reduceMotion)
+            animate(to: presented ? 1 : 0, reduceMotion: reduceMotion, velocity: velocity)
         }
     }
 
     func update(_ distance: CGFloat) {
-        guard distance.isFinite else { return }
-        settlement?.cancel(); settlement = nil
-        animationID = UUID()
+        guard acceptsInput, isReady, distance.isFinite else { return }
+        if dragOrigin == nil {
+            settlement?.cancel(); settlement = nil
+            animationID = UUID()
+            dragOrigin = meter.read(fallback: progress)
+        }
         var instant = Transaction(); instant.disablesAnimations = true
         withTransaction(instant) {
             isMoving = true
             isCollapsing = distance > 0
             translation = max(distance, 0)
-            progress = (1 - translation / max(travel, 1)).clamped(0, 1)
+            progress = ((dragOrigin ?? 1) - translation / max(travel, 1)).clamped(0, 1)
         }
     }
 
     func finishEntrance(reduceMotion: Bool = false) {
-        guard wantsPresented else { return }
+        guard wantsPresented, !isReady else { return }
         isReady = true
         animate(to: 1, reduceMotion: reduceMotion)
     }
-    func beginDismissal() { settlement?.cancel(); settlement = nil; animationID = UUID(); isMoving = true; isCollapsing = true }
-    func restore(reduceMotion: Bool = false) { isCollapsing = false; animate(to: 1, reduceMotion: reduceMotion) }
+    func beginDismissal(reduceMotion: Bool = false, velocity: CGFloat? = nil) {
+        setPresented(false, reduceMotion: reduceMotion, velocity: velocity.map { -$0 / max(travel, 1) })
+    }
+    func restore(reduceMotion: Bool = false) {
+        guard wantsPresented else { return }
+        isCollapsing = false
+        dragOrigin = nil
+        animate(to: 1, reduceMotion: reduceMotion)
+    }
 
-    private func animate(to target: CGFloat, reduceMotion: Bool) {
+    private func animate(to target: CGFloat, reduceMotion: Bool, velocity: CGFloat? = nil) {
         settlement?.cancel()
         let id = UUID(); animationID = id
-        withAnimation(PlayerMotionTiming.presentation(reduceMotion: reduceMotion)) {
+        let delta = target - meter.read(fallback: progress)
+        let duration = reduceMotion ? 0.16 : target == 0
+            ? (PlayerMotionTiming.duration * sqrt(Double(abs(delta)))).clamped(0.18, PlayerMotionTiming.duration)
+            : PlayerMotionTiming.duration
+        meter.reset()
+        withAnimation(PlayerMotionTiming.presentation(reduceMotion: reduceMotion, duration: duration, delta: delta, velocity: velocity)) {
             isMoving = true
             translation = 0
             progress = target
         }
-        let duration = reduceMotion ? 0.16 : PlayerMotionTiming.duration
         settlement = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(duration)) } catch { return }
             guard let self, self.animationID == id, !Task.isCancelled else { return }
             self.settlement = nil
+            self.meter.record(target)
             self.isMoving = false
-            if target == 0 && !self.wantsPresented { self.isPresented = false }
+            if target == 0 && !self.wantsPresented { self.isPresented = false; self.isReady = false }
         }
     }
 }

@@ -46,6 +46,26 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertEqual(scene.center, 0)
     }
 
+    func testSwipeReleaseDefersNewFarArtworkButKeepsTheNextSwipeReady() throws {
+        let entries = (1...5).map { QueueEntry(song: testSong(Int64($0))) }
+        var scene = CarouselScene()
+        scene.select(CarouselSelection(previous: nil, current: entries[0], next: entries[1], nextTwo: entries[2]))
+        let ready = try XCTUnwrap(scene.items.first { $0.entry.id == entries[2].id }).id
+        scene.select(CarouselSelection(previous: entries[0], current: entries[1], next: entries[2], nextTwo: entries[3]),
+                     preferredDirection: 1, deferFarPages: true)
+        XCTAssertEqual(scene.items.first { $0.entry.id == entries[2].id }?.id, ready)
+        XCTAssertFalse(scene.items.contains { $0.entry.id == entries[3].id })
+        scene.settle()
+        XCTAssertTrue(scene.items.contains { $0.entry.id == entries[3].id })
+        scene.select(CarouselSelection(previous: entries[1], current: entries[2], next: entries[3],
+                                       previousTwo: entries[0], nextTwo: entries[4]),
+                     preferredDirection: 1, deferFarPages: true)
+        XCTAssertEqual(scene.currentKey, ready)
+        XCTAssertFalse(scene.items.contains { $0.entry.id == entries[4].id })
+        scene.settle()
+        XCTAssertTrue(scene.items.contains { $0.entry.id == entries[4].id })
+    }
+
     func testRepeatNeighboursAndUnrelatedJumpsHaveUniqueOccurrences() {
         let a = QueueEntry(song: testSong(1)), b = QueueEntry(song: testSong(2)), c = QueueEntry(song: testSong(3))
         var scene = CarouselScene()

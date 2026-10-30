@@ -16,11 +16,13 @@ final class AudioFilePreloaderTests: XCTestCase {
 
     @MainActor
     func testBoundedReadAheadConsumesEachReaderOnceAndRejectsReplacedFiles() async throws {
-        let a = try file(), b = try file(), c = try file()
-        defer { for url in [a, b, c] { try? FileManager.default.removeItem(at: url) } }
+        let a = try file(), b = try file(), c = try file(), d = try file(), e = try file()
+        defer { for url in [a, b, c, d, e] { try? FileManager.default.removeItem(at: url) } }
         let loader = AudioFilePreloader()
-        await loader.warm([a, a, b, c])
-        XCTAssertNil(loader.take(c))
+        await loader.warm([a, a, b, c, d, e])
+        XCTAssertNil(loader.take(e))
+        XCTAssertNotNil(loader.take(c))
+        XCTAssertNotNil(loader.take(d))
         let first = try XCTUnwrap(loader.take(a))
         XCTAssertEqual(first.length, 800)
         XCTAssertEqual(first.framePosition, 0, "Decoder priming must rewind before handing off the reader")

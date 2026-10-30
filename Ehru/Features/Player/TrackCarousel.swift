@@ -127,7 +127,7 @@ struct TrackCarousel: View {
     private func selectionChanged(_ next: CarouselSelection, preferredDirection: Int? = nil, velocity: CGFloat? = nil) {
         guard next != scene.selection else { return }
         let previousID = scene.selection.current?.id
-        let adjacent = scene.select(next, preferredDirection: preferredDirection)
+        let adjacent = scene.select(next, preferredDirection: preferredDirection, deferFarPages: motion.moving)
         if previousID == next.current?.id && motion.moving { return }
         if previousID != next.current?.id, adjacent {
             settle(velocity: velocity)

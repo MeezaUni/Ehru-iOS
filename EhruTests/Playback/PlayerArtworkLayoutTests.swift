@@ -13,6 +13,8 @@ final class PlayerArtworkLayoutTests: XCTestCase {
         let controls = CGRect(x: 20, y: 410, width: 350, height: 100)
         let drag = PlayerDragState()
         drag.travel = 500
+        drag.setPresented(true, reduceMotion: true)
+        drag.finishEntrance(reduceMotion: true)
         var measuredFrames = PlayerArtworkFrames()
         var rendered = RenderFrames()
         let measured = expectation(description: "Artwork and controls laid out")
