@@ -145,32 +145,41 @@ final class CarouselSceneTests: XCTestCase {
                        CarouselPresentationSample(focus: 0.42, stack: 0.7))
     }
 
-    func testStackedNeighbourUsesASeparateTurnoverLaneAndFadesBehindTheRearPlateAtRest() {
+    func testStackedNeighbourStaysCentredBehindTheCurrentCard() {
         let current = CarouselPose(distance: 0, width: 280, stack: 1, reduceMotion: false)
         let next = CarouselPose(distance: 1, width: 280, stack: 1, reduceMotion: false)
         XCTAssertLessThan(next.scale, current.scale)
         XCTAssertLessThan(next.y, current.y)
         XCTAssertEqual(next.turn, 0)
-        XCTAssertGreaterThan(next.x, 280 * (current.scale + next.scale) / 2)
+        XCTAssertEqual(next.x, current.x)
         XCTAssertEqual(next.opacity, 0)
         XCTAssertEqual(CarouselPose(distance: -1, width: 280, stack: 1, reduceMotion: false).opacity, 0)
     }
 
-    func testProjectedCardsHaveAGapThroughoutSwipesInBothLayouts() {
+    func testProjectedSpreadCardsHaveAGapThroughoutSwipes() {
         for width in [CGFloat(160), 280, 480] {
             let size = CGSize(width: width, height: width + 100)
             for reduced in [false, true] {
-                for stack in [CGFloat(0), 0.25, 0.5, 0.75, 1] {
-                    for step in -40...40 {
-                        let focus = CGFloat(step) / 40
-                        for ordinal in -2...1 {
-                            let left = bounds(ordinal: ordinal, focus: focus, size: size, reduced: reduced, stack: stack)
-                            let right = bounds(ordinal: ordinal + 1, focus: focus, size: size, reduced: reduced, stack: stack)
-                            XCTAssertGreaterThanOrEqual(right.minX - left.maxX, CarouselPose.gap(width: width) - 0.001,
-                                                       "Cards cross at focus \(focus), layout \(stack), width \(width)")
-                        }
+                for step in -40...40 {
+                    let focus = CGFloat(step) / 40
+                    for ordinal in -2...1 {
+                        let left = bounds(ordinal: ordinal, focus: focus, size: size, reduced: reduced)
+                        let right = bounds(ordinal: ordinal + 1, focus: focus, size: size, reduced: reduced)
+                        XCTAssertGreaterThanOrEqual(right.minX - left.maxX, CarouselPose.gap(width: width) - 0.001,
+                                                   "Cards cross at focus \(focus), width \(width)")
                     }
                 }
+            }
+        }
+    }
+
+    func testStackedTurnoversNeverEnterFromTheSideInEitherDirection() {
+        for step in -40...40 {
+            let focus = CGFloat(step) / 40
+            for ordinal in -1...1 {
+                let pose = CarouselPose(distance: CGFloat(ordinal) - focus, width: 280, stack: 1, reduceMotion: false)
+                XCTAssertEqual(pose.x, 0)
+                XCTAssertEqual(pose.turn, 0)
             }
         }
     }

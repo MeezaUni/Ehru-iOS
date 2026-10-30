@@ -171,6 +171,17 @@ struct PlayerChromeFade: ViewModifier {
     @Environment(PlayerDragState.self) private var drag
     func body(content: Content) -> some View {
         content.modifier(PlayerChromeOpacity(progress: drag.progress))
+            .modifier(PlayerCollapseVisibility())
+    }
+}
+
+/// Collapse has a single painted owner: the floating artwork. Hide the remaining paint
+/// immediately while retaining its layout, measurement and active drag recognizer.
+struct PlayerCollapseVisibility: ViewModifier {
+    @Environment(PlayerDragState.self) private var drag
+    func body(content: Content) -> some View {
+        content.opacity(drag.isCollapsing ? 0 : 1)
+            .transaction { if drag.isCollapsing { $0.animation = nil } }
     }
 }
 
@@ -202,7 +213,9 @@ struct PlayerArtworkClip: ViewModifier {
 
 struct PlayerBackdropFade: ViewModifier {
     let drag: PlayerDragState
-    func body(content: Content) -> some View { content.opacity(Double(drag.progress)) }
+    func body(content: Content) -> some View {
+        content.opacity(Double(drag.progress)).modifier(PlayerCollapseVisibility())
+    }
 }
 
 struct MiniArtworkVisibility: ViewModifier {
@@ -225,6 +238,7 @@ final class PlayerDragState {
     private(set) var isPresented = false
     private(set) var isReady = false
     private(set) var isMoving = true
+    private(set) var isCollapsing = false
     @ObservationIgnored private var animationID = UUID()
     @ObservationIgnored private var settlement: Task<Void, Never>?
     @ObservationIgnored private var wantsPresented = false
@@ -232,6 +246,7 @@ final class PlayerDragState {
 
     func setPresented(_ presented: Bool, reduceMotion: Bool) {
         wantsPresented = presented
+        isCollapsing = !presented
         if presented && !isPresented {
             settlement?.cancel(); settlement = nil
             animationID = UUID()
@@ -256,6 +271,7 @@ final class PlayerDragState {
         var instant = Transaction(); instant.disablesAnimations = true
         withTransaction(instant) {
             isMoving = true
+            isCollapsing = distance > 0
             translation = max(distance, 0)
             progress = (1 - translation / max(travel, 1)).clamped(0, 1)
         }
@@ -266,8 +282,8 @@ final class PlayerDragState {
         isReady = true
         animate(to: 1, reduceMotion: reduceMotion)
     }
-    func beginDismissal() { settlement?.cancel(); settlement = nil; animationID = UUID(); isMoving = true }
-    func restore(reduceMotion: Bool = false) { animate(to: 1, reduceMotion: reduceMotion) }
+    func beginDismissal() { settlement?.cancel(); settlement = nil; animationID = UUID(); isMoving = true; isCollapsing = true }
+    func restore(reduceMotion: Bool = false) { isCollapsing = false; animate(to: 1, reduceMotion: reduceMotion) }
 
     private func animate(to target: CGFloat, reduceMotion: Bool) {
         settlement?.cancel()

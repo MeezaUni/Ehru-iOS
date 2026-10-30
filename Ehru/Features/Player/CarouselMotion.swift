@@ -34,8 +34,8 @@ final class CarouselMotion {
         var instant = Transaction(); instant.disablesAnimations = true
         withTransaction(instant) {
             focus = CarouselDragLimit.focus(origin.focus + distance, center: center, canPrevious: canPrevious, canNext: canNext)
-            // Unfold proportionally to the finger instead of teleporting to the spread layout.
-            stack = max(origin.stack - abs(distance) * 2, 0)
+            // A depth-deck swipe remains a depth-deck swipe; only the layout button spreads it.
+            stack = origin.stack
             frontOrdinal = Int(focus.rounded())
         }
     }

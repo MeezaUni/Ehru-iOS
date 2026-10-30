@@ -98,9 +98,9 @@ struct CarouselPose {
         let away = abs(distance), near = min(abs(distance), 1)
         let sideScale: CGFloat = reduceMotion ? 0.86 : 0.78
         scale = (1 - (1 - sideScale) * near) * (1 - stack) + (1 - 0.06 * near) * stack
-        // Separate projected edges, not just unrotated frame centres. Adjacent cards share
-        // the same pitch even halfway through a swipe, including a stacked-mode turnover.
-        x = Self.position(distance: distance, width: width, stack: stack, reduceMotion: reduceMotion)
+        // Spread cards keep separate projected edges. The layout blend gathers those
+        // lanes into a centred depth deck; swiping never unfolds that deck sideways.
+        x = stack == 1 ? 0 : Self.position(distance: distance, width: width, stack: stack, reduceMotion: reduceMotion) * (1 - stack)
         y = -20 * near * stack
         turn = reduceMotion ? 0 : -Double(distance.clamped(-1, 1)) * 32 * Double(1 - stack)
         let vanish = (1 - max(away - 1, 0) / 0.6).clamped(0, 1)
@@ -141,6 +141,10 @@ struct CarouselPose {
 
 enum CarouselProjection {
     static func transform(size: CGSize, scale: CGFloat, turn: Double, x: CGFloat = 0, y: CGFloat = 0) -> ProjectionTransform {
+        if turn == 0 {
+            return ProjectionTransform(CGAffineTransform(a: scale, b: 0, c: 0, d: scale,
+                tx: size.width * (1 - scale) / 2 + x, ty: size.height * (1 - scale) / 2 + y))
+        }
         var rotation = CATransform3DIdentity
         rotation.m34 = -0.45 / max(size.width, 1)
         rotation = CATransform3DRotate(rotation, CGFloat(turn * .pi / 180), 0, 1, 0)
@@ -186,8 +190,7 @@ struct CarouselStrip<Card: View>: View {
 
     var body: some View {
         ZStack {
-            // A quiet rear plate preserves the gathered deck at rest. Actual song cards
-            // always have separate lanes, so titles and artwork cannot cross during turnover.
+            // A quiet rear plate anchors the depth deck while the foreground changes.
             RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
                 .fill(Color.white.opacity(0.055))
                 .overlay(RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)

@@ -479,6 +479,8 @@ struct QueueSheet: View {
     @State private var page = 0
     @State private var savingName = ""
     @State private var saving = false
+    @State private var feedback: String?
+    @State private var feedbackID = UUID()
 
     var body: some View {
         let state = player.state
@@ -500,11 +502,11 @@ struct QueueSheet: View {
                 if page == 0 {
                     ToolbarItem(placement: .topBarLeading) {
                         Menu {
-                            Button { if !player.shuffleUpcoming() { actions.show("Fewer than two songs are coming up") } } label: {
+                            Button { if !player.shuffleUpcoming() { showFeedback("Fewer than two songs are coming up") } } label: {
                                 Label("Shuffle upcoming", systemImage: "shuffle")
                             }
                             Button { saving = true } label: { Label("Save as playlist", systemImage: "square.and.arrow.down") }
-                            Button { if !player.undoQueueRemoval() { actions.show("Nothing to undo") } } label: {
+                            Button { showFeedback(player.undoQueueRemoval() ? "Removal undone" : "Nothing to undo") } label: {
                                 Label("Undo removal", systemImage: "arrow.uturn.backward")
                             }
                         } label: { Image(systemName: "ellipsis.circle") }
@@ -520,8 +522,19 @@ struct QueueSheet: View {
                 }
             }
         }
+        .overlay(alignment: .bottom) {
+            if let feedback { Toast(text: feedback).padding(.horizontal, Spacing.gutter).padding(.bottom, Spacing.md).allowsHitTesting(false) }
+        }
+        .task(id: feedbackID) {
+            guard feedback != nil else { return }
+            do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            guard !Task.isCancelled else { return }
+            feedback = nil
+        }
         .presentationDetents([.medium, .large])
     }
+
+    private func showFeedback(_ text: String) { feedback = text; feedbackID = UUID() }
 
     private func queue(_ state: PlaybackState) -> some View {
         List {

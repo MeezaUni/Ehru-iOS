@@ -173,6 +173,12 @@ final class AudioEngine {
         stop(active)
         other.stage.cancel()
         active.stage.cancel()
+        // Preserve the old format in its deck. Alternating between differently encoded
+        // tracks while paused can then reuse both connections instead of rebuilding one
+        // deck on every swipe. The playing handoff above already uses the idle deck.
+        if active.format?.sampleRate != file.processingFormat.sampleRate || active.format?.channelCount != file.processingFormat.channelCount {
+            activeIndex = 1 - activeIndex
+        }
         let deck = active
         ensureFormat(deck, file.processingFormat)
         let start = AVAudioFramePosition(Double(positionMs) / 1000 * file.processingFormat.sampleRate)

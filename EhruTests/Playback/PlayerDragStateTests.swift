@@ -10,16 +10,19 @@ final class PlayerDragStateTests: XCTestCase {
         XCTAssertEqual(drag.translation, 80)
         XCTAssertEqual(drag.progress, 0.84, accuracy: 1e-6)
         XCTAssertTrue(drag.isMoving)
+        XCTAssertTrue(drag.isCollapsing)
         drag.update(155)
         XCTAssertEqual(drag.translation, 155)
         drag.update(-20)
         XCTAssertEqual(drag.translation, 0)
         drag.restore()
+        XCTAssertFalse(drag.isCollapsing)
         XCTAssertEqual(drag.translation, 0)
         XCTAssertEqual(drag.progress, 1)
         // Without an attached view, SwiftUI can complete an animation immediately.
         drag.beginDismissal() // Cancel the settling task; motion stays suspended during removal.
         XCTAssertTrue(drag.isMoving)
+        XCTAssertTrue(drag.isCollapsing)
     }
 
     func testCoverLandsExactlyOnExpandedAndBothMiniPlayerLayouts() {

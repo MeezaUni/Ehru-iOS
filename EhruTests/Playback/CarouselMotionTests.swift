@@ -5,15 +5,15 @@ import XCTest
 
 final class CarouselMotionTests: XCTestCase {
     @MainActor
-    func testAStackedDragUnfoldsUnderTheFingerInsteadOfJumpingToSpread() {
+    func testAStackedDragRetainsItsDepthLayoutInsteadOfUnfoldingSideways() {
         let motion = CarouselMotion()
         motion.snap(center: 0, stacked: true)
         motion.drag(translation: -10, page: 200, center: 0, canPrevious: true, canNext: true)
         XCTAssertEqual(motion.focus, 0.05, accuracy: 1e-6)
-        XCTAssertEqual(motion.stack, 0.9, accuracy: 1e-6)
+        XCTAssertEqual(motion.stack, 1, accuracy: 1e-6)
         motion.drag(translation: -50, page: 200, center: 0, canPrevious: true, canNext: true)
         XCTAssertEqual(motion.focus, 0.25, accuracy: 1e-6)
-        XCTAssertEqual(motion.stack, 0.5, accuracy: 1e-6)
+        XCTAssertEqual(motion.stack, 1, accuracy: 1e-6)
         motion.cancel()
         XCTAssertFalse(motion.moving)
     }
@@ -25,10 +25,10 @@ final class CarouselMotionTests: XCTestCase {
         motion.meter.record(0.7, stack: 0.6)
         motion.drag(translation: -10, page: 200, center: 1, canPrevious: true, canNext: true)
         XCTAssertEqual(motion.focus, 0.75, accuracy: 1e-6)
-        XCTAssertEqual(motion.stack, 0.5, accuracy: 1e-6)
+        XCTAssertEqual(motion.stack, 0.6, accuracy: 1e-6)
         motion.drag(translation: -20, page: 200, center: 1, canPrevious: true, canNext: true)
         XCTAssertEqual(motion.focus, 0.8, accuracy: 1e-6)
-        XCTAssertEqual(motion.stack, 0.4, accuracy: 1e-6)
+        XCTAssertEqual(motion.stack, 0.6, accuracy: 1e-6)
     }
 
     @MainActor

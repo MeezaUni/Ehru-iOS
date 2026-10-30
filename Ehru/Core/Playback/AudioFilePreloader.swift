@@ -15,8 +15,8 @@ private struct PreparedAudioFile: @unchecked Sendable {
     let fingerprint: AudioFileFingerprint
 }
 
-/// Opens only adjacent file headers off the UI thread. Each handle is consumed once, so two
-/// decks never share a mutable AVAudioFile reader. No audio samples are predecoded or retained.
+/// Opens adjacent readers and primes one small PCM block off the UI thread. Codec allocation
+/// and the first decode stay out of a swipe commit. Each reader is consumed once; no PCM is kept.
 @MainActor
 final class AudioFilePreloader {
     private var files: [URL: PreparedAudioFile] = [:]
@@ -34,8 +34,14 @@ final class AudioFilePreloader {
             guard !Task.isCancelled, generation == token else { return }
             if files[url] != nil { continue }
             let result = await Task.detached(priority: .userInitiated) { () -> PreparedAudioFile? in
-                guard let before = AudioFileFingerprint.read(url), let file = try? AVAudioFile(forReading: url),
-                      AudioFileFingerprint.read(url) == before else { return nil }
+                guard let before = AudioFileFingerprint.read(url), let file = try? AVAudioFile(forReading: url) else { return nil }
+                let count = AVAudioFrameCount(min(max(file.length, 0), 4096))
+                if count > 0 {
+                    guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: count),
+                          (try? file.read(into: buffer, frameCount: count)) != nil else { return nil }
+                    file.framePosition = 0
+                }
+                guard AudioFileFingerprint.read(url) == before else { return nil }
                 return PreparedAudioFile(file: file, fingerprint: before)
             }.value
             guard !Task.isCancelled, generation == token else { return }

@@ -4,8 +4,8 @@ import SwiftUI
 /// previous and next to either side, smaller, turned towards the centre and dimmed, partly visible.
 /// A sideways swipe moves the strip with the finger; released past a quarter of a page (or flung)
 /// it changes the song, otherwise it springs back. Any track change (swipe, buttons, end of song)
-/// slides the strip the same way. [stacked] uses a flatter gathered deck at rest, with separate lanes during a
-/// turnover. A vertical drag on the cards pulls the player down ([onPull]).
+/// slides the strip the same way. [stacked] instead brings the next card forward from a centred
+/// depth deck. A vertical drag on the cards pulls the player down ([onPull]).
 struct TrackCarousel: View {
     let stacked: Bool
     let previous: QueueEntry?
@@ -56,6 +56,7 @@ struct TrackCarousel: View {
                           reduceMotion: reduceMotion, meter: motion.meter) { item in
                 card(item, metrics: metrics)
             }
+            .modifier(PlayerCollapseVisibility())
             .contentShape(Rectangle())
             .highPriorityGesture(swipe(page: page))
         }
@@ -82,6 +83,7 @@ struct TrackCarousel: View {
         let song = isCurrent && currentSong.id == item.entry.song.id ? currentSong : item.entry.song
         let session = videos.slots[item.id]?.session
         return CarouselCard(song: song, isCurrent: isCurrent,
+                            showsMetadata: isCurrent || !stacked,
                             animatesMotion: CarouselVideoDeck.shouldAnimate(distance: distance, current: isCurrent),
                             reportsArtworkFrame: isCurrent && !motion.moving,
                             videoSession: session, distance: distance, metrics: metrics)
@@ -163,8 +165,8 @@ struct CardMetrics {
 
 /// One card at [distance] places from the centre: moved sideways by a share of its width, scaled
 /// down and turned towards the centre as it leaves, fading only past one place. With Reduce Motion
-/// the cards slide and scale but never turn. [stack] (0…1) blends towards the flatter deck layout. Both layouts keep a visible
-/// gap between the projected edges, including while changing layouts.
+/// the cards slide and scale but never turn. [stack] (0…1) blends the separated, angled
+/// cards into a centred deck whose incoming card advances from behind.
 struct DepthCard: GeometryEffect {
     var distance: CGFloat
     let width: CGFloat
@@ -187,6 +189,7 @@ struct DepthCard: GeometryEffect {
 private struct CarouselCard: View {
     let song: Song
     let isCurrent: Bool
+    let showsMetadata: Bool
     let animatesMotion: Bool
     let reportsArtworkFrame: Bool
     let videoSession: MotionVideoSession?
@@ -235,6 +238,7 @@ private struct CarouselCard: View {
                 }
             }
             .modifier(PlayerChromeFade())
+            .opacity(showsMetadata ? 1 : 0)
             .padding(.leading, Spacing.xs)
             .padding(.top, Spacing.sm)
             .frame(width: metrics.artSide, height: metrics.metadataHeight, alignment: .top)

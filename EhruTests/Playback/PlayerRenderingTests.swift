@@ -70,6 +70,45 @@ final class PlayerRenderingTests: XCTestCase {
     }
 
     @MainActor
+    func testCollapseShowsOnlyFloatingArtworkOverTheLibrary() throws {
+        let drag = PlayerDragState()
+        drag.setPresented(true, reduceMotion: false)
+        drag.finishEntrance()
+        drag.update(drag.travel / 2)
+        let source = CGRect(x: 55, y: 100, width: 280, height: 280)
+        let mini = CGRect(x: 20, y: 745, width: 44, height: 44)
+        let content = ZStack {
+            Color.blue // The library, underneath the player.
+            Color.green.modifier(PlayerCollapseVisibility()) // Carousel paint and backdrop.
+            Color.green.frame(width: 300, height: 90).modifier(PlayerChromeFade()) // Transport chrome.
+        }
+        .overlay {
+            PlayerArtworkOverlay(progress: drag.progress, frames: .init(expanded: source, mini: mini)) { Color.red }
+        }
+        .environment(drag)
+        let rendered = try pixels(content, size: CGSize(width: 390, height: 844))
+        assertColor(rendered, at: CGPoint(x: (source.midX + mini.midX) / 2, y: (source.midY + mini.midY) / 2), dominant: 0)
+        assertColor(rendered, at: CGPoint(x: 350, y: 422), dominant: 2)
+        assertColor(rendered, at: CGPoint(x: 195, y: 100), dominant: 2)
+    }
+
+    @MainActor
+    func testDepthTurnoverPaintsCentredCardsWithoutSidePreviews() throws {
+        let items = (-1...1).map { CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 2)))) }
+        for focus in [CGFloat(-0.75), -0.25, 0.25, 0.75] {
+            let content = CarouselStrip(items: items, focus: focus, frontOrdinal: Int(focus.rounded()), stack: 1,
+                                        viewport: CGSize(width: 390, height: 450), cardSize: CGSize(width: 280, height: 380),
+                                        reduceMotion: false, meter: CarouselPresentationMeter()) { _ in
+                Color.blue.frame(width: 280, height: 380)
+            }.background(Color.black)
+            let rendered = try pixels(content, size: CGSize(width: 390, height: 450))
+            assertColor(rendered, at: CGPoint(x: 195, y: 225), dominant: 2)
+            XCTAssertLessThan(rendered.color(x: 5, y: 225).max() ?? 1, 0.05)
+            XCTAssertLessThan(rendered.color(x: 385, y: 225).max() ?? 1, 0.05)
+        }
+    }
+
+    @MainActor
     func testCoverPixelsEscapeTheScrollViewportAndLandOnTheMiniPlayer() async throws {
         let source = CGRect(x: 55, y: 100, width: 280, height: 280)
         let mini = CGRect(x: 20, y: 745, width: 44, height: 44)

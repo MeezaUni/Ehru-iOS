@@ -4,6 +4,42 @@ import XCTest
 
 final class AudioEngineTests: XCTestCase {
     @MainActor
+    func testPausedAlternatingFormatsReuseTheirDecksAndResumeTheSelectedTrack() async throws {
+        let urls = (0..<2).map { _ in FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf") }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0) } }
+        for (index, rate) in [44_100.0, 48_000.0].enumerated() {
+            let format = try XCTUnwrap(AVAudioFormat(standardFormatWithSampleRate: rate, channels: 2))
+            let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(rate)))
+            buffer.frameLength = buffer.frameCapacity
+            for channel in 0..<2 {
+                for frame in 0..<Int(buffer.frameLength) { buffer.floatChannelData![channel][frame] = 0.1 }
+            }
+            let file = try AVAudioFile(forWriting: urls[index], settings: format.settings)
+            try file.write(from: buffer)
+        }
+        let engine = AudioEngine()
+        await engine.setUp()
+        defer { engine.stopAll() }
+        await engine.warmFiles(urls)
+        let first = UUID(), second = UUID()
+        try engine.play(entryId: first, url: urls[0], positionMs: 0, startPlaying: false)
+        let firstDeck = engine.active
+        try engine.play(entryId: second, url: urls[1], positionMs: 0, startPlaying: false)
+        let secondDeck = engine.active
+        XCTAssertFalse(firstDeck === secondDeck)
+        XCTAssertEqual(firstDeck.format?.sampleRate, 44_100)
+        XCTAssertEqual(secondDeck.format?.sampleRate, 48_000)
+        try engine.play(entryId: first, url: urls[0], positionMs: 100, startPlaying: false)
+        XCTAssertTrue(engine.active === firstDeck, "Swiping back must reuse the previous graph connection")
+        XCTAssertFalse(engine.isPlaying)
+        XCTAssertEqual(engine.currentPosition()?.entryId, first)
+        XCTAssertEqual(engine.currentPosition()?.positionMs, 100)
+        try engine.resume()
+        XCTAssertTrue(engine.isPlaying)
+        XCTAssertEqual(engine.currentPosition()?.entryId, first)
+    }
+
+    @MainActor
     func testPairPreviewSchedulesOnlyTheRealCueWindowsAndStopsBothDecks() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
         let incomingURL = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".caf")
