@@ -36,7 +36,9 @@ final class MotionCoverPosterCache {
             generator.appliesPreferredTrackTransform = true
             generator.maximumSize = CGSize(width: 1200, height: 1200)
             generator.requestedTimeToleranceBefore = .zero
-            generator.requestedTimeToleranceAfter = .zero
+            // Fragmented clips can have a composition offset before the first picture.
+            // Accept the first available frame instead of falling back to unrelated embedded art.
+            generator.requestedTimeToleranceAfter = .positiveInfinity
             guard let (frame, _) = try? await generator.image(at: .zero), !Task.isCancelled else { return nil }
             let image = UIImage(cgImage: frame)
             if let data = image.jpegData(compressionQuality: 0.94) { try? data.write(to: poster, options: .atomic) }

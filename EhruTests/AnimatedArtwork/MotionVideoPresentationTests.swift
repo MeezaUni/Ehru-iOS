@@ -252,7 +252,19 @@ final class MotionVideoPresentationTests: XCTestCase {
         XCTAssertNil(cache.cached(url))
     }
 
-    private func movie() async throws -> URL {
+    @MainActor
+    func testPosterHandlesAClipWhoseFirstPictureStartsAfterZero() async throws {
+        let url = try await movie(firstFrameTime: CMTime(value: 3, timescale: 30))
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: MotionCoverPosterCache.posterURL(for: url))
+        }
+        let image = await MotionCoverPosterCache().image(for: url)
+        XCTAssertNotNil(image, "A leading composition offset must not replace the video poster with embedded artwork")
+        XCTAssertEqual(image?.cgImage?.width, 64)
+    }
+
+    private func movie(firstFrameTime: CMTime = .zero) async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
@@ -278,7 +290,7 @@ final class MotionVideoPresentationTests: XCTestCase {
                 try await Task.sleep(for: .milliseconds(10))
             }
             guard input.isReadyForMoreMediaData else { throw MotionArtworkError("Test movie writer timed out") }
-            XCTAssertTrue(adapter.append(buffer, withPresentationTime: CMTime(value: Int64(frame), timescale: 30)))
+            XCTAssertTrue(adapter.append(buffer, withPresentationTime: CMTimeAdd(firstFrameTime, CMTime(value: Int64(frame), timescale: 30))))
         }
         input.markAsFinished()
         await writer.finishWriting()
