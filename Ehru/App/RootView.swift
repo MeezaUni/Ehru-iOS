@@ -54,7 +54,7 @@ struct RootView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 .onChange(of: geometry.size, initial: true) { _, size in playerMotion.travel = max(size.height * 0.65, 240) }
             }
-            .allowsHitTesting(playerMotion.isPresented)
+            .allowsHitTesting(playerMotion.acceptsInput)
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: router.showsDrawer)
         .coordinateSpace(name: PlayerArtworkSpace.root)

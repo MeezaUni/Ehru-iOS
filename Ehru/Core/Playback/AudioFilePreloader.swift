@@ -27,7 +27,7 @@ final class AudioFilePreloader {
         var wanted: [URL] = []
         for url in urls where !wanted.contains(url) {
             wanted.append(url)
-            if wanted.count == 2 { break }
+            if wanted.count == 4 { break }
         }
         files = files.filter { wanted.contains($0.key) }
         for url in wanted {

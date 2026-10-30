@@ -440,7 +440,9 @@ final class PlayerController {
         fileWarmup?.cancel()
         let previous = PlayOrder.previous(before: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode)
         let next = PlayOrder.next(after: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode, userSkip: true)
-        let urls = [next, previous].compactMap { index -> URL? in
+        let nextTwo = next.flatMap { PlayOrder.next(after: $0, count: state.queue.count, repeatMode: state.repeatMode, userSkip: true) }
+        let previousTwo = previous.flatMap { PlayOrder.previous(before: $0, count: state.queue.count, repeatMode: state.repeatMode) }
+        let urls = [next, previous, nextTwo, previousTwo].compactMap { index -> URL? in
             guard let index, state.queue.indices.contains(index) else { return nil }
             let url = state.queue[index].song.url
             return url == state.currentSong?.url ? nil : url

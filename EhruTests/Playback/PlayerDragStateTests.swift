@@ -6,6 +6,8 @@ final class PlayerDragStateTests: XCTestCase {
     func testDragTracksTheFingerAndStopsDecorativeMotionUntilSettled() {
         let drag = PlayerDragState()
         drag.travel = 500
+        drag.setPresented(true, reduceMotion: true)
+        drag.finishEntrance(reduceMotion: true)
         drag.update(80)
         XCTAssertEqual(drag.translation, 80)
         XCTAssertEqual(drag.progress, 0.84, accuracy: 1e-6)
@@ -66,6 +68,50 @@ final class PlayerDragStateTests: XCTestCase {
         XCTAssertTrue(drag.isPresented)
         drag.finishEntrance(reduceMotion: true)
         XCTAssertEqual(drag.progress, 1)
+    }
+
+    @MainActor
+    func testRepeatedDismissalAndStaleTouchesCannotStrandCoverOverHome() async throws {
+        let drag = PlayerDragState()
+        drag.setPresented(true, reduceMotion: true)
+        drag.finishEntrance(reduceMotion: true)
+        drag.update(120)
+        drag.beginDismissal(reduceMotion: true)
+        XCTAssertFalse(drag.acceptsInput)
+        XCTAssertEqual(drag.progress, 0)
+        // A late recognizer callback and the router's matching notification must be harmless.
+        drag.update(200)
+        drag.restore(reduceMotion: true)
+        drag.beginDismissal(reduceMotion: true)
+        drag.setPresented(false, reduceMotion: true)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertFalse(drag.isPresented)
+        XCTAssertFalse(drag.isMoving)
+        XCTAssertFalse(drag.isReady)
+        drag.update(80)
+        XCTAssertEqual(drag.progress, 0)
+        drag.setPresented(true, reduceMotion: true)
+        drag.finishEntrance(reduceMotion: true)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertTrue(drag.acceptsInput)
+        XCTAssertTrue(drag.isPresented)
+        XCTAssertEqual(drag.progress, 1)
+        XCTAssertFalse(drag.isMoving)
+    }
+
+    @MainActor
+    func testRetouchUsesVisibleCoverProgressAndKeepsOneOriginForTheGesture() {
+        let drag = PlayerDragState()
+        drag.travel = 500
+        drag.setPresented(true, reduceMotion: false)
+        drag.finishEntrance()
+        drag.meter.record(0.65) // The compositor is partway through the opening animation.
+        drag.update(25)
+        XCTAssertEqual(drag.progress, 0.60, accuracy: 1e-6)
+        drag.meter.record(0.60)
+        drag.update(50)
+        XCTAssertEqual(drag.progress, 0.55, accuracy: 1e-6)
+        drag.beginDismissal(reduceMotion: true)
     }
 
 }

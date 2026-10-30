@@ -129,7 +129,7 @@ private struct SectionCapsule: View {
                                         .font(.system(size: 19))
                                     Text(section.label).font(.caption2.weight(.medium)).lineLimit(1)
                                 }
-                                .foregroundStyle(abs(position - CGFloat(index)) < 0.5 ? palette.primary : palette.onSurfaceVariant)
+                                .foregroundStyle(abs(position - CGFloat(index)) < 0.5 ? palette.primary : Color.white)
                                 .frame(maxWidth: .infinity, minHeight: 56)
                                 .contentShape(Rectangle())
                             }
