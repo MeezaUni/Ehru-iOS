@@ -35,6 +35,7 @@ final class MotionVideoSession {
     private weak var outputItem: AVPlayerItem?
     private var output: AVPlayerItemVideoOutput?
     private var itemReadiness: NSKeyValueObservation?
+    private var playerReadiness: NSKeyValueObservation?
     private var generation = UUID()
     private var wantsPlayback = false
     private var prerolling = false
@@ -49,6 +50,9 @@ final class MotionVideoSession {
             let item = AVPlayerItem(url: url)
             item.preferredForwardBufferDuration = 3
             looper = AVPlayerLooper(player: player, templateItem: item)
+            playerReadiness = player.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
+                DispatchQueue.main.async { self?.prerollIfReady() }
+            }
             itemObservation = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
                 DispatchQueue.main.async { self?.bindOutput(); self?.observeReadiness() }
             }
@@ -96,7 +100,7 @@ final class MotionVideoSession {
     }
 
     private func prerollIfReady() {
-        guard !wantsPlayback, !primed, !prerolling, let player = residentPlayer,
+        guard !wantsPlayback, !primed, !prerolling, let player = residentPlayer, player.status == .readyToPlay,
               player.currentItem?.status == .readyToPlay else { return }
         prerolling = true
         let token = generation
@@ -142,6 +146,7 @@ final class MotionVideoSession {
         readiness = nil
         itemObservation = nil
         itemReadiness = nil
+        playerReadiness = nil
         if let output, let outputItem { outputItem.remove(output) }
         output = nil; outputItem = nil
         residentSurface?.videoLayer.player = nil

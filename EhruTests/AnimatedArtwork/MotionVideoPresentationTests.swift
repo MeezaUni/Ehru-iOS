@@ -62,6 +62,42 @@ final class MotionVideoPresentationTests: XCTestCase {
     }
 
     @MainActor
+    func testPausedNeighbourActuallyDecodesAFirstFrameBeforeItStartsMoving() async throws {
+        let url = try await movie()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let previous = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)
+        let scene = try XCTUnwrap(previous?.windowScene ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let controller = UIViewController()
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        let session = MotionVideoSession()
+        defer {
+            session.stop(); window.isHidden = true; window.rootViewController = nil
+            previous?.makeKeyAndVisible()
+        }
+        let host = MotionVideoHost(frame: controller.view.bounds)
+        controller.view.addSubview(host)
+        session.prepare(url: url)
+        session.attach(host, url: url, playing: false, frozen: false)
+        for _ in 0..<250 {
+            if session.surface.videoLayer.isReadyForDisplay || session.player.status == .failed { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(session.player.status, .readyToPlay)
+        XCTAssertTrue(session.surface.videoLayer.isReadyForDisplay, "A queued movie must have a real decoded frame ready before a swipe")
+        XCTAssertEqual(session.player.rate, 0)
+        let item = session.player.currentItem
+        let layer = session.surface.videoLayer
+        session.attach(host, url: url, playing: true, frozen: false)
+        XCTAssertTrue(session.player.currentItem === item)
+        XCTAssertTrue(session.surface.videoLayer === layer)
+        XCTAssertFalse(session.surface.isFrozen)
+    }
+
+    @MainActor
     func testSameAlbumRebindKeepsItsItemAndOldSurfaceTeardownCannotStopTheNewOne() async throws {
         let url = try await movie()
         defer { try? FileManager.default.removeItem(at: url) }
