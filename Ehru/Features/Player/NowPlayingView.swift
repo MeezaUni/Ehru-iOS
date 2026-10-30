@@ -24,6 +24,7 @@ struct NowPlayingView: View {
     @State private var showsAudioDetails = false
     /// The neighbour cards side by side (the default each time) or stacked behind the current one.
     @State private var stacked = false
+    @GestureState private var headerPullActive = false
 
     /// How much of the lyrics card shows at the bottom of the first screen.
     private static let lyricsPeek: CGFloat = 64
@@ -50,7 +51,8 @@ struct NowPlayingView: View {
                                                   return carouselSelection(player.state)
                                               }, videos: player.coverVideos,
                                               setBusy: { player.setVisualMotion(.carousel, active: $0) },
-                                              onPull: pulled, onPullEnd: pullEnded)
+                                              onPull: pulled, onPullEnd: pullEnded,
+                                              onPullCancel: { drag.cancelGesture(reduceMotion: reduceMotion) })
                                     .frame(maxHeight: .infinity)
                                 VStack(spacing: Spacing.sm) {
                                     ProgressSection(song: song)
@@ -88,6 +90,9 @@ struct NowPlayingView: View {
                 }
             }
         }
+        .onChange(of: headerPullActive) { _, active in
+            if !active { drag.cancelGesture(reduceMotion: reduceMotion) }
+        }
         .onChange(of: drag.isMoving, initial: true) { _, active in player.setVisualMotion(.presentation, active: active) }
         .onDisappear {
             player.setVisualMotion(.presentation, active: false)
@@ -115,6 +120,7 @@ struct NowPlayingView: View {
     /// The header and the cover carousel pull the player down (Android's collapse drag).
     private var pullGesture: some Gesture {
         DragGesture(minimumDistance: 8, coordinateSpace: .global)
+            .updating($headerPullActive) { _, active, _ in active = true }
             .onChanged { pulled($0.translation.height) }
             .onEnded { pullEnded($0.translation.height, $0.predictedEndTranslation.height) }
     }

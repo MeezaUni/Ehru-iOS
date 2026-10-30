@@ -28,6 +28,13 @@ enum PlayerArtworkSpace {
 struct PlayerArtworkFrames: Equatable {
     var expanded: CGRect = .zero
     var mini: CGRect = .zero
+
+    mutating func collect(_ next: Self, isMoving: Bool, isReady: Bool) {
+        // Initial entrance needs a real source frame; an active flight must keep its endpoints.
+        guard !isMoving || !isReady else { return }
+        if next.mini.width > 0 { mini = next.mini }
+        if next.expanded.width > 0 { expanded = next.expanded }
+    }
 }
 
 struct PlayerArtworkFrameKey: PreferenceKey {
@@ -335,6 +342,10 @@ final class PlayerDragState {
     }
     func beginDismissal(reduceMotion: Bool = false, velocity: CGFloat? = nil) {
         setPresented(false, reduceMotion: reduceMotion, velocity: velocity.map { -$0 / max(travel, 1) })
+    }
+    func cancelGesture(reduceMotion: Bool = false) {
+        guard acceptsInput, dragOrigin != nil else { return }
+        restore(reduceMotion: reduceMotion)
     }
     func restore(reduceMotion: Bool = false) {
         guard wantsPresented else { return }

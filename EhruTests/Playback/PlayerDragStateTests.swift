@@ -114,4 +114,40 @@ final class PlayerDragStateTests: XCTestCase {
         drag.beginDismissal(reduceMotion: true)
     }
 
+    @MainActor
+    func testCancelledVerticalGestureRestoresThePlayerAndCannotInterruptClosing() async throws {
+        let drag = PlayerDragState()
+        drag.setPresented(true, reduceMotion: true)
+        drag.finishEntrance(reduceMotion: true)
+        drag.update(150)
+        XCTAssertTrue(drag.isCollapsing)
+        drag.cancelGesture(reduceMotion: true)
+        XCTAssertFalse(drag.isCollapsing)
+        XCTAssertEqual(drag.progress, 1)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertFalse(drag.isMoving)
+        XCTAssertTrue(drag.isPresented)
+        drag.update(150)
+        drag.beginDismissal(reduceMotion: true)
+        drag.cancelGesture(reduceMotion: true)
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertFalse(drag.isPresented)
+    }
+
+    func testFlightIgnoresScrollingEndpointsButEntranceCanMeasureItsSource() {
+        let source = CGRect(x: 50, y: 90, width: 280, height: 280)
+        let mini = CGRect(x: 20, y: 700, width: 44, height: 44)
+        var frames = PlayerArtworkFrames()
+        let initial = PlayerArtworkFrames(expanded: source, mini: mini)
+        frames.collect(initial, isMoving: true, isReady: false)
+        XCTAssertEqual(frames, initial)
+        let scrolled = PlayerArtworkFrames(expanded: source.offsetBy(dx: 0, dy: -200), mini: mini.offsetBy(dx: 60, dy: 30))
+        frames.collect(scrolled, isMoving: true, isReady: true)
+        XCTAssertEqual(frames, initial, "Scrolling must not move an active flight's source or destination")
+        frames.collect(scrolled, isMoving: false, isReady: true)
+        XCTAssertEqual(frames, scrolled)
+        frames.collect(PlayerArtworkFrames(), isMoving: false, isReady: true)
+        XCTAssertEqual(frames, scrolled, "Missing preferences must not erase a valid endpoint")
+    }
+
 }

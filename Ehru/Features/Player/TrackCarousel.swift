@@ -23,6 +23,7 @@ struct TrackCarousel: View {
     /// distance and the predicted end on release.
     var onPull: (CGFloat) -> Void = { _ in }
     var onPullEnd: (CGFloat, CGFloat) -> Void = { _, _ in }
+    var onPullCancel: () -> Void = {}
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.playerInMotion) private var playerInMotion
     @Environment(AnimatedArtworkStore.self) private var artwork
@@ -31,6 +32,7 @@ struct TrackCarousel: View {
     @State private var scene = CarouselScene()
     @State private var motion = CarouselMotion()
     @State private var horizontal: Bool?
+    @GestureState private var gestureActive = false
     @State private var videoWarmup: Task<Void, Never>?
 
     private var selection: CarouselSelection { CarouselSelection(previous: previous, current: current, next: next, previousTwo: previousTwo, nextTwo: nextTwo) }
@@ -91,7 +93,14 @@ struct TrackCarousel: View {
             motion.snap(center: scene.center, stacked: stacked)
             scene.settle()
         }
-        .onDisappear { videoWarmup?.cancel(); videoWarmup = nil; motion.cancel(); setBusy(false) }
+        .onChange(of: gestureActive) { _, active in
+            // GestureState also resets on cancellation, when onEnded is never called.
+            guard !active, let axis = horizontal else { return }
+            horizontal = nil
+            motion.endGesture()
+            if axis { settle() } else { onPullCancel() }
+        }
+        .onDisappear { horizontal = nil; videoWarmup?.cancel(); videoWarmup = nil; motion.cancel(); setBusy(false) }
     }
 
     private func card(_ item: CarouselScene.Item, metrics: CardMetrics) -> some View {
@@ -120,6 +129,7 @@ struct TrackCarousel: View {
 
     private func swipe(page: CGFloat) -> some Gesture {
         DragGesture(minimumDistance: 12, coordinateSpace: .global)
+            .updating($gestureActive) { _, active, _ in active = true }
             .onChanged { value in
                 if horizontal == nil { horizontal = abs(value.translation.width) > abs(value.translation.height) }
                 guard horizontal == true else { onPull(value.translation.height); return }

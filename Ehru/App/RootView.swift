@@ -61,8 +61,7 @@ struct RootView: View {
         .coordinateSpace(name: PlayerArtworkSpace.root)
         .onPreferenceChange(PlayerArtworkFrameKey.self) { next in
             // The expanded placeholder stays fixed while its artwork overlay flies to the mini-player.
-            if next.mini.width > 0 { artworkFrames.mini = next.mini }
-            if next.expanded.width > 0 { artworkFrames.expanded = next.expanded }
+            artworkFrames.collect(next, isMoving: playerMotion.isMoving, isReady: playerMotion.isReady)
         }
         .onChange(of: router.showsNowPlaying, initial: true) { _, shown in
             if shown && !playerMotion.isPresented { artworkFrames.expanded = .zero }
