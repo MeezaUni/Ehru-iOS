@@ -16,7 +16,9 @@ final class CarouselVideoDeck {
     }
     private(set) var slots: [String: Slot] = [:]
     private(set) var currentKey: String?
+    @ObservationIgnored private var parked: Slot?
     var currentSession: MotionVideoSession? { currentKey.flatMap { slots[$0]?.session } }
+    var residentCount: Int { slots.count + (parked == nil ? 0 : 1) }
 
     func configure(_ requests: [Request], current: String?, prepareNeighbours: Bool = true) {
         let wanted = Array(requests.prefix(3))
@@ -31,7 +33,10 @@ final class CarouselVideoDeck {
             slots[current] = old
         }
         for key in Array(slots.keys) where !keys.contains(key) {
-            slots.removeValue(forKey: key)?.session.stop()
+            guard let retired = slots.removeValue(forKey: key) else { continue }
+            retired.session.pause()
+            parked?.session.stop()
+            parked = retired
         }
         for request in wanted {
             if let old = slots[request.key], old.url == request.url { continue }
@@ -39,15 +44,27 @@ final class CarouselVideoDeck {
             // Its slot is filled at settlement, before the next gesture starts.
             guard prepareNeighbours || request.key == current else { continue }
             slots.removeValue(forKey: request.key)?.session.stop()
-            let session = MotionVideoSession()
-            session.prepare(url: request.url)
-            slots[request.key] = Slot(url: request.url, session: session)
+            if let ready = parked, ready.url == request.url {
+                // Rotate the departing neighbour into the new neighbour's slot. Swiping
+                // through one album reuses all three movies, with no new asset or decoder.
+                parked = nil
+                slots[request.key] = ready
+            } else {
+                if residentCount >= 3 { parked?.session.stop(); parked = nil }
+                let session = MotionVideoSession()
+                session.prepare(url: request.url)
+                slots[request.key] = Slot(url: request.url, session: session)
+            }
         }
         currentKey = current
+        if prepareNeighbours || !wanted.contains(where: { slots[$0.key] == nil && $0.url == parked?.url }) {
+            parked?.session.stop(); parked = nil
+        }
     }
 
     /// Keep the current frame warm for reopening; hidden neighbour decoders are released.
     func retainCurrent() {
+        parked?.session.stop(); parked = nil
         for key in Array(slots.keys) {
             if key == currentKey { slots[key]?.session.pause() }
             else { slots.removeValue(forKey: key)?.session.stop() }
