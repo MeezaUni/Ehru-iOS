@@ -28,6 +28,46 @@ final class TransitionEditingTests: XCTestCase {
         TransitionEditing.curveOf(spec, role).points
     }
 
+    func testPlotActivationEntersCustomFromOffOrDefaultAndIsOneUndoableEdit() {
+        let pair = studioPairs(playlist, tracks: [t1, t2], config: TransitionConfig())[0]
+        for choice in [TransitionChoice.inherit, .off] {
+            var cfg = TransitionConfig()
+            cfg.pairs[pair.key] = choice
+            var draft = EditorDraft.open(.pair(pair), config: cfg)
+            XCTAssertNil(draft.shown)
+            draft.activateCurveEditing()
+            XCTAssertEqual(draft.selectedCard, .preset(.custom))
+            XCTAssertEqual(draft.spec.curve, .custom)
+            XCTAssertNotNil(draft.shown)
+            XCTAssertTrue(draft.isDirty)
+            XCTAssertEqual(draft.undo.count, 1)
+            let activated = draft
+            draft.activateCurveEditing()
+            XCTAssertEqual(draft, activated)
+            draft.undoLast()
+            XCTAssertEqual(draft.choice, choice)
+            XCTAssertFalse(draft.isDirty)
+        }
+    }
+
+    func testPlotActivationPreservesInheritedEQFiltersAndSourceCues() {
+        var inherited = TransitionSpec.preset(.blend)
+        inherited.durationMs = 4000
+        inherited.outgoingCutMs = 3000
+        inherited.incomingStartMs = 6000
+        var cfg = TransitionConfig()
+        cfg.global.defaultChoice = .custom(inherited)
+        let pair = studioPairs(playlist, tracks: [t1, t2], config: cfg)[0]
+        var draft = EditorDraft.open(.pair(pair), config: cfg)
+        draft.activateCurveEditing()
+        XCTAssertEqual(draft.selectedCard, .preset(.custom))
+        XCTAssertEqual(draft.spec.bassSwap, inherited.bassSwap)
+        XCTAssertEqual(draft.spec.filter, inherited.filter)
+        XCTAssertEqual(draft.spec.outgoingCutMs, 3000)
+        XCTAssertEqual(draft.spec.incomingStartMs, 6000)
+        XCTAssertEqual(draft.spec.durationMs, 4000)
+    }
+
     func testPairsFollowTheOrderAndSettingsStayWithTheirExactPair() {
         let cfg = config([key(t1, t2): .custom(rise), key(t2, t3): .off])
         let pairs = studioPairs(playlist, tracks: [t1, t2, t3], config: cfg)

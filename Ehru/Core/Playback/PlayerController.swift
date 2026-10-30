@@ -16,6 +16,8 @@ final class PlayerController {
     let clock = PlaybackClock()
 
     @ObservationIgnored let engine = AudioEngine()
+    /// Empty until video is actually shown; survives expanded-player view reconstruction.
+    @ObservationIgnored let coverVideoSession = MotionVideoSession()
     @ObservationIgnored private let database: LibraryDatabase
     @ObservationIgnored let transitions: TransitionSettingsStore
     @ObservationIgnored private let persistence = JSONStore<PersistedPlaybackState>(name: "playback.json", debounce: .milliseconds(250))

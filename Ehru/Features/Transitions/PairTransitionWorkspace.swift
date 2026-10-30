@@ -7,6 +7,8 @@ struct PairTransitionWorkspace: View {
     let spec: TransitionSpec
     let transitionEnabled: Bool
     @Binding var editingVolume: Bool
+    let customMode: Bool
+    let activateCustom: () -> Void
     let beginDrag: () -> Void
     let drag: ((TransitionSpec) -> TransitionSpec) -> Void
     let edit: ((TransitionSpec) -> TransitionSpec) -> Void
@@ -274,6 +276,7 @@ struct PairTransitionWorkspace: View {
                 .overlay { waveformInteraction(timing, size: geometry.size) }
                 .simultaneousGesture(magnification(timing))
                 .overlay { TransitionPreviewPlayhead(preview: preview, viewport: viewport(timing)) }
+                .accessibilityAction(named: "Customize transition") { activateCustom() }
                 .accessibilityAction(named: "Move outgoing cue earlier") { nudge(.outgoing, delta: 100) }
                 .accessibilityAction(named: "Move outgoing cue later") { nudge(.outgoing, delta: -100) }
                 .accessibilityAction(named: "Move incoming cue earlier") { nudge(.incoming, delta: 100) }
@@ -319,10 +322,19 @@ struct PairTransitionWorkspace: View {
                 if result != spec { edit { _ in result } }
             } else { finishCueDrag(gesture) }
         }, cancel: cancelCueDrag, tap: { location in
-            guard transitionEnabled else { return }
+            let entering = !customMode || !editingVolume
+            activateCustom()
             let layout = curveLayout(timing, size)
+            if !transitionEnabled {
+                selectedLine = .volume(layout.role(at: location))
+                selectedHandle = nil
+                return
+            }
             if let line = layout.nearestLine(location, spec: spec, showsEQ: showsEQ, showsFilter: showsFilter, selected: selectedLine) {
                 selectLine(line, at: location, timing: timing, size: size)
+            } else if entering {
+                selectedLine = .volume(layout.role(at: location))
+                selectedHandle = nil
             } else if editingVolume && isEditingGain { selectOrAddPoint(location, size: size, timing: timing) }
             else { inspectedMs = viewport(timing).time(at: Double(location.x / max(size.width, 1))) }
         }, touchDown: { location in

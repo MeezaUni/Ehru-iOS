@@ -11,7 +11,7 @@ struct NowPlayingView: View {
     @Environment(AppRouter.self) private var router
     @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
-    @State private var videoSession = MotionVideoSession()
+    private var videoSession: MotionVideoSession { player.coverVideoSession }
     @Environment(\.playerArtworkFrames) private var artworkFrames
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var artworkTarget: ArtworkTarget?
@@ -30,6 +30,7 @@ struct NowPlayingView: View {
 
     var body: some View {
         let state = player.state
+        let neighborhood = carouselSelection(state)
         VStack(spacing: 0) {
             header.modifier(PlayerChromeFade())
             if let current = state.currentSong {
@@ -42,11 +43,11 @@ struct NowPlayingView: View {
                         VStack(spacing: 0) {
                             VStack(spacing: Spacing.md) {
                                 TrackCarousel(stacked: stacked, previous: previousEntry(state), current: state.currentEntry,
-                                              next: nextEntry(state), currentSong: song, isPlaying: state.isPlaying,
+                                              next: nextEntry(state), previousTwo: neighborhood.previousTwo, nextTwo: neighborhood.nextTwo,
+                                              currentSong: song, isPlaying: state.isPlaying,
                                               skip: { direction in
                                                   if direction > 0 { player.skipNext() } else { player.skipToPreviousItem() }
-                                                  let current = player.state
-                                                  return CarouselSelection(previous: previousEntry(current), current: current.currentEntry, next: nextEntry(current))
+                                                  return carouselSelection(player.state)
                                               }, videoSession: videoSession,
                                               setBusy: { player.setVisualMotion(.carousel, active: $0) },
                                               onPull: pulled, onPullEnd: pullEnded)
@@ -92,7 +93,7 @@ struct NowPlayingView: View {
         .onDisappear {
             player.setVisualMotion(.presentation, active: false)
             player.setVisualMotion(.carousel, active: false)
-            videoSession.stop()
+            videoSession.pause()
         }
         .background(backdrop(state.currentSong).ignoresSafeArea().modifier(PlayerBackdropFade(drag: drag)))
         .contentShape(Rectangle())
@@ -140,6 +141,17 @@ struct NowPlayingView: View {
 
     private func nextEntry(_ state: PlaybackState) -> QueueEntry? {
         PlayOrder.next(after: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode, userSkip: true).map { state.queue[$0] }
+    }
+
+    private func carouselSelection(_ state: PlaybackState) -> CarouselSelection {
+        guard state.currentEntry != nil else { return CarouselSelection(previous: nil, current: nil, next: nil) }
+        let previous = PlayOrder.previous(before: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode)
+        let next = PlayOrder.next(after: state.currentIndex, count: state.queue.count, repeatMode: state.repeatMode, userSkip: true)
+        let previousTwo = previous.flatMap { PlayOrder.previous(before: $0, count: state.queue.count, repeatMode: state.repeatMode) }
+        let nextTwo = next.flatMap { PlayOrder.next(after: $0, count: state.queue.count, repeatMode: state.repeatMode, userSkip: true) }
+        return CarouselSelection(previous: previous.map { state.queue[$0] }, current: state.currentEntry,
+                                 next: next.map { state.queue[$0] }, previousTwo: previousTwo.map { state.queue[$0] },
+                                 nextTwo: nextTwo.map { state.queue[$0] })
     }
 
     /// Previous restarts the song after a few seconds; otherwise both buttons slide the carousel

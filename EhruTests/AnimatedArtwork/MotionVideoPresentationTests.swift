@@ -5,6 +5,17 @@ import XCTest
 
 final class MotionVideoPresentationTests: XCTestCase {
     @MainActor
+    func testUnusedVideoSessionsDoNotConstructNativePlayersOrLayers() {
+        for _ in 0..<20 {
+            let session = MotionVideoSession()
+            session.pause()
+            session.stop()
+            XCTAssertFalse(session.hasResidentPlayer)
+            XCTAssertFalse(session.hasResidentSurface)
+        }
+    }
+
+    @MainActor
     func testVideoBoundsDoNotLagBehindContainerWithAnImplicitResizeAnimation() {
         let surface = MotionVideoSurface(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
         surface.layoutIfNeeded()

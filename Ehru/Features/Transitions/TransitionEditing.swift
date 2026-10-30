@@ -335,6 +335,13 @@ struct EditorDraft: Equatable, Identifiable {
         }
     }
 
+    /// Direct plot interaction and the Custom button share one idempotent activation.
+    /// Starting from Auto preserves its inherited automation, EQ, filter and source cues.
+    mutating func activateCurveEditing() {
+        guard mode != .custom || spec.preset != .custom || spec.curve != .custom else { return }
+        edit { TransitionEditing.setCurve($0, .custom) }
+    }
+
     /// One discrete edit (a tap, or the end of a drag), recorded for undo; it makes the level custom.
     mutating func edit(_ transform: (TransitionSpec) -> TransitionSpec) {
         record { draft in

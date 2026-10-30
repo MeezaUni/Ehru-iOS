@@ -11,6 +11,8 @@ struct TrackCarousel: View {
     let previous: QueueEntry?
     let current: QueueEntry?
     let next: QueueEntry?
+    var previousTwo: QueueEntry? = nil
+    var nextTwo: QueueEntry? = nil
     /// The playing song as the player has it now (its favourite state may be newer than the entry's).
     let currentSong: Song
     let isPlaying: Bool
@@ -25,68 +27,44 @@ struct TrackCarousel: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.playerInMotion) private var playerInMotion
     @State private var scene = CarouselScene()
-    @State private var focus: CGFloat = 0
-    @State private var dragStart: CGFloat?
+    @State private var motion = CarouselMotion()
     @State private var horizontal: Bool?
-    @State private var moving = false
-    @State private var stackAmount: CGFloat = 0
-    @State private var frontOrdinal = 0
     @State private var videoKey: String?
-    @State private var generation = UUID()
-    @State private var meter = CarouselPresentationMeter()
 
-    private static let settle = Animation.smooth(duration: 0.3)
-    private var selection: CarouselSelection { CarouselSelection(previous: previous, current: current, next: next) }
+    private var selection: CarouselSelection { CarouselSelection(previous: previous, current: current, next: next, previousTwo: previousTwo, nextTwo: nextTwo) }
 
     var body: some View {
         GeometryReader { geometry in
             let metrics = CardMetrics(geometry.size)
             let page = CarouselPose.page(width: metrics.cardWidth)
-            CarouselStrip(items: scene.items, focus: focus, frontOrdinal: frontOrdinal, stack: stackAmount,
+            CarouselStrip(items: scene.items, focus: motion.focus, frontOrdinal: motion.frontOrdinal, stack: motion.stack,
                           viewport: geometry.size,
                           cardSize: CGSize(width: metrics.cardWidth, height: metrics.artSide + metrics.metadataHeight + CardMetrics.padding * 2),
-                          hideLeft: next != nil, reduceMotion: reduceMotion, meter: meter) { item in
+                          hideLeft: next != nil, reduceMotion: reduceMotion, meter: motion.meter) { item in
                 card(item, metrics: metrics)
             }
             .contentShape(Rectangle())
             .highPriorityGesture(swipe(page: page))
         }
-        .onAppear {
-            meter.observeNearest { nearest in
-                DispatchQueue.main.async {
-                    guard Int(meter.read(fallback: focus).rounded()) == nearest else { return }
-                    var instant = Transaction(); instant.disablesAnimations = true
-                    withTransaction(instant) { frontOrdinal = nearest }
-                }
-            }
-        }
-        .onChange(of: moving, initial: true) { _, active in setBusy(active) }
+        .onChange(of: motion.moving, initial: true) { _, active in setBusy(active) }
         .onChange(of: selection, initial: true) { _, next in selectionChanged(next) }
-        .onChange(of: stacked) { _, stack in
-            if !moving { withAnimation(Self.settle) { stackAmount = stack ? 1 : 0 } }
-        }
+        .onChange(of: stacked) { _, _ in settle() }
         .onChange(of: playerInMotion) { _, active in
-            guard active, moving else { return }
-            generation = UUID()
-            var instant = Transaction(); instant.disablesAnimations = true
-            withTransaction(instant) {
-                focus = CGFloat(scene.center)
-                frontOrdinal = scene.center
-                scene.settle()
-                moving = false
-                videoKey = scene.currentKey
-            }
+            guard active, motion.moving else { return }
+            motion.snap(center: scene.center, stacked: stacked)
+            scene.settle()
+            videoKey = scene.currentKey
         }
-        .onDisappear { generation = UUID(); meter.observeNearest(nil); setBusy(false) }
+        .onDisappear { motion.cancel(); setBusy(false) }
     }
 
     private func card(_ item: CarouselScene.Item, metrics: CardMetrics) -> some View {
-        let distance = CGFloat(item.ordinal) - focus
+        let distance = CGFloat(item.ordinal) - motion.focus
         let isCurrent = item.id == scene.currentKey
         let song = isCurrent && currentSong.id == item.entry.song.id ? currentSong : item.entry.song
         return CarouselCard(song: song, isCurrent: isCurrent, isPlaying: isCurrent && isPlaying,
-                            rendersMotion: item.id == videoKey, motionSuspended: moving,
-                            reportsArtworkFrame: isCurrent && !moving,
+                            rendersMotion: item.id == videoKey, motionSuspended: motion.moving,
+                            reportsArtworkFrame: isCurrent && !motion.moving,
                             videoSession: videoSession, distance: distance, metrics: metrics)
             .modifier(PlayerNeighbourFade(isCurrent: isCurrent))
             .transition(.opacity)
@@ -102,31 +80,17 @@ struct TrackCarousel: View {
             .onChanged { value in
                 if horizontal == nil { horizontal = abs(value.translation.width) > abs(value.translation.height) }
                 guard horizontal == true else { onPull(value.translation.height); return }
-                if dragStart == nil {
-                    generation = UUID()
-                    dragStart = meter.read(fallback: focus)
-                    moving = true
-                    videoSession.pause()
-                }
-                let base = dragStart ?? focus
-                let target = base - value.translation.width / max(page, 1)
-                var instant = Transaction(); instant.disablesAnimations = true
-                withTransaction(instant) {
-                    stackAmount = 0
-                    focus = CarouselDragLimit.focus(target, center: scene.center, canPrevious: selection.canMove(-1), canNext: selection.canMove(1))
-                    frontOrdinal = Int(focus.rounded())
-                }
+                if !motion.moving { videoSession.pause() }
+                motion.drag(translation: value.translation.width, page: page, center: scene.center,
+                            canPrevious: selection.canMove(-1), canNext: selection.canMove(1))
             }
             .onEnded { value in
-                defer { horizontal = nil; dragStart = nil }
+                defer { horizontal = nil; motion.endGesture() }
                 guard horizontal == true else { onPullEnd(value.translation.height, value.predictedEndTranslation.height); return }
-                let displacement = focus - CGFloat(scene.center)
-                let projection = value.predictedEndTranslation.width - value.translation.width
-                let wanted = abs(projection) > 180 ? (projection < 0 ? 1 : -1)
-                    : abs(displacement) > 0.25 ? (displacement > 0 ? 1 : -1) : 0
-                let allowed = selection.canMove(wanted)
-                if allowed { commitSwipe(wanted) }
-                else { settle(on: CGFloat(scene.center)) }
+                let wanted = CarouselSwipeIntent.direction(translation: value.translation.width,
+                                                           predicted: value.predictedEndTranslation.width, page: page)
+                if selection.canMove(wanted) { commitSwipe(wanted) }
+                else { settle() }
             }
     }
 
@@ -134,63 +98,37 @@ struct TrackCarousel: View {
         guard next != scene.selection else { return }
         let previousID = scene.selection.current?.id
         let adjacent = scene.select(next, preferredDirection: preferredDirection)
-        if previousID == next.current?.id && moving { return }
+        if previousID == next.current?.id && motion.moving { return }
         if previousID != next.current?.id, adjacent {
-            moving = true
             videoSession.pause()
-            stackAmount = 0
-            if abs(meter.read(fallback: focus) - CGFloat(scene.center)) < 0.001 {
-                generation = UUID()
-                finishSettlement()
-            } else { settle(on: CGFloat(scene.center)) }
+            settle()
         } else {
-            generation = UUID()
-            var instant = Transaction(); instant.disablesAnimations = true
-            withTransaction(instant) {
-                focus = CGFloat(scene.center)
-                frontOrdinal = scene.center
-                scene.settle()
-                moving = false
-                stackAmount = stacked ? 1 : 0
-                videoKey = scene.currentKey
-            }
+            motion.snap(center: scene.center, stacked: stacked)
+            scene.settle()
+            videoKey = scene.currentKey
         }
     }
 
     /// Commit the real queue immediately so card title, index, duration and audio stay together.
     /// Transport defers non-audio side effects while the compositor settles the strip.
     private func commitSwipe(_ direction: Int) {
-        guard !playerInMotion, selection.canMove(direction) else { settle(on: CGFloat(scene.center)); return }
-        moving = true
+        guard !playerInMotion, selection.canMove(direction) else { settle(); return }
+        motion.hold()
         setBusy(true)
         videoSession.pause()
         let before = scene.selection.current?.id
         let result = skip(direction)
         selectionChanged(result, preferredDirection: direction)
-        if result.current?.id == before { settle(on: CGFloat(scene.center)) }
+        if result.current?.id == before { settle() }
     }
 
-    private func settle(on target: CGFloat) {
-        let token = UUID(); generation = token
-        moving = true
-        withAnimation(reduceMotion ? .easeOut(duration: 0.18) : Self.settle, completionCriteria: .removed) {
-            focus = target
-        } completion: {
-            guard generation == token else { return }
-            finishSettlement()
-        }
-    }
-
-    private func finishSettlement() {
-        var instant = Transaction(); instant.disablesAnimations = true
-        withTransaction(instant) {
+    private func settle() {
+        motion.settle(center: scene.center, stacked: stacked, reduceMotion: reduceMotion) {
             scene.settle()
-            frontOrdinal = scene.center
-            moving = false
             videoKey = scene.currentKey
         }
-        if stacked { withAnimation(Self.settle) { stackAmount = 1 } }
     }
+
 }
 
 /// The card's size in the room it is given (Android's CarouselCard): the artwork as large as the
@@ -233,7 +171,7 @@ struct DepthCard: GeometryEffect {
         return ProjectionTransform(CGAffineTransform(translationX: -size.width / 2, y: -size.height / 2))
             .concatenating(ProjectionTransform(rotation))
             .concatenating(ProjectionTransform(CGAffineTransform(scaleX: pose.scale, y: pose.scale)))
-            .concatenating(ProjectionTransform(CGAffineTransform(translationX: size.width / 2 + pose.x, y: size.height / 2)))
+            .concatenating(ProjectionTransform(CGAffineTransform(translationX: size.width / 2 + pose.x, y: size.height / 2 + pose.y)))
     }
 }
 
@@ -264,7 +202,7 @@ private struct CarouselCard: View {
                 .frame(width: metrics.artSide, height: metrics.artSide)
                 .background { if reportsArtworkFrame { Color.clear.playerArtworkFrame(expanded: true) } }
                 .overlay {
-                    MotionCoverView(song: song, playing: isCurrent && isPlaying, rendersVideo: rendersMotion && !artworkInFlight, animateStill: false,
+                    MotionCoverView(song: song, playing: isCurrent && isPlaying, rendersVideo: rendersMotion && !artworkInFlight, maxPixels: isCurrent ? 1200 : 600, animateStill: false,
                                     suspended: motionSuspended, videoSession: videoSession)
                         .frame(width: metrics.artSide, height: metrics.artSide)
                         .modifier(PlayerArtworkClip(isCurrent: isCurrent, side: metrics.artSide))

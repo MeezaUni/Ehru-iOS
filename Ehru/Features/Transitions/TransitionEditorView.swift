@@ -49,8 +49,13 @@ struct TransitionEditorView: View {
         VStack(alignment: .leading, spacing: Spacing.md) {
             PairTransitionWorkspace(pair: pair, spec: current.shown ?? current.editBase,
                                     transitionEnabled: current.shown != nil, editingVolume: $pairEditingVolume,
+                                    customMode: current.mode == .custom && current.spec.preset == .custom && current.spec.curve == .custom,
+                                    activateCustom: { draft?.activateCurveEditing(); pairEditingVolume = true },
                                     beginDrag: { draft?.beginDrag() }, drag: { draft?.drag($0) }, edit: { draft?.edit($0) })
-            PresetCards(current: current, compact: true) { draft?.choose($0) }
+            PresetCards(current: current, compact: true) { choice in
+                if choice == .preset(.custom) { draft?.activateCurveEditing(); pairEditingVolume = true }
+                else { draft?.choose(choice) }
+            }
             Text(statusLine(current)).font(.caption2).foregroundStyle(palette.onSurfaceVariant)
             settingsRows(current)
             if !transitions.config.global.masterEnabled {
@@ -372,7 +377,7 @@ private struct PresetCards: View {
     private func presetButton(_ card: Card) -> some View {
         let selected = current.selectedCard == card.choice
         return Button {
-            if card.choice != .preset(.custom) || !selected { onChoose(card.choice) }
+            onChoose(card.choice)
         } label: {
             HStack(spacing: Spacing.xs) {
                 if card.choice == .auto { Image(systemName: "sparkles").font(.caption) }

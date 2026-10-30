@@ -1,0 +1,82 @@
+import Observation
+import SwiftUI
+
+/// One finite animation for position and layout. Rendering only samples this state; it never
+/// dispatches a state change back into the animation that is currently being rendered.
+@MainActor
+@Observable
+final class CarouselMotion {
+    private(set) var focus: CGFloat = 0
+    private(set) var stack: CGFloat = 0
+    private(set) var frontOrdinal = 0
+    private(set) var moving = false
+    @ObservationIgnored let meter = CarouselPresentationMeter()
+    @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var origin: CarouselPresentationSample?
+
+    static let duration: TimeInterval = 0.28
+
+    func hold() {
+        generation = UUID()
+        moving = true
+    }
+
+    func drag(translation: CGFloat, page: CGFloat, center: Int, canPrevious: Bool, canNext: Bool) {
+        guard translation.isFinite, page.isFinite, page > 0 else { return }
+        if origin == nil {
+            hold()
+            origin = meter.sample(fallback: CarouselPresentationSample(focus: focus, stack: stack))
+        }
+        guard let origin else { return }
+        let distance = -translation / page
+        var instant = Transaction(); instant.disablesAnimations = true
+        withTransaction(instant) {
+            focus = CarouselDragLimit.focus(origin.focus + distance, center: center, canPrevious: canPrevious, canNext: canNext)
+            // Unfold proportionally to the finger instead of teleporting to the spread layout.
+            stack = max(origin.stack - abs(distance) * 2, 0)
+            frontOrdinal = Int(focus.rounded())
+        }
+    }
+
+    func settle(center: Int, stacked: Bool, reduceMotion: Bool, completion: @escaping () -> Void = {}) {
+        origin = nil
+        let token = UUID(); generation = token
+        moving = true
+        let animation = Animation.timingCurve(0.22, 0.8, 0.25, 1, duration: reduceMotion ? 0.16 : Self.duration)
+        withAnimation(animation, completionCriteria: .logicallyComplete) {
+            focus = CGFloat(center)
+            stack = stacked ? 1 : 0
+            frontOrdinal = center
+        } completion: { [weak self] in
+            guard let self, self.generation == token else { return }
+            self.moving = false
+            completion()
+        }
+    }
+
+    func snap(center: Int, stacked: Bool) {
+        cancel()
+        var instant = Transaction(); instant.disablesAnimations = true
+        withTransaction(instant) {
+            focus = CGFloat(center)
+            stack = stacked ? 1 : 0
+            frontOrdinal = center
+            moving = false
+        }
+        meter.record(focus, stack: stack)
+    }
+
+    func endGesture() { origin = nil }
+    func cancel() { generation = UUID(); origin = nil; moving = false }
+}
+
+enum CarouselSwipeIntent {
+    /// The gesture's own travel determines direction, even when it interrupts a previous slide.
+    static func direction(translation: CGFloat, predicted: CGFloat, page: CGFloat) -> Int {
+        guard translation.isFinite, predicted.isFinite, page.isFinite, page > 0 else { return 0 }
+        let projected = predicted - translation
+        if abs(projected) > 180 { return projected < 0 ? 1 : -1 }
+        guard abs(translation) > page * 0.25 else { return 0 }
+        return translation < 0 ? 1 : -1
+    }
+}

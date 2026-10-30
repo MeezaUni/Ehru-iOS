@@ -5,6 +5,8 @@ struct CarouselSelection: Equatable {
     let previous: QueueEntry?
     let current: QueueEntry?
     let next: QueueEntry?
+    var previousTwo: QueueEntry? = nil
+    var nextTwo: QueueEntry? = nil
 
     func canMove(_ direction: Int) -> Bool {
         guard let current else { return false }
@@ -53,38 +55,37 @@ struct CarouselScene {
     private var targetItems: [Item] {
         guard let current = selection.current else { return [] }
         var result: [Item] = []
+        if let previous = selection.previousTwo { result.append(Item(ordinal: center - 2, entry: previous)) }
         if let previous = selection.previous { result.append(Item(ordinal: center - 1, entry: previous)) }
         result.append(Item(ordinal: center, entry: current))
         if let next = selection.next { result.append(Item(ordinal: center + 1, entry: next)) }
+        if let next = selection.nextTwo { result.append(Item(ordinal: center + 2, entry: next)) }
         return result
     }
 }
 
 /// A compositor sample, not published view state. A new touch can pick up a settling strip
 /// at its visible position instead of jumping to the previous animation's target.
+struct CarouselPresentationSample: Equatable {
+    let focus: CGFloat
+    let stack: CGFloat
+}
+
 final class CarouselPresentationMeter: @unchecked Sendable {
     private let lock = NSLock()
-    private var value: CGFloat?
-    private var nearest: Int?
-    private var observer: ((Int) -> Void)?
+    private var value: CarouselPresentationSample?
 
-    func observeNearest(_ observer: ((Int) -> Void)?) { lock.withLock { self.observer = observer } }
-    func record(_ focus: CGFloat) {
-        let callback: ((Int) -> Void)? = lock.withLock {
-            value = focus
-            let next = Int(focus.rounded())
-            guard next != nearest else { return nil }
-            nearest = next
-            return observer
-        }
-        callback?(Int(focus.rounded()))
+    func record(_ focus: CGFloat, stack: CGFloat = 0) {
+        lock.withLock { value = CarouselPresentationSample(focus: focus, stack: stack) }
     }
-    func read(fallback: CGFloat) -> CGFloat { lock.withLock { value ?? fallback } }
+    func read(fallback: CGFloat) -> CGFloat { lock.withLock { value?.focus ?? fallback } }
+    func sample(fallback: CarouselPresentationSample) -> CarouselPresentationSample { lock.withLock { value ?? fallback } }
 }
 
 struct CarouselPose {
     let scale: CGFloat
     let x: CGFloat
+    let y: CGFloat
     let turn: Double
     let opacity: Double
 
@@ -94,8 +95,9 @@ struct CarouselPose {
     init(distance: CGFloat, width: CGFloat, stack: CGFloat, hideLeft: Bool, reduceMotion: Bool) {
         let away = abs(distance), near = min(abs(distance), 1)
         let sideScale: CGFloat = reduceMotion ? 0.86 : 0.78
-        scale = (1 - (1 - sideScale) * near) * (1 - stack) + (1 + 0.06 * near) * stack
-        x = distance * Self.page(width: width) * (1 - stack)
+        scale = (1 - (1 - sideScale) * near) * (1 - stack) + (1 - 0.06 * near) * stack
+        x = distance * (Self.page(width: width) * (1 - stack) + 12 * stack)
+        y = -20 * near * stack
         turn = reduceMotion ? 0 : -Double(distance.clamped(-1, 1)) * 32 * Double(1 - stack)
         let vanish = (1 - max(away - 1, 0) / 0.6).clamped(0, 1)
         let gathered = hideLeft ? min(stack * min(max(-distance, 0), 1) * 1.5, 1) : 0
@@ -107,19 +109,20 @@ struct CarouselPose {
 /// with their own target while their opacity transition is being installed.
 struct CarouselFocusProbe: GeometryEffect {
     var focus: CGFloat
+    var stack: CGFloat = 0
     let meter: CarouselPresentationMeter
-    var animatableData: CGFloat {
-        get { focus }
-        set { focus = newValue }
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(focus, stack) }
+        set { focus = newValue.first; stack = newValue.second }
     }
     func effectValue(size: CGSize) -> ProjectionTransform {
-        meter.record(focus)
+        meter.record(focus, stack: stack)
         return ProjectionTransform(CGAffineTransform.identity)
     }
 }
 
 /// The transforms animate natively; the z-index remains a direct trait of each ZStack child.
-/// Only crossing a page midpoint updates frontOrdinal, rather than rebuilding cards each frame.
+/// Depth changes only with direct input or a new destination; sampling never mutates view state.
 struct CarouselStrip<Card: View>: View {
     let items: [CarouselScene.Item]
     let focus: CGFloat
@@ -145,7 +148,7 @@ struct CarouselStrip<Card: View>: View {
                     .zIndex(CarouselPose.depth(distance: CGFloat(item.ordinal - frontOrdinal)))
             }
             Color.clear.frame(width: 1, height: 1)
-                .modifier(CarouselFocusProbe(focus: focus, meter: meter))
+                .modifier(CarouselFocusProbe(focus: focus, stack: stack, meter: meter))
                 .allowsHitTesting(false).accessibilityHidden(true)
         }
         .frame(width: viewport.width, height: viewport.height)

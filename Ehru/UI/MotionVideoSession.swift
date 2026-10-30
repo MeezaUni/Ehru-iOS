@@ -2,26 +2,38 @@ import AVFoundation
 import CoreImage
 import UIKit
 
-/// One resident decoder for a carousel. Rebinding the same album keeps its buffer and position;
+/// One lazy, resident decoder owned by playback. Rebinding the same album keeps its buffer and position;
 /// an old view's teardown cannot stop the layer that has just taken ownership.
 @MainActor
 final class MotionVideoSession {
-    let player = AVQueuePlayer()
+    private var residentPlayer: AVQueuePlayer?
+    private var residentSurface: MotionVideoSurface?
+    var hasResidentPlayer: Bool { residentPlayer != nil }
+    var hasResidentSurface: Bool { residentSurface != nil }
+
+    var player: AVQueuePlayer {
+        if let residentPlayer { return residentPlayer }
+        let player = AVQueuePlayer()
+        player.isMuted = true
+        player.volume = 0
+        player.preventsDisplaySleepDuringVideoPlayback = false
+        player.audiovisualBackgroundPlaybackPolicy = .pauses
+        residentPlayer = player
+        return player
+    }
     private var looper: AVPlayerLooper?
     private(set) var url: URL?
-    let surface = MotionVideoSurface(frame: .zero)
+    var surface: MotionVideoSurface {
+        if let residentSurface { return residentSurface }
+        let surface = MotionVideoSurface(frame: .zero)
+        residentSurface = surface
+        return surface
+    }
     private weak var host: MotionVideoHost?
     private var readiness: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
     private weak var outputItem: AVPlayerItem?
     private var output: AVPlayerItemVideoOutput?
-
-    init() {
-        player.isMuted = true
-        player.volume = 0
-        player.preventsDisplaySleepDuringVideoPlayback = false
-        player.audiovisualBackgroundPlaybackPolicy = .pauses
-    }
 
     func attach(_ next: MotionVideoHost, url: URL, playing: Bool, frozen: Bool) {
         if self.url != url {
@@ -58,6 +70,7 @@ final class MotionVideoSession {
     }
 
     private func bindOutput() {
+        guard let player = residentPlayer else { return }
         guard outputItem !== player.currentItem else { return }
         if let output, let outputItem { outputItem.remove(output) }
         output = nil
@@ -74,26 +87,26 @@ final class MotionVideoSession {
 
     func detach(_ old: MotionVideoHost) {
         guard host === old else { return }
-        player.pause()
-        surface.removeFromSuperview()
+        residentPlayer?.pause()
+        residentSurface?.removeFromSuperview()
         host = nil
         // Keep the same decoded layer/frame for a card <-> flight-overlay reparent.
     }
 
-    func pause() { player.pause() }
+    func pause() { residentPlayer?.pause() }
 
     func stop() {
-        player.pause()
+        residentPlayer?.pause()
         readiness = nil
         itemObservation = nil
         if let output, let outputItem { outputItem.remove(output) }
         output = nil; outputItem = nil
-        surface.videoLayer.player = nil
-        surface.removeFromSuperview()
-        surface.reset()
+        residentSurface?.videoLayer.player = nil
+        residentSurface?.removeFromSuperview()
+        residentSurface?.reset()
         host = nil
         looper?.disableLooping(); looper = nil
-        player.removeAllItems()
+        residentPlayer?.removeAllItems()
         url = nil
     }
 }

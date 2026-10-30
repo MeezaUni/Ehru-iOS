@@ -53,10 +53,10 @@ a later main-loop turn. Shared cards keep their loaded artwork and identity when
 Departing cards are retained through settlement and then pruned, with at most seven nearby
 occurrences even during repeatedly interrupted swipes. A compositor meter lets a rapid
 new touch pick up the visible interpolated position. Generation tokens discard stale completions.
-Cover Flow spacing leaves a visible previous/next preview at both edges. The nearest card
-draws in front: z-index is a direct trait on each ZStack child, outside the transform. A
-compositor probe publishes only nearest-page midpoint crossings, rather than rebuilding the
-card subtree every frame. DepthCard geometry animates natively. Stack mode gathers neighbours
+Cover Flow spacing leaves a visible previous/next preview at both edges. Z-index is a direct trait on each ZStack child, outside its transform. Finger movement chooses
+the nearest card while dragging; a released slide keeps the destination in front. The compositor
+probe only records position and stack amount for an interrupted gesture. It never publishes
+view state from rendering or interrupts the native animation with a midpoint callback. Stack mode gathers neighbours
 only at rest. Expanded artwork geometry is not republished on every horizontal frame.
 
 Playback opens up to two adjacent file headers at user-initiated priority off the main thread.
@@ -89,3 +89,30 @@ rendered preview visibility and cursor height, artwork escaping a clipped viewpo
 cache painting, interrupted focus, implicit-layer-resize suppression, real-pixel frame freezing and cancellation,
 same-asset session reuse, stale-host teardown, and bounded single-use file preparation/invalidation.
 Device video compositing and frame pacing still require verification on an iPhone.
+
+## Finite motion and decoder lifetime
+
+CarouselMotion owns one 280 ms cubic animation for both position and stack layout. A stacked
+drag unfolds in proportion to the finger; it never switches layouts instantly at touch-down.
+Release restores the chosen layout within that same animation. Stacked neighbours are smaller
+and slightly raised behind the current card. Mid-slide retouch reads both presented values;
+gesture direction comes from finger travel, independently of the previous slide's destination.
+Generation guards prevent an interrupted completion from pruning the active scene or clearing
+its movement flag. Mode toggles retarget the same motion owner.
+
+Opening/dismissal uses a finite 300 ms cubic curve and logical completion, so chrome and input
+are released without waiting for a spring's physical settling tail. The playback controller owns
+one lazy MotionVideoSession. Constructing or reconstructing a SwiftUI view does not create an
+AVQueuePlayer or AVPlayerLayer. Close/background pauses the existing session and re-opening the
+same album reuses it. A cold animated asset is attached after entrance finishes; already-ready
+video can accompany the cover flight. Non-animated covers never create a native video player.
+
+CI hosts the actual motion state in a UIWindow and checks intermediate frames, prompt completion,
+mode changes, interrupted gestures and reopening. It also verifies lazy native allocation and
+Custom activation from inherited/off settings, including undo and preservation of EQ/filter/cues.
+These checks do not establish a physical-device frame rate.
+
+The strip mounts two neighbours in each direction, so a second quick swipe reuses an already
+positioned cover instead of inserting a new card directly at its destination mid-animation.
+Playback-order helpers supply these neighbours, including repeat wraparound. Retention remains
+bounded to seven occurrences; side covers request 600 px and the current cover refines to 1200 px.

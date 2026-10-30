@@ -27,6 +27,25 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertEqual(scene.items.map(\.entry.id), [a.id, b.id, c.id])
     }
 
+    func testRapidSecondSwipeAlreadyHasItsCoverMountedBeforeTheFirstSettles() throws {
+        let a = QueueEntry(song: testSong(1)), b = QueueEntry(song: testSong(2))
+        let c = QueueEntry(song: testSong(3)), d = QueueEntry(song: testSong(4))
+        var scene = CarouselScene()
+        scene.select(CarouselSelection(previous: nil, current: a, next: b, nextTwo: c))
+        let ahead = try XCTUnwrap(scene.items.first { $0.entry.id == c.id }).id
+        scene.select(CarouselSelection(previous: a, current: b, next: c, nextTwo: d))
+        scene.select(CarouselSelection(previous: b, current: c, next: d, previousTwo: a))
+        XCTAssertEqual(scene.currentKey, ahead)
+        XCTAssertEqual(scene.center, 2)
+        XCTAssertLessThanOrEqual(scene.items.count, 7)
+        scene.settle()
+        let behind = try XCTUnwrap(scene.items.first { $0.entry.id == a.id }).id
+        scene.select(CarouselSelection(previous: a, current: b, next: c, nextTwo: d), preferredDirection: -1)
+        scene.select(CarouselSelection(previous: nil, current: a, next: b, nextTwo: c), preferredDirection: -1)
+        XCTAssertEqual(scene.currentKey, behind)
+        XCTAssertEqual(scene.center, 0)
+    }
+
     func testRepeatNeighboursAndUnrelatedJumpsHaveUniqueOccurrences() {
         let a = QueueEntry(song: testSong(1)), b = QueueEntry(song: testSong(2)), c = QueueEntry(song: testSong(3))
         var scene = CarouselScene()
@@ -85,7 +104,7 @@ final class CarouselSceneTests: XCTestCase {
         }
     }
 
-    func testTheNearestCardStaysInFrontThroughForwardAndReverseSlides() {
+    func testDepthPriorityIsGreatestAtTheChosenFrontOrdinal() {
         for step in -40...40 {
             let focus = CGFloat(step) / 40
             let distances = (-2...2).map { CGFloat($0) - focus }
@@ -119,15 +138,29 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertEqual(CarouselDragLimit.focus(.nan, center: 5, canPrevious: true, canNext: true), 5)
     }
 
-    func testDepthObserverOnlyPublishesMidpointCrossings() {
+    func testPresentationMeterRetainsBothPositionAndLayoutWithoutPublishingState() {
         let meter = CarouselPresentationMeter()
-        var pages: [Int] = []
-        meter.observeNearest { pages.append($0) }
-        for focus: CGFloat in [0, 0.1, 0.2, 0.49, 0.51, 0.8, 1, 0.7, 0.4, 0] { meter.record(focus) }
-        XCTAssertEqual(pages, [0, 1, 0])
-        meter.observeNearest(nil)
-        meter.record(1)
-        XCTAssertEqual(pages, [0, 1, 0])
+        meter.record(0.42, stack: 0.7)
+        XCTAssertEqual(meter.sample(fallback: CarouselPresentationSample(focus: 1, stack: 0)),
+                       CarouselPresentationSample(focus: 0.42, stack: 0.7))
+    }
+
+    func testStackedNeighbourIsSmallerAndSitsBehindTheCurrentCard() {
+        let current = CarouselPose(distance: 0, width: 280, stack: 1, hideLeft: true, reduceMotion: false)
+        let next = CarouselPose(distance: 1, width: 280, stack: 1, hideLeft: true, reduceMotion: false)
+        XCTAssertLessThan(next.scale, current.scale)
+        XCTAssertLessThan(next.y, current.y)
+        XCTAssertEqual(next.turn, 0)
+        XCTAssertLessThan(next.x, 20)
+        XCTAssertEqual(CarouselPose(distance: -1, width: 280, stack: 1, hideLeft: true, reduceMotion: false).opacity, 0)
+    }
+
+    func testSwipeDirectionUsesFingerTravelInsteadOfThePreviousSlidePosition() {
+        XCTAssertEqual(CarouselSwipeIntent.direction(translation: -70, predicted: -100, page: 200), 1)
+        XCTAssertEqual(CarouselSwipeIntent.direction(translation: 70, predicted: 100, page: 200), -1)
+        XCTAssertEqual(CarouselSwipeIntent.direction(translation: 12, predicted: 14, page: 200), 0)
+        XCTAssertEqual(CarouselSwipeIntent.direction(translation: -12, predicted: -300, page: 200), 1)
+        XCTAssertEqual(CarouselSwipeIntent.direction(translation: .nan, predicted: -300, page: 200), 0)
     }
 
     func testInterruptedGestureCanReadTheActualInterpolatedFocus() {

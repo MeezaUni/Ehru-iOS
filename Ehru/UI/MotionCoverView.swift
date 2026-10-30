@@ -35,8 +35,9 @@ struct MotionCoverView: View {
             SongArtworkView(song: song, maxPixels: maxPixels)
                 .modifier(MovingArtwork(isPlaying: animateStill && playing && !suspended && url == nil,
                                         enabled: animateStill && url == nil))
-            if rendersVideo, visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url {
-                // Pause the existing decoder instead of destroying/recreating it on every pause.
+            if rendersVideo, visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url, (!playerInMotion || videoSession?.url == url) {
+                // Reuse a prepared decoder during flight. A cold video waits until the cover
+                // has arrived, keeping AVPlayer construction off the opening animation.
                 LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion && !suspended,
                                    frozen: playerInMotion || suspended, session: videoSession)
                     .modifier(MotionVideoDissolve())

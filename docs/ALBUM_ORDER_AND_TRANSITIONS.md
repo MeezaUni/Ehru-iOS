@@ -129,3 +129,10 @@ zoomed views show an edge direction marker if playback leaves the visible interv
 CI covers no-clock/no-progress, deck handover, route latency, bounds, cut timing and bypassed
 stages, render-clock availability/cleanup, full-preview fit, and exact dB/time point edits.
 Verify audible alignment on wired, Bluetooth and speaker routes and touch feel on a device.
+
+Tapping anywhere inside the pair plot activates Custom and reveals its curve handles, including
+when Auto resolves to no crossfade or the pair is Off. It uses the same idempotent draft action
+as the retained Custom button, starts from inherited settings, and preserves duration, EQ, filter
+and source cues. Activation is one undo step; repeated activation does not resample an already
+custom curve or add undo entries. A tap that first enters editing selects the lane without
+inserting an arbitrary point. Vertical scrolling alone does not change the transition choice.

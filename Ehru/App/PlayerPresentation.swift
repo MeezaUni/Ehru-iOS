@@ -199,6 +199,13 @@ struct MiniArtworkVisibility: ViewModifier {
     func body(content: Content) -> some View { content.opacity(drag.isPresented && drag.isReady ? 0 : 1) }
 }
 
+enum PlayerMotionTiming {
+    static let duration: TimeInterval = 0.30
+    static func presentation(reduceMotion: Bool) -> Animation {
+        .timingCurve(0.22, 0.8, 0.25, 1, duration: reduceMotion ? 0.16 : duration)
+    }
+}
+
 @MainActor
 @Observable
 final class PlayerDragState {
@@ -251,7 +258,7 @@ final class PlayerDragState {
     private func animate(to target: CGFloat, reduceMotion: Bool) {
         let id = UUID(); animationID = id
         isMoving = true
-        withAnimation(reduceMotion ? .easeOut(duration: 0.16) : .smooth(duration: 0.36), completionCriteria: .removed) {
+        withAnimation(PlayerMotionTiming.presentation(reduceMotion: reduceMotion), completionCriteria: .logicallyComplete) {
             translation = 0
             progress = target
         } completion: { [weak self] in
