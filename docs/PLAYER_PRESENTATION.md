@@ -100,8 +100,10 @@ gesture direction comes from finger travel, independently of the previous slide'
 Generation guards prevent an interrupted completion from pruning the active scene or clearing
 its movement flag. Mode toggles retarget the same motion owner.
 
-Opening/dismissal uses a finite 300 ms cubic curve and logical completion, so chrome and input
-are released without waiting for a spring's physical settling tail. The playback controller owns
+Opening/dismissal uses a finite 300 ms cubic curve. Generation-guarded monotonic tasks release
+chrome/input and prune settled pages at the declared duration, independently of SwiftUI
+render-completion callbacks. They do not drive frame positions or the audio playhead. This
+also prevents an offscreen or interrupted render transaction from leaving the player busy. The playback controller owns
 one lazy MotionVideoSession. Constructing or reconstructing a SwiftUI view does not create an
 AVQueuePlayer or AVPlayerLayer. Close/background pauses the existing session and re-opening the
 same album reuses it. A cold animated asset is attached after entrance finishes; already-ready

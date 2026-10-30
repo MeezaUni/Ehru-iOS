@@ -215,12 +215,14 @@ final class PlayerDragState {
     private(set) var isReady = false
     private(set) var isMoving = true
     @ObservationIgnored private var animationID = UUID()
+    @ObservationIgnored private var settlement: Task<Void, Never>?
     @ObservationIgnored private var wantsPresented = false
     @ObservationIgnored var travel: CGFloat = 500
 
     func setPresented(_ presented: Bool, reduceMotion: Bool) {
         wantsPresented = presented
         if presented && !isPresented {
+            settlement?.cancel(); settlement = nil
             animationID = UUID()
             var instant = Transaction(); instant.disablesAnimations = true
             withTransaction(instant) {
@@ -238,6 +240,7 @@ final class PlayerDragState {
 
     func update(_ distance: CGFloat) {
         guard distance.isFinite else { return }
+        settlement?.cancel(); settlement = nil
         animationID = UUID()
         var instant = Transaction(); instant.disablesAnimations = true
         withTransaction(instant) {
@@ -252,17 +255,22 @@ final class PlayerDragState {
         isReady = true
         animate(to: 1, reduceMotion: reduceMotion)
     }
-    func beginDismissal() { animationID = UUID(); isMoving = true }
+    func beginDismissal() { settlement?.cancel(); settlement = nil; animationID = UUID(); isMoving = true }
     func restore(reduceMotion: Bool = false) { animate(to: 1, reduceMotion: reduceMotion) }
 
     private func animate(to target: CGFloat, reduceMotion: Bool) {
+        settlement?.cancel()
         let id = UUID(); animationID = id
-        isMoving = true
-        withAnimation(PlayerMotionTiming.presentation(reduceMotion: reduceMotion), completionCriteria: .logicallyComplete) {
+        withAnimation(PlayerMotionTiming.presentation(reduceMotion: reduceMotion)) {
+            isMoving = true
             translation = 0
             progress = target
-        } completion: { [weak self] in
-            guard let self, self.animationID == id else { return }
+        }
+        let duration = reduceMotion ? 0.16 : PlayerMotionTiming.duration
+        settlement = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(duration)) } catch { return }
+            guard let self, self.animationID == id, !Task.isCancelled else { return }
+            self.settlement = nil
             self.isMoving = false
             if target == 0 && !self.wantsPresented { self.isPresented = false }
         }

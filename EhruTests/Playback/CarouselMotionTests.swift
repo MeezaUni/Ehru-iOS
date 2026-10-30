@@ -32,6 +32,28 @@ final class CarouselMotionTests: XCTestCase {
     }
 
     @MainActor
+    func testCleanupDeadlineDoesNotDependOnAVisibleSwiftUIRenderer() async throws {
+        let motion = CarouselMotion()
+        var completed = 0
+        motion.settle(center: 1, stacked: true, reduceMotion: false) { completed += 1 }
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertFalse(motion.moving)
+        XCTAssertEqual(completed, 1)
+        let drag = PlayerDragState()
+        drag.setPresented(true, reduceMotion: false)
+        drag.finishEntrance()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertFalse(drag.isMoving)
+        drag.setPresented(false, reduceMotion: false)
+        try await Task.sleep(for: .milliseconds(80))
+        drag.setPresented(true, reduceMotion: false)
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertTrue(drag.isPresented)
+        XCTAssertEqual(drag.progress, 1)
+        XCTAssertFalse(drag.isMoving)
+    }
+
+    @MainActor
     func testHostedSlidesAndModeChangesHaveIntermediateFramesAndFinishPromptly() async throws {
         let motion = CarouselMotion()
         try await hosted(MotionProbe(motion: motion)) {
@@ -112,7 +134,10 @@ final class CarouselMotionTests: XCTestCase {
     private func hosted<Content: View>(_ content: Content, operation: @MainActor () async throws -> Void) async throws {
         let previous = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             .flatMap(\.windows).first(where: \.isKeyWindow)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 450))
+        let scene = try XCTUnwrap(previous?.windowScene ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first,
+                                   "Animated tests require a live simulator window scene")
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 450)
         let controller = UIHostingController(rootView: content.ignoresSafeArea())
         controller.safeAreaRegions = []
         window.rootViewController = controller

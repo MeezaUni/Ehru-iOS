@@ -12,11 +12,13 @@ final class CarouselMotion {
     private(set) var moving = false
     @ObservationIgnored let meter = CarouselPresentationMeter()
     @ObservationIgnored private var generation = UUID()
+    @ObservationIgnored private var settlement: Task<Void, Never>?
     @ObservationIgnored private var origin: CarouselPresentationSample?
 
     static let duration: TimeInterval = 0.28
 
     func hold() {
+        settlement?.cancel(); settlement = nil
         generation = UUID()
         moving = true
     }
@@ -40,15 +42,23 @@ final class CarouselMotion {
 
     func settle(center: Int, stacked: Bool, reduceMotion: Bool, completion: @escaping () -> Void = {}) {
         origin = nil
+        settlement?.cancel()
         let token = UUID(); generation = token
-        moving = true
-        let animation = Animation.timingCurve(0.22, 0.8, 0.25, 1, duration: reduceMotion ? 0.16 : Self.duration)
-        withAnimation(animation, completionCriteria: .logicallyComplete) {
+        let duration = reduceMotion ? 0.16 : Self.duration
+        let animation = Animation.timingCurve(0.22, 0.8, 0.25, 1, duration: duration)
+        withAnimation(animation) {
+            moving = true
             focus = CGFloat(center)
             stack = stacked ? 1 : 0
             frontOrdinal = center
-        } completion: { [weak self] in
-            guard let self, self.generation == token else { return }
+        }
+        // Cleanup is bounded independently of SwiftUI's render/visibility completion callbacks.
+        // Native interpolation still draws every frame; this task only releases interaction state.
+        settlement = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .seconds(duration)) } catch { return }
+            guard let self, self.generation == token, !Task.isCancelled else { return }
+            self.settlement = nil
+            self.meter.record(self.focus, stack: self.stack)
             self.moving = false
             completion()
         }
@@ -67,7 +77,7 @@ final class CarouselMotion {
     }
 
     func endGesture() { origin = nil }
-    func cancel() { generation = UUID(); origin = nil; moving = false }
+    func cancel() { settlement?.cancel(); settlement = nil; generation = UUID(); origin = nil; moving = false }
 }
 
 enum CarouselSwipeIntent {
