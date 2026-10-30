@@ -55,7 +55,7 @@ final class PlayerRenderingTests: XCTestCase {
     }
 
     @MainActor
-    func testCoverPixelsEscapeTheScrollViewportAndLandOnTheMiniPlayer() throws {
+    func testCoverPixelsEscapeTheScrollViewportAndLandOnTheMiniPlayer() async throws {
         let source = CGRect(x: 55, y: 100, width: 280, height: 280)
         let mini = CGRect(x: 20, y: 745, width: 44, height: 44)
         for progress in [CGFloat(1), 0.5, 0] {
@@ -65,7 +65,7 @@ final class PlayerRenderingTests: XCTestCase {
                     ZStack(alignment: .topLeading) {
                         Color.gray.frame(width: 280, height: 380).offset(x: 55, y: 100)
                         Color.blue.frame(width: 350, height: 90).offset(x: 20, y: 450)
-                    }.frame(width: 390, height: 600)
+                    }.frame(width: 390, height: 600, alignment: .topLeading)
                 }
                 .frame(width: 390, height: 600)
                 .clipped()
@@ -76,7 +76,9 @@ final class PlayerRenderingTests: XCTestCase {
                     Color.red
                 }
             }
-            let rendered = try pixels(content, size: CGSize(width: 390, height: 844))
+            // ScrollView contains a UIKit-backed scrolling surface. Capture the actual hosted
+            // hierarchy, including its controls, rather than ImageRenderer's partial output.
+            let rendered = try await windowPixels(content, size: CGSize(width: 390, height: 844))
             let center = CGPoint(x: mini.midX + (source.midX - mini.midX) * progress,
                                  y: mini.midY + (source.midY - mini.midY) * progress)
             assertColor(rendered, at: center, dominant: 0)
@@ -112,6 +114,39 @@ final class PlayerRenderingTests: XCTestCase {
         let renderer = ImageRenderer(content: content.frame(width: size.width, height: size.height))
         renderer.scale = 1
         let image = try XCTUnwrap(renderer.cgImage)
+        return try rgbaPixels(image)
+    }
+
+    @MainActor
+    private func windowPixels<Content: View>(_ content: Content, size: CGSize) async throws -> Pixels {
+        let previous = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)
+        let window = UIWindow(frame: CGRect(origin: .zero, size: size))
+        let controller = UIHostingController(rootView: content.ignoresSafeArea())
+        controller.safeAreaRegions = []
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            previous?.makeKeyAndVisible()
+        }
+        window.layoutIfNeeded()
+        controller.view.layoutIfNeeded()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(controller.view.bounds.size, size)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        var captured = false
+        let image = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+            captured = controller.view.drawHierarchy(in: CGRect(origin: .zero, size: size), afterScreenUpdates: true)
+        }
+        XCTAssertTrue(captured, "The hosted scroll view must be captured before inspecting its pixels")
+        return try rgbaPixels(XCTUnwrap(image.cgImage))
+    }
+
+    private func rgbaPixels(_ image: CGImage) throws -> Pixels {
         let width = image.width, height = image.height
         var bytes = [UInt8](repeating: 0, count: width * height * 4)
         try bytes.withUnsafeMutableBytes { buffer in
