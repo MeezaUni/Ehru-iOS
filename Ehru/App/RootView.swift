@@ -10,6 +10,7 @@ struct RootView: View {
     @Environment(LibraryActions.self) private var actions
     @Environment(AppRouter.self) private var router
     @Environment(SoundStore.self) private var sound
+    @Environment(WifiTransferStore.self) private var transfer
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.palette) private var palette
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -91,6 +92,7 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { library.scan() }
             if phase == .background {
+                transfer.stop(.backgrounded)
                 player.persistNow()
                 sound.persistNow()
             }
