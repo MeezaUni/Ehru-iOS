@@ -113,11 +113,15 @@ struct CarouselFocusProbe: GeometryEffect {
     let meter: CarouselPresentationMeter
     var animatableData: AnimatablePair<CGFloat, CGFloat> {
         get { AnimatablePair(focus, stack) }
-        set { focus = newValue.first; stack = newValue.second }
+        set {
+            focus = newValue.first; stack = newValue.second
+            // The setter receives presentation values during interpolation. effectValue also
+            // runs for target/layout evaluations, which must not overwrite this sample.
+            meter.record(focus, stack: stack)
+        }
     }
     func effectValue(size: CGSize) -> ProjectionTransform {
-        meter.record(focus, stack: stack)
-        return ProjectionTransform(CGAffineTransform.identity)
+        ProjectionTransform(CGAffineTransform.identity)
     }
 }
 

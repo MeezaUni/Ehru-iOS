@@ -165,9 +165,11 @@ final class CarouselSceneTests: XCTestCase {
 
     func testInterruptedGestureCanReadTheActualInterpolatedFocus() {
         let meter = CarouselPresentationMeter()
-        let effect = CarouselFocusProbe(focus: 0.42, meter: meter)
+        var effect = CarouselFocusProbe(focus: 1, stack: 1, meter: meter)
+        effect.animatableData = AnimatablePair(0.42, 0.7)
         _ = effect.effectValue(size: CGSize(width: 280, height: 380))
         XCTAssertEqual(meter.read(fallback: 1), 0.42, accuracy: 1e-6)
+        XCTAssertEqual(meter.sample(fallback: CarouselPresentationSample(focus: 1, stack: 1)).stack, 0.7, accuracy: 1e-6)
     }
 
     private func bounds(ordinal: Int, focus: CGFloat, size: CGSize, reduced: Bool) -> CGRect {

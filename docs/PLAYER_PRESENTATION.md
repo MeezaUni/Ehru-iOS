@@ -118,3 +118,8 @@ The strip mounts two neighbours in each direction, so a second quick swipe reuse
 positioned cover instead of inserting a new card directly at its destination mid-animation.
 Playback-order helpers supply these neighbours, including repeat wraparound. Retention remains
 bounded to seven occurrences; side covers request 600 px and the current cover refines to 1200 px.
+
+The passive presentation sample is recorded in the probe's animatable-data setter, which
+receives interpolated values. Target/layout calls to effectValue do not overwrite it. First
+creation of the Core Image snapshot context occurs on its serial conversion queue, keeping
+GPU-context setup off the first swipe's UI thread as well as the conversion itself.

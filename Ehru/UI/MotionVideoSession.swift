@@ -208,7 +208,9 @@ final class MotionVideoSurface: UIView {
 private final class MotionFrameRasterizer: @unchecked Sendable {
     static let shared = MotionFrameRasterizer()
     private let queue = DispatchQueue(label: "ehru.motion-frame", qos: .userInitiated)
-    private let context = CIContext(options: [.cacheIntermediates: false])
+    // Accessed only by the serial conversion queue below; even the first GPU-context
+    // construction must stay off the gesture/UI thread.
+    private lazy var context = CIContext(options: [.cacheIntermediates: false])
     func image(_ buffer: CVPixelBuffer, completion: @escaping (CGImage?) -> Void) {
         queue.async {
             let input = CIImage(cvPixelBuffer: buffer)
