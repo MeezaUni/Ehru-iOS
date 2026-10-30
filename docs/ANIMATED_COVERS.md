@@ -5,9 +5,9 @@ Lock Screen. Animated-cover lookup, downloading, native video rendering and anim
 MediaPlayer artwork are removed; existing downloaded clips are not read or played.
 The animated-cover menu and decorative-artwork setting are also absent.
 
-All shared player, queue, transition-editor, metadata and library changes up to `c577e09` remain,
+All shared player, queue, transition-editor, metadata and library changes through the latest shared player update remain,
 including velocity-aware finger swipes, directional stacked turnover and cover-only dismissal.
 Audio playback, transition preview and visualization remain available.
 
-Use [`with-animated-art`](https://github.com/MeezaUni/Ehru-iOS/tree/with-animated-art)
+Use [`with-animated-art`](https://github.com/MeezaUni/Erhu-iOS/tree/with-animated-art)
 for the build with animated artwork and its setup instructions.

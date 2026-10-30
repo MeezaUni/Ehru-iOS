@@ -1,7 +1,7 @@
 # Performance checks
 
 The iOS workflow runs `LibraryPerformanceTests` alongside the regression suite and uploads
-`Ehru-test-results` (an `.xcresult` bundle). Open the bundle in Xcode to inspect wall-clock
+`Erhu-test-results` (an `.xcresult` bundle). Open the bundle in Xcode to inspect wall-clock
 and CPU measurements for building a synthetic library of 10,000 tracks. Compare runs with
 the same Xcode, simulator and runner class. These measurements are not device temperature
 or battery measurements, and there is no established performance baseline yet.
@@ -10,10 +10,10 @@ On a Mac, generate the project with `xcodegen generate`, select an installed iPh
 with `xcrun simctl list devices available`, then run:
 
 ```sh
-xcodebuild test -project Ehru.xcodeproj -scheme Ehru \
+xcodebuild test -project Erhu.xcodeproj -scheme Erhu \
   -destination 'id=<simulator-UUID>' \
-  -only-testing:EhruTests/LibraryPerformanceTests \
-  -resultBundlePath /tmp/Ehru-performance.xcresult CODE_SIGNING_ALLOWED=NO
+  -only-testing:ErhuTests/LibraryPerformanceTests \
+  -resultBundlePath /tmp/Erhu-performance.xcresult CODE_SIGNING_ALLOWED=NO
 ```
 
 Use a fresh result bundle path for each run. Linux syntax parsing does not compile or execute

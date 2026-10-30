@@ -1,6 +1,6 @@
 # Android → iOS port
 
-What the Android app (lochanpthakke/empee3) does, and where each part stands in this iOS app.
+Android-to-iOS feature status. The original source and licence are listed in [the third-party notice](../ThirdParty/ANDROID-NOTICE.md).
 The rules the Android code follows are kept: nothing is made up, music never leaves the phone,
 no cloud inference, no microphone, and online lyrics send only title, artist, album and duration.
 
@@ -56,7 +56,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 
 | Android | iOS | Notes |
 |---|---|---|
-| Wi-Fi Transfer | ✅ | Same page, routes, pairing and checks. Runs only while empee3 is open (iOS suspends apps in the background). Ogg and Opus are refused because iOS cannot play them. |
+| Wi-Fi Transfer | ✅ | Same page, routes, pairing and checks. Runs only while Erhu is open (iOS suspends apps in the background). Ogg and Opus are refused because iOS cannot play them. |
 | Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz, Deezer and Last.fm searched (Last.fm with the listener's own key from Settings › Online sources); native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Genius (needs its own token), renaming files (song identity is the path on iOS) |
 | Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer, Wikimedia, and Fanart.tv and Discogs when their keys are set in Settings › Online sources; automatic artist photos with the Deezer matcher; covers embedded with the verified writer; playlist covers from Photos. Not ported: Genius / DuckDuckGo scraping |
 | Animated album artwork (Apple Music motion covers) | Separate branch | Available on `with-animated-art`; this `without-animated-art` branch uses static artwork only |
