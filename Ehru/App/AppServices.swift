@@ -21,15 +21,13 @@ final class AppServices {
     let fixTags: FixTagsStore
     let artwork: ArtworkFetcherStore
     let waveforms: WaveformStore
-    let animatedArtwork: AnimatedArtworkStore
 
     private init() {
         // A database that cannot be opened falls back to memory: the app still works this session.
         database = (try? LibraryDatabase.open()) ?? (try! LibraryDatabase.inMemory())
         library = LibraryStore(database: database)
         transitions = TransitionSettingsStore()
-        animatedArtwork = AnimatedArtworkStore()
-        player = PlayerController(database: database, transitions: transitions, motionCovers: animatedArtwork)
+        player = PlayerController(database: database, transitions: transitions)
         vybe = VybeStore(database: database, player: player)
         mixes = MixStore(database: database, vybe: vybe.engine)
         actions = LibraryActions(database: database, player: player, mixes: mixes)

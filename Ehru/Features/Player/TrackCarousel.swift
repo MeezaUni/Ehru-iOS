@@ -17,7 +17,6 @@ struct TrackCarousel: View {
     let currentSong: Song
     /// +1 next, -1 previous: always a change of song, never a restart.
     let skip: (Int) -> CarouselSelection
-    let videos: CarouselVideoDeck
     var setBusy: (Bool) -> Void = { _ in }
     /// A downward drag on the cards pulls the player down: the distance while dragging, then the
     /// distance and the predicted end on release.
@@ -25,27 +24,11 @@ struct TrackCarousel: View {
     var onPullEnd: (CGFloat, CGFloat) -> Void = { _, _ in }
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.playerInMotion) private var playerInMotion
-    @Environment(AnimatedArtworkStore.self) private var artwork
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.visualWorkBudget) private var budget
     @State private var scene = CarouselScene()
     @State private var motion = CarouselMotion()
     @State private var horizontal: Bool?
 
     private var selection: CarouselSelection { CarouselSelection(previous: previous, current: current, next: next, previousTwo: previousTwo, nextTwo: nextTwo) }
-    private func videoRequests() -> [CarouselVideoDeck.Request] {
-        guard scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion else { return [] }
-        return scene.items.filter { abs($0.ordinal - scene.center) <= 1 }.compactMap { item in
-            artwork.url(for: item.entry.song).map { CarouselVideoDeck.Request(key: item.id, url: $0) }
-        }
-    }
-
-    private func refreshVideos() {
-        // Cold media construction waits for the entrance. Already prepared surfaces can fly.
-        guard !playerInMotion, scene.currentKey != nil else { return }
-        videos.configure(videoRequests(), current: scene.currentKey, prepareNeighbours: !motion.moving)
-    }
-
     var body: some View {
         GeometryReader { geometry in
             let metrics = CardMetrics(geometry.size)
@@ -60,21 +43,11 @@ struct TrackCarousel: View {
             .contentShape(Rectangle())
             .highPriorityGesture(swipe(page: page))
         }
-        .onAppear { refreshVideos() }
-        .onChange(of: motion.moving, initial: true) { _, active in
-            setBusy(active)
-            if !active { refreshVideos() }
-        }
+        .onChange(of: motion.moving, initial: true) { _, active in setBusy(active) }
         .onChange(of: selection, initial: true) { _, next in selectionChanged(next) }
         .onChange(of: stacked) { _, _ in settle() }
-        // Media lookup is structural work, never a dependency of the per-touch render path.
-        .onChange(of: artwork.saved) { _, _ in refreshVideos() }
-        .onChange(of: scenePhase) { _, _ in refreshVideos() }
-        .onChange(of: budget) { _, _ in refreshVideos() }
-        .onChange(of: reduceMotion) { _, _ in refreshVideos() }
         .onChange(of: playerInMotion) { _, active in
-            if !active { refreshVideos(); return }
-            guard motion.moving else { return }
+            guard active, motion.moving else { return }
             motion.snap(center: scene.center, stacked: stacked)
             scene.settle()
         }
@@ -85,12 +58,10 @@ struct TrackCarousel: View {
         let distance = CGFloat(item.ordinal) - motion.focus
         let isCurrent = item.id == scene.currentKey
         let song = isCurrent && currentSong.id == item.entry.song.id ? currentSong : item.entry.song
-        let session = videos.slots[item.id]?.session
         return CarouselCard(song: song, isCurrent: isCurrent,
                             showsMetadata: isCurrent || !stacked,
-                            animatesMotion: CarouselVideoDeck.shouldAnimate(distance: distance, current: isCurrent),
                             reportsArtworkFrame: isCurrent && !motion.moving,
-                            videoSession: session, metrics: metrics)
+                            metrics: metrics)
             .equatable()
             .overlay {
                 RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
@@ -135,7 +106,6 @@ struct TrackCarousel: View {
             motion.snap(center: scene.center, stacked: stacked)
             scene.settle()
         }
-        refreshVideos()
     }
 
     /// Commit the real queue immediately so card title, index, duration and audio stay together.
@@ -202,9 +172,7 @@ private struct CarouselCard: View, Equatable {
     let song: Song
     let isCurrent: Bool
     let showsMetadata: Bool
-    let animatesMotion: Bool
     let reportsArtworkFrame: Bool
-    let videoSession: MotionVideoSession?
     let metrics: CardMetrics
     @Environment(LibraryActions.self) private var actions
     @Environment(\.playerArtworkInFlight) private var artworkInFlight
@@ -214,8 +182,7 @@ private struct CarouselCard: View, Equatable {
 
     nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
         lhs.song == rhs.song && lhs.isCurrent == rhs.isCurrent && lhs.showsMetadata == rhs.showsMetadata &&
-        lhs.animatesMotion == rhs.animatesMotion && lhs.reportsArtworkFrame == rhs.reportsArtworkFrame &&
-        lhs.videoSession === rhs.videoSession && lhs.metrics == rhs.metrics
+        lhs.reportsArtworkFrame == rhs.reportsArtworkFrame && lhs.metrics == rhs.metrics
     }
 
     var body: some View {
@@ -226,9 +193,7 @@ private struct CarouselCard: View, Equatable {
                 .frame(width: metrics.artSide, height: metrics.artSide)
                 .background { if reportsArtworkFrame { Color.clear.playerArtworkFrame(expanded: true) } }
                 .overlay {
-                    MotionCoverView(song: song, playing: animatesMotion, rendersVideo: videoSession != nil && !artworkInFlight,
-                                    maxPixels: isCurrent ? 1200 : 600, animateStill: false,
-                                    videoSession: videoSession, tracksScrollVisibility: false)
+                    SongArtworkView(song: song, maxPixels: isCurrent ? 1200 : 600)
                         .frame(width: metrics.artSide, height: metrics.artSide)
                         .modifier(PlayerArtworkClip(isCurrent: isCurrent, side: metrics.artSide))
                         .modifier(PlayerArtworkSlotVisibility(hidden: isCurrent && artworkInFlight))

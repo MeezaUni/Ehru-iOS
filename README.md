@@ -3,6 +3,13 @@
 iOS version of [empee3](https://github.com/lochanpthakke/empee3), the Android local music player.
 Written in Swift and SwiftUI, and built in the cloud by GitHub Actions, so no up-to-date Mac is needed.
 
+## Branches
+
+- `without-animated-art`: current player, transitions, metadata and library fixes, using static
+  album artwork throughout the app and on the Lock Screen. No motion-cover downloads or video players.
+- [`with-animated-art`](https://github.com/MeezaUni/Ehru-iOS/tree/with-animated-art): the same
+  shared fixes with downloaded animated covers in album pages, Now Playing and the Lock Screen.
+
 ## What works so far
 
 - Library of the audio files in the app's folder (MP3, M4A/AAC/ALAC, FLAC, WAV, AIFF), with title,

@@ -65,7 +65,6 @@ struct AlbumDetailView: View {
     @Environment(AppRouter.self) private var router
     @State private var songs: [Song] = []
     @State private var artworkTarget: ArtworkTarget?
-    @State private var motionCover = MotionVideoSession()
 
     var body: some View {
         let origin = CollectionRef.album(albumId)
@@ -76,9 +75,7 @@ struct AlbumDetailView: View {
                     CollectionHeader(title: album.title, subtitle: album.artist, facts: songs.contains(where: \.isLossless) ? "\(facts) · Lossless" : facts,
                                      coverInset: Spacing.md, canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
                                      onShuffle: { actions.playShuffled(songs, origin: origin) }) {
-                        // The album hero animates even when audio is paused. Keep its ready
-                        // surface across a visit to Now Playing instead of recreating the movie.
-                        MotionCoverView(song: library.albumCoverSong[albumId], playing: true, maxPixels: 900, videoSession: motionCover)
+                        AlbumArtworkView(albumId: albumId, maxPixels: 900)
                     }
                     TransitionStudioRow(collection: origin).padding(.bottom, Spacing.sm)
                     SongList(songs: songs, origin: origin, showTrackNumbers: true)
@@ -106,7 +103,6 @@ struct AlbumDetailView: View {
         }
         .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .task(id: library.songs) { songs = (try? library.database.songsOfAlbum(albumId)) ?? [] }
-        .onDisappear { motionCover.pause() }
         .artworkFocus(library.albumCoverSong[albumId]?.url)
         .background(alignment: .top) { CoverGlow(url: library.albumCoverSong[albumId]?.url) }
     }

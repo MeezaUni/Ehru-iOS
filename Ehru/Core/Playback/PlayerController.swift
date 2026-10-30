@@ -16,8 +16,6 @@ final class PlayerController {
     let clock = PlaybackClock()
 
     @ObservationIgnored let engine = AudioEngine()
-    /// Empty until video is actually shown; survives expanded-player view reconstruction.
-    @ObservationIgnored let coverVideos = CarouselVideoDeck()
     @ObservationIgnored private let database: LibraryDatabase
     @ObservationIgnored let transitions: TransitionSettingsStore
     @ObservationIgnored private let persistence = JSONStore<PersistedPlaybackState>(name: "playback.json", debounce: .milliseconds(250))
@@ -52,8 +50,6 @@ final class PlayerController {
     @ObservationIgnored private var observers: [NSObjectProtocol] = []
     @ObservationIgnored private var artwork: MPMediaItemArtwork?
     @ObservationIgnored private var artworkSongId: Int64?
-    @ObservationIgnored private let motionCovers: AnimatedArtworkStore?
-    @ObservationIgnored let lockScreenMotion = LockScreenMotionArtwork()
 
     /// Media3's "previous restarts the song after 3 s".
     private static let restartThreshold: Int64 = 3_000
@@ -67,11 +63,9 @@ final class PlayerController {
     /// The next track is queued gaplessly once this little of the current one remains.
     private static let gaplessLeadMs: Int64 = 8_000
 
-    init(database: LibraryDatabase, transitions: TransitionSettingsStore, motionCovers: AnimatedArtworkStore? = nil) {
+    init(database: LibraryDatabase, transitions: TransitionSettingsStore) {
         self.database = database
         self.transitions = transitions
-        self.motionCovers = motionCovers
-        motionCovers?.onChange = { [weak self] in self?.updateNowPlaying() }
         transitions.onChange = { [weak self] in self?.reevaluateTransition() }
         engine.onEntryFinished = { [weak self] id in self?.entryFinished(id) }
         engine.onConfigurationChange = { [weak self] in self?.restartAfterConfigurationChange() }
@@ -85,11 +79,6 @@ final class PlayerController {
     }
 
     // MARK: Transport
-
-    func refreshLockScreenArtwork() {
-        lockScreenMotion.retry()
-        updateNowPlaying()
-    }
 
     func play() {
         guard !state.queue.isEmpty else { return }
@@ -694,7 +683,6 @@ final class PlayerController {
         observers.append(center.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                if case .unavailable = self.lockScreenMotion.status { self.lockScreenMotion.retry() }
                 self.updateNowPlaying()
             }
         })
@@ -769,7 +757,6 @@ final class PlayerController {
 
     private func publishNowPlaying() {
         guard let song = state.currentSong else {
-            lockScreenMotion.update(sources: [], onReady: {})
             MPNowPlayingInfoCenter.default().playbackState = .stopped
             MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
             return
@@ -790,8 +777,6 @@ final class PlayerController {
             MPNowPlayingInfoPropertyPlaybackRate: state.isPlaying ? 1.0 : 0.0,
         ]
         if let artwork { info[MPMediaItemPropertyArtwork] = artwork }
-        lockScreenMotion.update(sources: motionCovers?.lockScreenURLs(for: song) ?? []) { [weak self] in self?.updateNowPlaying() }
-        info.merge(lockScreenMotion.info) { _, animated in animated }
         MPNowPlayingInfoCenter.default().nowPlayingInfo = info
         MPNowPlayingInfoCenter.default().playbackState = state.isPlaying ? .playing : .paused
     }

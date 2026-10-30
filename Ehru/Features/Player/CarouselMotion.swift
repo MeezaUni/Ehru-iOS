@@ -36,8 +36,8 @@ final class CarouselMotion {
             focus = CarouselDragLimit.focus(origin.focus + distance, center: center, canPrevious: canPrevious, canNext: canNext)
             // A depth-deck swipe remains a depth-deck swipe; only the layout button spreads it.
             stack = origin.stack
-            // Keep the existing layer order throughout the touch. Reordering AVPlayer-backed
-            // surfaces at the half-page boundary adds a discrete repaint to a continuous drag.
+            // Keep the existing layer order throughout the touch. Reordering cards at the
+            // half-page boundary adds a discrete repaint to a continuous drag.
         }
     }
 

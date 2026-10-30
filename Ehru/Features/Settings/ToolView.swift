@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 
 extension Tool {
     /// The tools ported so far; the rest join the menu as they arrive.
-    static let available: [Tool] = [.soundCapsule, .equalizer, .autoFixTags, .artworkFetcher, .animatedArtwork, .wifiTransfer, .settings]
+    static let available: [Tool] = [.soundCapsule, .equalizer, .autoFixTags, .artworkFetcher, .wifiTransfer, .settings]
 }
 
 /// A tool page from the side menu.
@@ -18,7 +18,6 @@ struct ToolView: View {
         case .wifiTransfer: WifiTransferView()
         case .autoFixTags: FixTagsView()
         case .artworkFetcher: ArtworkFetcherView()
-        case .animatedArtwork: AnimatedArtworkView()
         default: EmptyState(message: "\(tool.label) isn't available on iOS yet.", systemImage: tool.icon).navigationTitle(tool.label)
         }
     }
@@ -52,7 +51,6 @@ struct SettingsView: View {
                 }
                 if let themeMessage { Text(themeMessage).font(.footnote).foregroundStyle(.secondary) }
                 Toggle("Glass effect", isOn: $settings.glassEnabled)
-                Toggle("Moving artwork in Now Playing", isOn: $settings.movingArtwork)
                 Picker("Start on", selection: $settings.startSection) {
                     ForEach(LibrarySection.allCases) { Text($0.label).tag($0) }
                 }

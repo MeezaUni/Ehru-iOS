@@ -11,7 +11,6 @@ struct NowPlayingView: View {
     @Environment(AppRouter.self) private var router
     @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
-    private var videoSession: MotionVideoSession? { player.coverVideos.currentSession }
     @Environment(\.playerArtworkFrames) private var artworkFrames
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var artworkTarget: ArtworkTarget?
@@ -48,7 +47,7 @@ struct NowPlayingView: View {
                                               skip: { direction in
                                                   if direction > 0 { player.skipNext() } else { player.skipToPreviousItem() }
                                                   return carouselSelection(player.state)
-                                              }, videos: player.coverVideos,
+                                              },
                                               setBusy: { player.setVisualMotion(.carousel, active: $0) },
                                               onPull: pulled, onPullEnd: pullEnded)
                                     .frame(maxHeight: .infinity)
@@ -83,7 +82,7 @@ struct NowPlayingView: View {
         .overlay {
             if !reduceMotion, let song = state.currentSong {
                 PlayerArtworkOverlay(progress: drag.progress, frames: artworkFrames, visible: drag.isMoving && drag.isReady) {
-                    MotionCoverView(song: song, rendersVideo: videoSession != nil && drag.isMoving && drag.isReady, animateStill: false, suspended: true, videoSession: videoSession, tracksScrollVisibility: false)
+                    SongArtworkView(song: song, maxPixels: 1200)
                         .modifier(PlayerArtworkClip(isCurrent: true, side: artworkFrames.expanded.width))
                 }
                 .environment(\.playerCoverProgress, drag.progress)
@@ -93,7 +92,6 @@ struct NowPlayingView: View {
         .onDisappear {
             player.setVisualMotion(.presentation, active: false)
             player.setVisualMotion(.carousel, active: false)
-            player.coverVideos.retainCurrent()
         }
         .background(backdrop(state.currentSong).ignoresSafeArea().modifier(PlayerBackdropFade(drag: drag)))
         .contentShape(Rectangle())
@@ -587,37 +585,5 @@ struct QueueSheet: View {
             Spacer(minLength: 0)
         }
         .contentShape(Rectangle())
-    }
-}
-
-/// A slow drift and zoom of the artwork while music plays, so the cover feels alive without being
-/// a video. Still when paused, when turned off in Settings, or with Reduce Motion on.
-struct MovingArtwork: ViewModifier {
-    let isPlaying: Bool
-    var enabled = true
-    @Environment(AppSettings.self) private var settings
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.playerInMotion) private var playerInMotion
-    @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.visualWorkBudget) private var budget
-    /// One full drift cycle.
-    private static let period: Double = 24
-
-    func body(content: Content) -> some View {
-        if enabled && settings.movingArtwork && !reduceMotion {
-            TimelineView(.animation(minimumInterval: 1.0 / 30,
-                                    paused: !isPlaying || playerInMotion || scenePhase != .active || !budget.allowsDecorativeMotion)) { context in
-                let phase = context.date.timeIntervalSinceReferenceDate / Self.period * 2 * .pi
-                GeometryReader { geometry in
-                    let travel = geometry.size.width * 0.03
-                    content
-                        .scaleEffect(1.08 + 0.02 * CGFloat(sin(phase * 0.5)))
-                        .offset(x: travel * CGFloat(cos(phase)), y: travel * CGFloat(sin(phase)))
-                        .frame(width: geometry.size.width, height: geometry.size.height)
-                }
-            }
-        } else {
-            content
-        }
     }
 }
