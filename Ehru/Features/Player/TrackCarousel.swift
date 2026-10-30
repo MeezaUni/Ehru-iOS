@@ -31,6 +31,7 @@ struct TrackCarousel: View {
     @State private var scene = CarouselScene()
     @State private var motion = CarouselMotion()
     @State private var horizontal: Bool?
+    @State private var videoWarmup: Task<Void, Never>?
 
     private var selection: CarouselSelection { CarouselSelection(previous: previous, current: current, next: next, previousTwo: previousTwo, nextTwo: nextTwo) }
     private func videoRequests() -> [CarouselVideoDeck.Request] {
@@ -41,9 +42,19 @@ struct TrackCarousel: View {
     }
 
     private func refreshVideos() {
-        // Cold media construction waits for the entrance. Already prepared surfaces can fly.
-        guard !playerInMotion, scene.currentKey != nil else { return }
-        videos.configure(videoRequests(), current: scene.currentKey, prepareNeighbours: !motion.moving)
+        videoWarmup?.cancel(); videoWarmup = nil
+        // Ready surfaces and recycled neighbours can rebind immediately. Native decoder
+        // construction waits until the final cover frame has painted and input is idle.
+        guard !playerInMotion, let key = scene.currentKey else { return }
+        let requests = videoRequests()
+        videos.configure(requests, current: key, prepareNeighbours: !motion.moving, allowNewSessions: false)
+        guard !motion.moving, !requests.isEmpty else { return }
+        videoWarmup = Task { @MainActor in
+            do { try await Task.sleep(for: .milliseconds(60)) } catch { return }
+            guard !Task.isCancelled, !motion.moving, !playerInMotion, scene.currentKey == key else { return }
+            videos.configure(requests, current: key)
+            videoWarmup = nil
+        }
     }
 
     var body: some View {
@@ -63,7 +74,8 @@ struct TrackCarousel: View {
         .onAppear { refreshVideos() }
         .onChange(of: motion.moving, initial: true) { _, active in
             setBusy(active)
-            if !active { refreshVideos() }
+            if active { videoWarmup?.cancel(); videoWarmup = nil }
+            else { refreshVideos() }
         }
         .onChange(of: selection, initial: true) { _, next in selectionChanged(next) }
         .onChange(of: stacked) { _, _ in settle() }
@@ -74,11 +86,12 @@ struct TrackCarousel: View {
         .onChange(of: reduceMotion) { _, _ in refreshVideos() }
         .onChange(of: playerInMotion) { _, active in
             if !active { refreshVideos(); return }
+            videoWarmup?.cancel(); videoWarmup = nil
             guard motion.moving else { return }
             motion.snap(center: scene.center, stacked: stacked)
             scene.settle()
         }
-        .onDisappear { motion.cancel(); setBusy(false) }
+        .onDisappear { videoWarmup?.cancel(); videoWarmup = nil; motion.cancel(); setBusy(false) }
     }
 
     private func card(_ item: CarouselScene.Item, metrics: CardMetrics) -> some View {

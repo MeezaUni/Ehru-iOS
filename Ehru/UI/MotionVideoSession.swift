@@ -14,6 +14,7 @@ final class MotionVideoSession {
     var player: AVQueuePlayer {
         if let residentPlayer { return residentPlayer }
         let player = AVQueuePlayer()
+        player.automaticallyWaitsToMinimizeStalling = false // Complete local clips, already prerolled.
         player.isMuted = true
         player.volume = 0
         player.preventsDisplaySleepDuringVideoPlayback = false
@@ -213,13 +214,23 @@ final class MotionVideoSurface: UIView {
     func reset() {
         generation = UUID(); isFrozen = false; ready = false
         still.image = nil
+        videoLayer.removeAnimation(forKey: "first-frame")
         updateVisibility()
     }
 
     func setReady(_ value: Bool) {
+        let firstFrame = value && !ready && still.image == nil
         ready = value
         if ready && !isFrozen { still.image = nil }
         updateVisibility()
+        if firstFrame {
+            // The matching video poster remains underneath while the first decoded layer arrives.
+            let reveal = CABasicAnimation(keyPath: "opacity")
+            reveal.fromValue = 0
+            reveal.toValue = 1
+            reveal.duration = 0.16
+            videoLayer.add(reveal, forKey: "first-frame")
+        }
     }
 
     func freeze(_ buffer: CVPixelBuffer?) {

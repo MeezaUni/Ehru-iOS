@@ -199,6 +199,59 @@ final class MotionVideoPresentationTests: XCTestCase {
         XCTAssertNil(deck.currentSession)
     }
 
+    @MainActor
+    func testColdDecoderConstructionCanWaitUntilAfterTheGesture() async throws {
+        let url = try await movie()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let deck = CarouselVideoDeck()
+        defer { deck.stop() }
+        let requests = [CarouselVideoDeck.Request(key: "current", url: url)]
+        deck.configure(requests, current: "current", allowNewSessions: false)
+        XCTAssertTrue(deck.slots.isEmpty)
+        XCTAssertNil(deck.currentSession)
+        deck.configure(requests, current: "current")
+        let prepared = try XCTUnwrap(deck.currentSession)
+        XCTAssertTrue(prepared.hasResidentPlayer)
+        deck.configure(requests, current: "current", allowNewSessions: false)
+        XCTAssertTrue(deck.currentSession === prepared)
+    }
+
+    @MainActor
+    func testVideoPosterUsesRealPixelsAndIsSharedWithoutRepeatedExtraction() async throws {
+        let url = try await movie()
+        let poster = MotionCoverPosterCache.posterURL(for: url)
+        defer {
+            try? FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: poster)
+        }
+        let cache = MotionCoverPosterCache()
+        async let first = cache.image(for: url)
+        async let second = cache.image(for: url)
+        let (a, b) = await (first, second)
+        let image = try XCTUnwrap(a)
+        XCTAssertTrue(image === b, "Simultaneous mini/carousel requests must share one extraction")
+        XCTAssertTrue(cache.cached(url) === image)
+        XCTAssertEqual(image.cgImage?.width, 64)
+        XCTAssertEqual(image.cgImage?.height, 64)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: poster.path))
+        let restoredImage = await MotionCoverPosterCache().image(for: url)
+        let restored = try XCTUnwrap(restoredImage)
+        XCTAssertEqual(restored.cgImage?.width, 64)
+        // The fixture contains white video frames: the poster must contain those real pixels.
+        var pixel = [UInt8](repeating: 0, count: 4)
+        try pixel.withUnsafeMutableBytes { bytes in
+            let context = try XCTUnwrap(CGContext(data: bytes.baseAddress, width: 1, height: 1, bitsPerComponent: 8,
+                                                bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(),
+                                                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(try XCTUnwrap(image.cgImage), in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        XCTAssertGreaterThan(pixel[0], 240)
+        XCTAssertGreaterThan(pixel[1], 240)
+        XCTAssertGreaterThan(pixel[2], 240)
+        cache.forget(url)
+        XCTAssertNil(cache.cached(url))
+    }
+
     private func movie() async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)

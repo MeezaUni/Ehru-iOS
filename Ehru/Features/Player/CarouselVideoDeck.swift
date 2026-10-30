@@ -20,7 +20,7 @@ final class CarouselVideoDeck {
     var currentSession: MotionVideoSession? { currentKey.flatMap { slots[$0]?.session } }
     var residentCount: Int { slots.count + (parked == nil ? 0 : 1) }
 
-    func configure(_ requests: [Request], current: String?, prepareNeighbours: Bool = true) {
+    func configure(_ requests: [Request], current: String?, prepareNeighbours: Bool = true, allowNewSessions: Bool = true) {
         let wanted = Array(requests.prefix(3))
         let keys = Set(wanted.map(\.key))
         // A newly opened carousel starts its coordinates at zero. Carry the current
@@ -50,6 +50,7 @@ final class CarouselVideoDeck {
                 parked = nil
                 slots[request.key] = ready
             } else {
+                guard allowNewSessions else { continue }
                 if residentCount >= 3 { parked?.session.stop(); parked = nil }
                 let session = MotionVideoSession()
                 session.prepare(url: request.url)

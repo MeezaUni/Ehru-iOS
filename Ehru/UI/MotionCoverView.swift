@@ -26,13 +26,13 @@ struct MotionCoverView: View {
     @Environment(\.motionCoverVisible) private var sectionVisible
     @Environment(\.playerInMotion) private var playerInMotion
     @Environment(\.visualWorkBudget) private var budget
-    @State private var visible = false
+    @State private var visible = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let url = song.flatMap { store.url(for: $0) }
         ZStack {
-            SongArtworkView(song: song, maxPixels: maxPixels)
+            MotionCoverPoster(song: song, maxPixels: maxPixels)
                 .modifier(MovingArtwork(isPlaying: animateStill && playing && !suspended && url == nil,
                                         enabled: animateStill && url == nil))
             if rendersVideo, visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url, (!playerInMotion || videoSession?.url == url) {

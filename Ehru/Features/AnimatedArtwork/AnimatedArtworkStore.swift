@@ -101,6 +101,8 @@ final class AnimatedArtworkStore {
                     }
                 }
                 try Task.checkCancellation()
+                _ = await MotionCoverPosterCache.shared.image(for: url)
+                try Task.checkCancellation()
                 let old = saved.covers[String(album.id)]
                 saved.covers[String(album.id)] = SavedMotionCover(albumId: album.id, album: album.title, artist: album.artist,
                                                                   catalogId: match.catalogId, storefront: match.storefront, fileName: name,
@@ -110,8 +112,8 @@ final class AnimatedArtworkStore {
                 if let old { removeFiles(old) }
                 status[album.id] = .saved
             } catch {
-                if let destination { try? FileManager.default.removeItem(at: destination) }
-                if let portraitDestination { try? FileManager.default.removeItem(at: portraitDestination) }
+                if let destination { removeFile(destination) }
+                if let portraitDestination { removeFile(portraitDestination) }
                 if error is CancellationError || Task.isCancelled { status[album.id] = nil }
                 else { status[album.id] = .failed(error.localizedDescription) }
             }
@@ -132,8 +134,14 @@ final class AnimatedArtworkStore {
 
     private func removeFiles(_ cover: SavedMotionCover) {
         for name in [cover.fileName, cover.portraitFileName].compactMap({ $0 }) {
-            try? FileManager.default.removeItem(at: Self.folder.appendingPathComponent(name))
+            removeFile(Self.folder.appendingPathComponent(name))
         }
+    }
+
+    private func removeFile(_ video: URL) {
+        MotionCoverPosterCache.shared.forget(video)
+        try? FileManager.default.removeItem(at: MotionCoverPosterCache.posterURL(for: video))
+        try? FileManager.default.removeItem(at: video)
     }
 
 }

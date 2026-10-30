@@ -14,7 +14,7 @@ struct MiniPlayer: View {
         HStack(spacing: 4) {
             Button(action: onOpen) {
                 HStack(spacing: Spacing.md) {
-                    SongArtworkView(song: song, maxPixels: 132)
+                    MotionCoverPoster(song: song, maxPixels: 132)
                         .frame(width: ArtworkSize.miniPlayer, height: ArtworkSize.miniPlayer)
                         .clipShape(RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
                         .playerArtworkFrame(expanded: false)
