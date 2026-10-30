@@ -42,7 +42,7 @@ struct TrackCarousel: View {
 
     private func refreshVideos() {
         // Cold media construction waits for the entrance. Already prepared surfaces can fly.
-        guard !playerInMotion else { return }
+        guard !playerInMotion, scene.currentKey != nil else { return }
         videos.configure(videoRequests, current: scene.currentKey, prepareNeighbours: !motion.moving)
     }
 
@@ -59,6 +59,7 @@ struct TrackCarousel: View {
             .contentShape(Rectangle())
             .highPriorityGesture(swipe(page: page))
         }
+        .onAppear { refreshVideos() }
         .onChange(of: motion.moving, initial: true) { _, active in
             setBusy(active)
             if !active { refreshVideos() }

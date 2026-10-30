@@ -89,7 +89,9 @@ struct CarouselPose {
     let turn: Double
     let opacity: Double
 
-    static func page(width: CGFloat) -> CGFloat { width * 0.66 }
+    static func page(width: CGFloat) -> CGFloat {
+        position(distance: 1, width: width, stack: 0, reduceMotion: false)
+    }
     static func depth(distance: CGFloat) -> Double { 2 - Double(abs(distance)) }
 
     init(distance: CGFloat, width: CGFloat, stack: CGFloat, reduceMotion: Bool) {

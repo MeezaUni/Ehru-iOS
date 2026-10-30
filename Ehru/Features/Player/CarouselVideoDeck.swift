@@ -21,6 +21,15 @@ final class CarouselVideoDeck {
     func configure(_ requests: [Request], current: String?, prepareNeighbours: Bool = true) {
         let wanted = Array(requests.prefix(3))
         let keys = Set(wanted.map(\.key))
+        // A newly opened carousel starts its coordinates at zero. Carry the current
+        // surface across that coordinate change, rather than restarting the same album
+        // immediately after its cover has flown into place.
+        if let current, slots[current] == nil,
+           let request = wanted.first(where: { $0.key == current }),
+           let oldKey = currentKey, !keys.contains(oldKey), let old = slots[oldKey], old.url == request.url {
+            slots.removeValue(forKey: oldKey)
+            slots[current] = old
+        }
         for key in Array(slots.keys) where !keys.contains(key) {
             slots.removeValue(forKey: key)?.session.stop()
         }

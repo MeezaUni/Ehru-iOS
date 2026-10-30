@@ -134,6 +134,10 @@ final class MotionVideoPresentationTests: XCTestCase {
         XCTAssertEqual(deck.slots.count, 1)
         XCTAssertTrue(deck.currentSession === incoming)
         XCTAssertEqual(incoming.player.rate, 0)
+        deck.configure([.init(key: "reopened-at-zero", url: url)], current: "reopened-at-zero")
+        XCTAssertTrue(deck.currentSession === incoming, "Reopening must preserve the ready movie despite new carousel coordinates")
+        XCTAssertTrue(incoming.player.currentItem === prepared)
+        XCTAssertTrue(incoming.surface === surface)
     }
 
     @MainActor
