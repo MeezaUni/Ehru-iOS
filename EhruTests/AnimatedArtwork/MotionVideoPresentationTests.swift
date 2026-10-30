@@ -219,7 +219,8 @@ final class MotionVideoPresentationTests: XCTestCase {
         memset(CVPixelBufferGetBaseAddress(buffer)!, 255, CVPixelBufferGetBytesPerRow(buffer) * 64)
         CVPixelBufferUnlockBaseAddress(buffer, [])
         let deadline = Date().addingTimeInterval(5)
-        for frame in 0..<3 {
+        // Keep identity assertions away from the looper's intentional end-of-file item swap.
+        for frame in 0..<60 {
             while !input.isReadyForMoreMediaData, writer.status == .writing, Date() < deadline {
                 try await Task.sleep(for: .milliseconds(10))
             }
