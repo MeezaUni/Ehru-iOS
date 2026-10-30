@@ -151,6 +151,11 @@ final class MotionVideoPresentationTests: XCTestCase {
         let second = MotionVideoHost(frame: first.frame)
         outgoing.attach(first, url: url, playing: true, frozen: false)
         incoming.attach(second, url: url, playing: false, frozen: false)
+        // AVPlayerLooper inserts its copied item asynchronously, even for a local file.
+        for _ in 0..<250 {
+            if incoming.player.currentItem != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         let prepared = try XCTUnwrap(incoming.player.currentItem)
         let surface = incoming.surface
         XCTAssertTrue(surface.superview === second)
