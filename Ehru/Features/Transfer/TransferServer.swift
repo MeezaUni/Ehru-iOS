@@ -1,8 +1,8 @@
 import Foundation
 import Network
 
-/// A small HTTP server for one transfer session, listening only on the Wi-Fi interface (never on
-/// every interface). One request per connection; at most [TransferLimits.maxConnections] at once
+/// A small HTTP server for one transfer session, accepting HTTP only over Wi-Fi.
+/// One request per connection; at most [TransferLimits.maxConnections] at once
 /// (others get a quick 503); stalled connections time out. [stop] closes the listener and every
 /// connection, which ends any upload in progress (the router then deletes its partial file).
 final class TransferServer: @unchecked Sendable {
@@ -11,59 +11,84 @@ final class TransferServer: @unchecked Sendable {
     private let address: String
     private let limits: TransferLimits
     private let routerFor: (String) -> TransferRouter
+    private let allowsConnection: @Sendable (NWPath?) -> Bool
     private let queue = DispatchQueue(label: "ehru.transfer")
     private var listener: NWListener?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
     private let lock = NSLock()
+    private var stopped = false
 
-    init(address: String, limits: TransferLimits, routerFor: @escaping (String) -> TransferRouter) {
+    init(address: String, limits: TransferLimits,
+         allowsConnection: @escaping @Sendable (NWPath?) -> Bool = { $0?.usesInterfaceType(.wifi) == true },
+         routerFor: @escaping (String) -> TransferRouter) {
         self.address = address
         self.limits = limits
         self.routerFor = routerFor
+        self.allowsConnection = allowsConnection
     }
 
     /// Starts listening on [preferredPort] (or a free port if it is taken). Returns the port in use.
     func start(preferredPort: UInt16 = defaultPort) async throws -> UInt16 {
         do {
             return try await listen(on: preferredPort)
-        } catch {
+        } catch let error as NWError {
+            // An occupied port can be retried. Configuration, permission and cancellation
+            // failures cannot be repaired by binding the same broken listener on another port.
+            guard preferredPort != 0, case .posix(.EADDRINUSE) = error else { throw error }
+            try Task.checkCancellation()
             return try await listen(on: 0)
         }
     }
 
     private func listen(on port: UInt16) async throws -> UInt16 {
-        // Plain TCP: iOS refuses (EINVAL) a listener restricted to one address or interface.
-        // Each connection is checked to arrive over Wi-Fi instead (see [accept]).
-        let parameters = NWParameters.tcp
-        let listener = try NWListener(using: parameters, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port) ?? .any)
-        let bound: UInt16 = try await withCheckedThrowingContinuation { continuation in
-            let resumed = OnceFlag()
-            listener.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    if let port = listener.port?.rawValue, resumed.claim() { continuation.resume(returning: port) }
-                case .failed(let error), .waiting(let error):
-                    if resumed.claim() {
-                        listener.cancel()
-                        continuation.resume(throwing: error)
-                    }
-                case .cancelled:
-                    if resumed.claim() { continuation.resume(throwing: CancellationError()) }
-                default:
-                    break
-                }
-            }
-            listener.start(queue: queue)
+        try Task.checkCancellation()
+        let listener = try NWListener(using: .tcp, on: port == 0 ? .any : NWEndpoint.Port(rawValue: port)!)
+        let routing = ListenerRouting(address: address, make: routerFor)
+        // Network.framework requires this handler BEFORE start(), including on an ephemeral
+        // port. Installing it after .ready causes the listener to fail with POSIX EINVAL.
+        listener.newConnectionHandler = { [weak self, weak listener] connection in
+            guard let self, let port = listener?.port?.rawValue else { connection.cancel(); return }
+            self.accept(connection, routing.router(port: port))
         }
-        let router = routerFor("\(address):\(bound)")
-        listener.newConnectionHandler = { [weak self] connection in self?.accept(connection, router) }
-        lock.withLock { self.listener = listener }
-        return bound
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let resumed = OnceFlag()
+                listener.stateUpdateHandler = { [weak listener] state in
+                    switch state {
+                    case .ready:
+                        if resumed.claim() {
+                            if let bound = listener?.port?.rawValue, bound != 0 { continuation.resume(returning: bound) }
+                            else { listener?.cancel(); continuation.resume(throwing: NWError.posix(.EINVAL)) }
+                        }
+                    case .failed(let error), .waiting(let error):
+                        if resumed.claim() {
+                            listener?.cancel()
+                            continuation.resume(throwing: error)
+                        }
+                    case .cancelled:
+                        if resumed.claim() { continuation.resume(throwing: CancellationError()) }
+                    default: break
+                    }
+                }
+                let started = lock.withLock { () -> Bool in
+                    guard !stopped else { return false }
+                    self.listener = listener
+                    // Register and start under the same lock: stop() can never cancel an
+                    // unstarted listener and strand its startup continuation.
+                    listener.start(queue: queue)
+                    return true
+                }
+                if !started, resumed.claim() { continuation.resume(throwing: CancellationError()) }
+            }
+        } onCancel: {
+            self.stop()
+        }
     }
 
     func stop() {
         let (listener, open) = lock.withLock { () -> (NWListener?, [NWConnection]) in
             defer {
+                stopped = true
                 self.listener = nil
                 connections = [:]
             }
@@ -75,11 +100,12 @@ final class TransferServer: @unchecked Sendable {
 
     private func accept(_ connection: NWConnection, _ router: TransferRouter) {
         let admitted = lock.withLock { () -> Bool in
-            guard connections.count < limits.maxConnections else { return false }
+            guard !stopped, connections.count < limits.maxConnections else { return false }
             connections[ObjectIdentifier(connection)] = connection
             return true
         }
         guard admitted else {
+            guard !lock.withLock({ stopped }) else { connection.cancel(); return }
             connection.start(queue: queue)
             sendAndClose(HttpResponse.error(HttpStatus.serviceUnavailable, "Too many connections, try again"), on: connection)
             return
@@ -90,7 +116,7 @@ final class TransferServer: @unchecked Sendable {
             case .ready:
                 // Only the Wi-Fi network: nothing over cellular, VPN or another interface.
                 guard started.claim() else { return }
-                if connection.currentPath?.usesInterfaceType(.wifi) == false {
+                if self?.allowsConnection(connection.currentPath) != true {
                     connection.cancel()
                     self?.lock.withLock { _ = self?.connections.removeValue(forKey: ObjectIdentifier(connection)) }
                     return
@@ -134,6 +160,24 @@ final class TransferServer: @unchecked Sendable {
                 connection.cancel()
                 continuation.resume()
             })
+        }
+    }
+}
+
+/// One shared router per listening socket, created with the actual bound port. Its upload
+/// concurrency limit and pairing state must be shared by all of that socket's connections.
+private final class ListenerRouting: @unchecked Sendable {
+    private let address: String
+    private let make: (String) -> TransferRouter
+    private let lock = NSLock()
+    private var value: TransferRouter?
+    init(address: String, make: @escaping (String) -> TransferRouter) { self.address = address; self.make = make }
+    func router(port: UInt16) -> TransferRouter {
+        lock.withLock {
+            if let value { return value }
+            let router = make("\(address):\(port)")
+            value = router
+            return router
         }
     }
 }

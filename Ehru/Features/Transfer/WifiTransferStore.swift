@@ -16,7 +16,7 @@ enum TransferServerState: Equatable {
 }
 
 /// One Wi-Fi transfer session at a time, from the user's Start to Stop (Android's
-/// WifiTransferCoordinator). The server listens only on the Wi-Fi address and only while the app
+/// WifiTransferCoordinator). The server accepts connections only over Wi-Fi and only while the app
 /// is open (iOS suspends it in the background): it stops when the user stops it, when Wi-Fi goes
 /// away or changes address, after 10 minutes without any request, when the session's lifetime ends,
 /// or when the app leaves the foreground. Every stop closes the session (its credentials stop
@@ -34,17 +34,20 @@ final class WifiTransferStore {
     private(set) var items: [TransferItem] = []
 
     private let library: LibraryStore
+    @ObservationIgnored private let addressProvider: () -> String?
     @ObservationIgnored private let registry = TransferRegistry()
     @ObservationIgnored private let limits = TransferLimits()
     @ObservationIgnored private var server: TransferServer?
+    @ObservationIgnored private var startup: Task<Void, Never>?
     @ObservationIgnored private var session: TransferSession?
     @ObservationIgnored private var sink: FolderUploadSink?
     @ObservationIgnored private var watchdog: Task<Void, Never>?
     @ObservationIgnored private var refresh: Task<Void, Never>?
     @ObservationIgnored private let activity = ActivityClock()
 
-    init(library: LibraryStore) {
+    init(library: LibraryStore, addressProvider: @escaping () -> String? = wifiAddress) {
         self.library = library
+        self.addressProvider = addressProvider
         registry.onChange = { [weak self] items in
             Task { @MainActor in self?.items = items }
         }
@@ -60,7 +63,7 @@ final class WifiTransferStore {
         case .running, .starting: return
         case .stopped: break
         }
-        guard let address = wifiAddress() else {
+        guard let address = addressProvider() else {
             state = .stopped(.noWifi)
             return
         }
@@ -81,17 +84,21 @@ final class WifiTransferStore {
         let newServer = TransferServer(address: address, limits: limits) { hostPort in
             TransferRouter(session: newSession, hostPort: hostPort, sink: newSink, registry: registry, limits: limits, events: events)
         }
-        Task {
+        // Own the starting server/session as well as the running one, so Stop and backgrounding
+        // can cancel startup. Identity checks prevent an old attempt from changing a new session.
+        session = newSession
+        server = newServer
+        sink = newSink
+        startup = Task {
+            guard !Task.isCancelled, server === newServer else { return }
             newSink.cleanUpLeftovers()
             do {
                 let port = try await newServer.start()
-                guard state == .starting else {
+                guard !Task.isCancelled, server === newServer, state == .starting else {
                     newServer.stop()
                     return
                 }
-                session = newSession
-                server = newServer
-                sink = newSink
+                startup = nil
                 activity.touch()
                 startWatchdog(newSession, address: address)
                 UIApplication.shared.isIdleTimerDisabled = true
@@ -99,6 +106,8 @@ final class WifiTransferStore {
                 state = .running(address: base, pairingUrl: "\(base)/#t=\(newSession.token)", pairingCode: newSession.pairingCode)
             } catch {
                 newServer.stop()
+                guard server === newServer, state == .starting else { return }
+                startup = nil
                 finish(.failedToStart(error.localizedDescription))
             }
         }
@@ -110,6 +119,8 @@ final class WifiTransferStore {
     }
 
     private func finish(_ reason: StopReason) {
+        startup?.cancel()
+        startup = nil
         watchdog?.cancel()
         watchdog = nil
         session?.close()
@@ -150,7 +161,7 @@ final class WifiTransferStore {
                     stop(.sessionExpired)
                 } else if activity.uploading == 0, now - activity.lastActivity > Self.idleTimeoutMs {
                     stop(.idleTimeout)
-                } else if wifiAddress() != address {
+                } else if addressProvider() != address {
                     stop(.wifiLost)
                 }
             }

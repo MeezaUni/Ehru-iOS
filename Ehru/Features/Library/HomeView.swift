@@ -22,6 +22,8 @@ struct HomeView: View {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if showsHero, let smart {
                     SmartMixHero(mixes: smart.mixes, needsMoreListening: smart.needsMoreListening,
+                                 isActive: router.section == .home && (router.paths[.home]?.isEmpty ?? true) &&
+                                     !router.showsNowPlaying && !router.showsSearch && !router.showsDrawer,
                                  onOpen: { router.open(.smartPlaylist($0)) }, onPlay: { actions.playMix($0) })
                         .padding(.top, Spacing.xs)
                         .padding(.bottom, Spacing.lg)
@@ -100,10 +102,23 @@ enum HomeSession {
 struct SmartMixHero: View {
     let mixes: [SmartMix]
     let needsMoreListening: Bool
+    var isActive = true
     let onOpen: (String) -> Void
     let onPlay: (String) -> Void
     @Environment(\.palette) private var palette
     @State private var page = 0
+    @State private var visible = false
+    @State private var interaction: UInt64 = 0
+    @GestureState private var dragging = false
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private struct Rotation: Hashable {
+        let active: Bool
+        let count: Int
+        let page: Int
+        let interaction: UInt64
+    }
 
     private static let maxBanners = 6
     private static let aspect: CGFloat = 1.75
@@ -113,6 +128,8 @@ struct SmartMixHero: View {
     var body: some View {
         let featured = HomeSession.feature(mixes, limit: Self.maxBanners)
         let count = featured.count + (needsMoreListening ? 1 : 0)
+        let rotation = Rotation(active: isActive && visible && scenePhase == .active && !reduceMotion && !dragging,
+                                count: count, page: page, interaction: interaction)
         let bannerWidth = max(width - Spacing.gutter * 2, 1)
         // Wide on every phone, never towering on a tablet or squashed on a small screen.
         let height = min(max(bannerWidth / Self.aspect, 168), 240)
@@ -123,7 +140,8 @@ struct SmartMixHero: View {
                         Group {
                             if index < featured.count {
                                 MixBanner(mix: featured[index], aspect: Float(bannerWidth / height),
-                                          onOpen: { onOpen(featured[index].kind.key) }, onPlay: { onPlay(featured[index].kind.key) })
+                                          onOpen: { interaction &+= 1; onOpen(featured[index].kind.key) },
+                                          onPlay: { interaction &+= 1; onPlay(featured[index].kind.key) })
                             } else {
                                 MoreListeningBanner()
                             }
@@ -134,10 +152,22 @@ struct SmartMixHero: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
                 .frame(height: height)
+                .simultaneousGesture(DragGesture(minimumDistance: 10)
+                    .updating($dragging) { _, active, _ in active = true })
                 if count > 1 { PageDots(count: count, current: page) }
             }
         }
         .frame(maxWidth: .infinity)
+        .onAppear { visible = true }
+        .onDisappear { visible = false }
+        .reportsScrollVisibility { visible = $0 }
+        .onChange(of: count, initial: true) { _, count in page = min(page, max(count - 1, 0)) }
+        .task(id: rotation) {
+            guard rotation.active, rotation.count > 1 else { return }
+            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            guard !Task.isCancelled else { return }
+            withAnimation(.smooth(duration: 0.45)) { page = (rotation.page + 1) % rotation.count }
+        }
         .background(GeometryReader { geometry in
             Color.clear
                 .onAppear { width = geometry.size.width }

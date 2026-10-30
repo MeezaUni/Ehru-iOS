@@ -4,7 +4,6 @@ import SwiftUI
 /// Wi-Fi Transfer: receive music from a computer's browser over the local network.
 struct WifiTransferView: View {
     @Environment(WifiTransferStore.self) private var transfer
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.palette) private var palette
 
     var body: some View {
@@ -55,9 +54,6 @@ struct WifiTransferView: View {
             }
         }
         .navigationTitle("Wi-Fi Transfer")
-        .onChange(of: scenePhase) { _, phase in
-            if phase == .background { transfer.stop(.backgrounded) }
-        }
     }
 
     private var status: some View {
