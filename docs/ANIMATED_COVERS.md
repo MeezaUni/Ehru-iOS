@@ -58,7 +58,7 @@ system motion/power restrictions. Simulator/unit checks do not establish lock-sc
 
 ## Lookup implementation
 
-Adapted from `MeezaUni/empee3` at `f291c7dc41d5725efcdf646677c048f282f78a4b`:
+Adapted from `MeezaUni/Erhu` at `f291c7dc41d5725efcdf646677c048f282f78a4b`:
 Apple web catalog editorial-video lookup, public web-player token discovery, unencrypted HLS
 playlist assembly, and fragmented MP4 timeline rebasing. The web token is kept only in memory,
 refreshed after an authorization failure, and is never persisted or printed. Apple can change

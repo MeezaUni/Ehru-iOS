@@ -32,7 +32,7 @@ jobs:
         run: |
           set -o pipefail
           mkdir -p build
-          if ! xcodebuild build -project Ehru.xcodeproj -scheme Ehru -configuration Release \
+          if ! xcodebuild build -project Erhu.xcodeproj -scheme Erhu -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" 2>&1 | tee build/compile.log; then
             python3 - <<'PY'
@@ -50,13 +50,13 @@ jobs:
             exit 1
           fi
           mkdir -p dist/Payload
-          cp -R build/Build/Products/Release-iphoneos/Ehru.app dist/Payload/
-          (cd dist && zip -qry Ehru.ipa Payload)
+          cp -R build/Build/Products/Release-iphoneos/Erhu.app dist/Payload/
+          (cd dist && zip -qry Erhu.ipa Payload)
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Ehru-ipa
-          path: dist/Ehru.ipa
+          name: Erhu-ipa
+          path: dist/Erhu.ipa
           if-no-files-found: error
 
       - name: Create iPhone simulator
@@ -82,7 +82,7 @@ jobs:
       - name: Run unit tests
         run: |
           set -o pipefail
-          if ! xcodebuild test -project Ehru.xcodeproj -scheme Ehru \
+          if ! xcodebuild test -project Erhu.xcodeproj -scheme Erhu \
             -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build/tests.log; then
             python3 - <<'PY'
@@ -114,6 +114,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Ehru-test-results
+          name: Erhu-test-results
           path: build/TestResults.xcresult
           if-no-files-found: warn

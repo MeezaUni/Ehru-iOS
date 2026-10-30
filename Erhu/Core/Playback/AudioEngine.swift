@@ -1,0 +1,442 @@
+import AVFoundation
+import Foundation
+
+/// The app's audio graph (what ExoPlayer + its audio processors were on Android):
+///
+///     deck A: player node → transition stage ┐
+///                                            ├→ mixer → equaliser → main mixer → output
+///     deck B: player node → transition stage ┘                      └ tap (visualizer, meter)
+///
+/// One deck plays at a time; both play during a crossfade. Because both decks run on the same
+/// render clock, the incoming track starts on the exact sample its fade-in begins, and the
+/// outgoing track keeps playing on its own deck (no hand-over between players as on Android).
+/// Consecutive tracks with the same format are queued back to back on one deck: gapless.
+@MainActor
+final class AudioEngine {
+    /// One player node and its transition stage.
+    final class Deck {
+        let player = AVAudioPlayerNode()
+        let stage = TransitionStageKernel()
+        var stageUnit: AVAudioUnit?
+        var format: AVAudioFormat?
+        /// Segments scheduled on this deck since its last play(), in order.
+        var segments: [Segment] = []
+        /// Bumped whenever the deck is stopped, so callbacks of earlier schedules are ignored.
+        var generation = 0
+        /// The render clock may be unavailable after pausing the node.
+        var pausedFrame: AVAudioFramePosition = 0
+    }
+
+    struct Segment {
+        let entryId: UUID
+        let file: AVAudioFile
+        /// First frame of the file that plays.
+        let fileStartFrame: AVAudioFramePosition
+        let frameCount: AVAudioFrameCount
+        /// Player sample time at which this segment starts (frames since the deck's play()).
+        let deckStartFrame: AVAudioFramePosition
+    }
+
+    enum EngineError: Error {
+        case notReady
+        case unreadable(URL)
+    }
+
+    /// An entry played to its end on its own. Main thread.
+    var onEntryFinished: ((UUID) -> Void)?
+    /// The engine was rebuilt after a route or configuration change.
+    var onConfigurationChange: (() -> Void)?
+
+    let eqKernel = EqKernel()
+    let tap = AudioTap()
+
+    private let engine = AVAudioEngine()
+    private let filePreloader = AudioFilePreloader()
+    private let mixer = AVAudioMixerNode()
+    private var eqUnit: AVAudioUnit?
+    private let decks = [Deck(), Deck()]
+    private var activeIndex = 0
+    private struct PreviewSchedule {
+        let outgoingID: UUID
+        let incomingID: UUID
+        let outgoingHost: UInt64
+        let incomingHost: UInt64
+        let clock: TransitionPreviewClock
+        let latencyMs: Double
+    }
+    private var previewSchedule: PreviewSchedule?
+    private(set) var isReady = false
+    private var configurationObserver: NSObjectProtocol?
+
+    var active: Deck { decks[activeIndex] }
+
+    /// What the app hands to iOS after its processing (nil before the graph is built).
+    var outputFormat: AVAudioFormat? { isReady ? engine.mainMixerNode.outputFormat(forBus: 0) : nil }
+    /// The PCM format the playing file is decoded to, before the app's processing.
+    var decodedFormat: AVAudioFormat? { currentSegment(active)?.file.processingFormat }
+    var isRunning: Bool { engine.isRunning }
+    /// Whether the equaliser and transition stages are in the graph (they are unless the audio units failed to load).
+    var hasProcessing: Bool { eqUnit != nil }
+    var other: Deck { decks[1 - activeIndex] }
+
+    /// Builds the graph (the custom audio units are made asynchronously).
+    func setUp() async {
+        guard !isReady else { return }
+        do {
+            let eq = try await KernelAudioUnit.make(kernel: eqKernel)
+            eqUnit = eq
+            for deck in decks {
+                deck.stageUnit = try await KernelAudioUnit.make(kernel: deck.stage)
+            }
+        } catch {
+            NSLog("Erhu: audio units unavailable, playing without DSP: \(error)")
+        }
+        engine.attach(mixer)
+        if let eqUnit { engine.attach(eqUnit) }
+        for deck in decks {
+            engine.attach(deck.player)
+            if let unit = deck.stageUnit { engine.attach(unit) }
+        }
+        connectOutput()
+        for (index, deck) in decks.enumerated() {
+            connect(deck, bus: index, format: AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 2)!)
+        }
+        engine.prepare()
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleConfigurationChange() }
+        }
+        isReady = true
+    }
+
+    private func connectOutput() {
+        let outputRate = engine.outputNode.outputFormat(forBus: 0).sampleRate
+        let format = AVAudioFormat(standardFormatWithSampleRate: outputRate > 0 ? outputRate : 48_000, channels: 2)!
+        if let eqUnit {
+            engine.connect(mixer, to: eqUnit, format: format)
+            engine.connect(eqUnit, to: engine.mainMixerNode, format: format)
+        } else {
+            engine.connect(mixer, to: engine.mainMixerNode, format: format)
+        }
+        engine.mainMixerNode.removeTap(onBus: 0)
+        let tap = self.tap
+        engine.mainMixerNode.installTap(onBus: 0, bufferSize: 2048, format: nil) { buffer, _ in
+            tap.write(buffer, time: Date().timeIntervalSince1970)
+        }
+    }
+
+    private func connect(_ deck: Deck, bus: Int, format: AVAudioFormat) {
+        if let unit = deck.stageUnit {
+            engine.connect(deck.player, to: unit, format: format)
+            engine.connect(unit, to: mixer, fromBus: 0, toBus: bus, format: format)
+        } else {
+            engine.connect(deck.player, to: mixer, fromBus: 0, toBus: bus, format: format)
+        }
+        deck.format = format
+    }
+
+    private func startEngineIfNeeded() throws {
+        if !engine.isRunning { try engine.start() }
+    }
+
+    var volume: Float {
+        get { mixer.outputVolume }
+        set { mixer.outputVolume = newValue.clamped(0, 1) }
+    }
+
+    func warmFiles(_ urls: [URL]) async { await filePreloader.warm(urls) }
+
+    private func openFile(_ url: URL) throws -> AVAudioFile {
+        if let ready = filePreloader.take(url) { return ready }
+        return try AVAudioFile(forReading: url)
+    }
+
+    // MARK: Playing
+
+    /// Stops both decks and starts [url] (entry [entryId]) at [positionMs] on the active deck.
+    func play(entryId: UUID, url: URL, positionMs: Int64, startPlaying: Bool) throws {
+        guard isReady else { throw EngineError.notReady }
+        guard let file = try? openFile(url) else { throw EngineError.unreadable(url) }
+        previewSchedule = nil
+        if startPlaying, active.player.isPlaying, currentSegment(active)?.entryId != entryId,
+           decks.allSatisfy({ $0.stageUnit != nil }) {
+            // Prepare the idle deck while the old one is still sounding. A short render-clock
+            // handoff avoids stopping audio while a new format/decoder is scheduled.
+            var handoff = TransitionSpec()
+            handoff.curve = .linear
+            try startCrossfade(file: file, entryId: entryId, incomingStartMs: positionMs,
+                               spec: handoff, durationMs: 20, startHostTime: nil)
+            return
+        }
+        stop(other)
+        stop(active)
+        other.stage.cancel()
+        active.stage.cancel()
+        // Preserve the old format in its deck. Alternating between differently encoded
+        // tracks while paused can then reuse both connections instead of rebuilding one
+        // deck on every swipe. The playing handoff above already uses the idle deck.
+        if active.format?.sampleRate != file.processingFormat.sampleRate || active.format?.channelCount != file.processingFormat.channelCount {
+            activeIndex = 1 - activeIndex
+        }
+        let deck = active
+        ensureFormat(deck, file.processingFormat)
+        let start = AVAudioFramePosition(Double(positionMs) / 1000 * file.processingFormat.sampleRate)
+        schedule(deck, entryId: entryId, file: file, from: start)
+        if startPlaying {
+            try startEngineIfNeeded()
+            deck.player.play()
+        }
+    }
+
+    /// Queues [url] right after what the active deck is playing, for a gapless boundary. False when
+    /// the format differs (the boundary then needs a fresh start, a few milliseconds of gap).
+    @discardableResult
+    func queueGapless(entryId: UUID, url: URL) -> Bool {
+        let deck = active
+        guard deck.segments.count == 1, deck.segments[0].entryId != entryId,
+              let file = try? openFile(url),
+              file.processingFormat.sampleRate == deck.format?.sampleRate,
+              file.processingFormat.channelCount == deck.format?.channelCount
+        else { return false }
+        schedule(deck, entryId: entryId, file: file, from: 0)
+        return true
+    }
+
+    /// Drops anything queued after the current segment of the active deck (the queue changed).
+    /// Only possible by restarting at the current position.
+    func dropQueuedAfterCurrent(currentEntry: UUID) {
+        guard active.segments.count > 1, let segment = currentSegment(active), segment.entryId == currentEntry else { return }
+        let positionMs = position(of: active, in: segment)
+        let wasPlaying = active.player.isPlaying
+        let url = segment.file.url
+        try? play(entryId: segment.entryId, url: url, positionMs: positionMs, startPlaying: wasPlaying)
+    }
+
+    func pause() {
+        for deck in decks where deck.player.isPlaying {
+            deck.pausedFrame = playedFrames(deck)
+            deck.player.pause()
+        }
+        // Stop rendering the DSP graph while retaining the scheduled segments.
+        engine.pause()
+    }
+
+    /// Resumes the active deck (and an outgoing crossfade deck that is still sounding).
+    func resume() throws {
+        try startEngineIfNeeded()
+        if active.segments.isEmpty == false { active.player.play() }
+        if other.stage.isEngaged, !other.stage.isSilent, !other.segments.isEmpty { other.player.play() }
+    }
+
+    func stopAll() {
+        previewSchedule = nil
+        stop(other)
+        stop(active)
+        engine.pause()
+    }
+
+    var isPlaying: Bool { active.player.isPlaying }
+
+    /// Seeks within the active deck's current entry.
+    func seek(entryId: UUID, url: URL, toMs positionMs: Int64) throws {
+        let wasPlaying = active.player.isPlaying
+        stop(other)
+        try play(entryId: entryId, url: url, positionMs: positionMs, startPlaying: wasPlaying)
+    }
+
+    // MARK: Crossfades
+
+    /// Starts [url] on the other deck at host time [startHostTime], fading in, while the active deck
+    /// fades out from the same moment. The other deck becomes the active one.
+    func crossfade(to entryId: UUID, url: URL, incomingStartMs: Int64, spec: TransitionSpec, durationMs: Int,
+                   startHostTime: UInt64) throws {
+        guard let file = try? openFile(url) else { throw EngineError.unreadable(url) }
+        try startCrossfade(file: file, entryId: entryId, incomingStartMs: incomingStartMs,
+                           spec: spec, durationMs: durationMs, startHostTime: startHostTime)
+    }
+
+    private func startCrossfade(file: AVAudioFile, entryId: UUID, incomingStartMs: Int64, spec: TransitionSpec,
+                                durationMs: Int, startHostTime: UInt64?) throws {
+        let outgoing = active
+        let incoming = other
+        stop(incoming)
+        ensureFormat(incoming, file.processingFormat)
+        let start = AVAudioFramePosition(Double(incomingStartMs) / 1000 * file.processingFormat.sampleRate)
+        schedule(incoming, entryId: entryId, file: file, from: start)
+        // Nothing may follow the outgoing track on its own deck any more.
+        outgoing.segments = Array(outgoing.segments.prefix(1))
+        // Manual handoffs start only after format conversion/decoder scheduling is ready.
+        // Automatic album transitions retain their already-planned absolute host time.
+        let lead = max(AVAudioSession.sharedInstance().ioBufferDuration * 2, 0.012)
+        let startHostTime = startHostTime ?? mach_absolute_time() + TransitionStageKernel.hostTicks(forSeconds: lead)
+        outgoing.stage.arm(TransitionAutomation(role: .outgoing, spec: spec, durationMs: durationMs), startHostTime: startHostTime)
+        incoming.stage.arm(TransitionAutomation(role: .incoming, spec: spec, durationMs: durationMs), startHostTime: startHostTime)
+        try startEngineIfNeeded()
+        incoming.player.play(at: AVAudioTime(hostTime: startHostTime))
+        activeIndex = 1 - activeIndex
+    }
+
+    /// Auditions a bounded pair on a separate engine, with the same DSP stages as normal playback.
+    /// Both nodes are scheduled on the render clock; no UI timer starts the incoming track.
+    func previewTransition(outgoing: URL, incoming: URL, timing: PairTransitionTiming) throws {
+        guard isReady, decks.allSatisfy({ $0.stageUnit != nil }), hasProcessing else { throw EngineError.notReady }
+        let outFile = try AVAudioFile(forReading: outgoing)
+        let inFile = try AVAudioFile(forReading: incoming)
+        func frame(_ ms: Int64, _ file: AVAudioFile) -> AVAudioFramePosition {
+            AVAudioFramePosition((Double(ms) * file.processingFormat.sampleRate / 1000).rounded())
+        }
+        guard frame(timing.outgoingRange.upperBound, outFile) <= outFile.length + 1,
+              frame(timing.incomingRange.upperBound, inFile) <= inFile.length + 1 else { throw EngineError.unreadable(outgoing) }
+        stopAll()
+        let out = decks[0], inc = decks[1]
+        ensureFormat(out, outFile.processingFormat)
+        ensureFormat(inc, inFile.processingFormat)
+        let outgoingID = UUID(), incomingID = UUID()
+        schedule(out, entryId: outgoingID, file: outFile, from: frame(timing.outgoingRange.lowerBound, outFile),
+                 to: frame(timing.outgoingRange.upperBound, outFile))
+        schedule(inc, entryId: incomingID, file: inFile, from: frame(timing.incomingRange.lowerBound, inFile),
+                 to: frame(timing.incomingRange.upperBound, inFile))
+        let host = mach_absolute_time() + TransitionStageKernel.hostTicks(forSeconds: 0.12)
+        let incomingHost = host + TransitionStageKernel.hostTicks(forSeconds: Double(timing.leadMs) / 1000)
+        if timing.hasOverlap {
+            var outgoingAutomation = timing.automation(.outgoing)
+            outgoingAutomation.leadInMs = Int(timing.leadMs)
+            out.stage.arm(outgoingAutomation, startHostTime: host)
+            inc.stage.arm(timing.automation(.incoming), startHostTime: incomingHost)
+        } else {
+            out.stage.cancel()
+            inc.stage.cancel()
+        }
+        activeIndex = 1
+        try startEngineIfNeeded()
+        out.player.play(at: AVAudioTime(hostTime: host))
+        inc.player.play(at: AVAudioTime(hostTime: incomingHost))
+        previewSchedule = PreviewSchedule(outgoingID: outgoingID, incomingID: incomingID,
+                                          outgoingHost: host, incomingHost: incomingHost,
+                                          clock: TransitionPreviewClock(timing: timing), latencyMs: outputLatency * 1000)
+    }
+
+    /// Actual rendered sample time, adjusted for the current output route's latency.
+    /// Nil before the scheduled audio starts, after Stop, or if the render clock is unavailable.
+    func previewPositionMs() -> Double? {
+        guard let preview = previewSchedule, engine.isRunning else { return nil }
+        func elapsed(_ deck: Deck, id: UUID, host: UInt64) -> Double? {
+            guard deck.segments.first?.entryId == id, deck.player.isPlaying,
+                  let render = deck.player.lastRenderTime,
+                  let sample = deck.player.playerTime(forNodeTime: render), sample.isSampleTimeValid else { return nil }
+            return TransitionPreviewClock.elapsed(sampleTime: sample.sampleTime, sampleRate: sample.sampleRate,
+                                                  renderHost: render.isHostTimeValid ? render.hostTime : nil, scheduledHost: host)
+        }
+        return preview.clock.position(outgoingElapsedMs: elapsed(decks[0], id: preview.outgoingID, host: preview.outgoingHost),
+                                      incomingElapsedMs: elapsed(decks[1], id: preview.incomingID, host: preview.incomingHost),
+                                      latencyMs: preview.latencyMs)
+    }
+
+    /// The outgoing deck of a crossfade, once its fade is over (or it ended), is stopped.
+    func releaseFinishedOutgoing() {
+        let deck = other
+        guard !deck.segments.isEmpty, deck.stage.isSilent || !deck.stage.isEngaged else { return }
+        stop(deck)
+        deck.stage.cancel()
+    }
+
+    /// True while the outgoing deck of a crossfade is still sounding.
+    var isCrossfading: Bool { other.player.isPlaying && other.stage.isEngaged && !other.stage.isSilent }
+
+    /// Abandons a running crossfade: the outgoing deck stops, the incoming one plays unshaped.
+    func cancelCrossfade() {
+        stop(other)
+        other.stage.cancel()
+        active.stage.cancel()
+    }
+
+    // MARK: Position
+
+    /// True when [entryId] is already queued to follow on the active deck (a gapless boundary).
+    func hasQueued(_ entryId: UUID) -> Bool {
+        active.segments.dropFirst().contains { $0.entryId == entryId }
+    }
+
+    /// The entry the active deck is playing now, and its position in ms.
+    func currentPosition() -> (entryId: UUID, positionMs: Int64)? {
+        guard let segment = currentSegment(active) else { return nil }
+        return (segment.entryId, position(of: active, in: segment))
+    }
+
+    private func currentSegment(_ deck: Deck) -> Segment? {
+        guard !deck.segments.isEmpty else { return nil }
+        let played = playedFrames(deck)
+        return deck.segments.last { $0.deckStartFrame <= played } ?? deck.segments.first
+    }
+
+    private func playedFrames(_ deck: Deck) -> AVAudioFramePosition {
+        guard deck.player.isPlaying else { return deck.pausedFrame }
+        guard let nodeTime = deck.player.lastRenderTime, let playerTime = deck.player.playerTime(forNodeTime: nodeTime) else { return deck.pausedFrame }
+        return max(playerTime.sampleTime, 0)
+    }
+
+    private func position(of deck: Deck, in segment: Segment) -> Int64 {
+        let frames = segment.fileStartFrame + min(max(playedFrames(deck) - segment.deckStartFrame, 0), AVAudioFramePosition(segment.frameCount))
+        return Int64(Double(frames) / segment.file.processingFormat.sampleRate * 1000)
+    }
+
+    /// Seconds between audio leaving the engine and being heard (for the visualizer).
+    var outputLatency: TimeInterval {
+        let session = AVAudioSession.sharedInstance()
+        return session.outputLatency + session.ioBufferDuration
+    }
+
+    var outputSampleRate: Double { engine.outputNode.outputFormat(forBus: 0).sampleRate }
+
+    // MARK: Internals
+
+    private func ensureFormat(_ deck: Deck, _ format: AVAudioFormat) {
+        if deck.format?.sampleRate != format.sampleRate || deck.format?.channelCount != format.channelCount {
+            let bus = deck === decks[0] ? 0 : 1
+            connect(deck, bus: bus, format: format)
+        }
+    }
+
+    private func schedule(_ deck: Deck, entryId: UUID, file: AVAudioFile, from startFrame: AVAudioFramePosition,
+                          to endFrame: AVAudioFramePosition? = nil) {
+        let start = startFrame.clamped(0, max(file.length - 1, 0))
+        let count = AVAudioFrameCount(max(min(endFrame ?? file.length, file.length) - start, 1))
+        let deckStart = deck.segments.last.map { $0.deckStartFrame + AVAudioFramePosition($0.frameCount) } ?? 0
+        deck.segments.append(Segment(entryId: entryId, file: file, fileStartFrame: start, frameCount: count, deckStartFrame: deckStart))
+        let generation = deck.generation
+        deck.player.scheduleSegment(file, startingFrame: start, frameCount: count, at: nil, completionCallbackType: .dataPlayedBack) { [weak self, weak deck] _ in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, let deck, deck.generation == generation else { return }
+                    self.segmentFinished(deck, entryId: entryId)
+                }
+            }
+        }
+    }
+
+    private func segmentFinished(_ deck: Deck, entryId: UUID) {
+        if deck === other {
+            // The outgoing side of a crossfade ran out: it is done.
+            stop(deck)
+            deck.stage.cancel()
+            return
+        }
+        onEntryFinished?(entryId)
+    }
+
+    private func stop(_ deck: Deck) {
+        deck.generation += 1
+        deck.player.stop()
+        deck.segments.removeAll()
+        deck.pausedFrame = 0
+    }
+
+    private func handleConfigurationChange() {
+        // The output changed (e.g. headphones, a new sample rate): rebuild the output side and let
+        // the controller restart playback at its position.
+        connectOutput()
+        engine.prepare()
+        onConfigurationChange?()
+    }
+}

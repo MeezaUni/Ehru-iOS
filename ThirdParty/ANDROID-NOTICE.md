@@ -1,0 +1,20 @@
+The Apple motion artwork adapters in `Erhu/Core/AnimatedArtwork` are adapted from
+MeezaUni/empee3, commit f291c7dc41d5725efcdf646677c048f282f78a4b:
+
+- core/network/.../apple/AnimatedArtworkNetworkDataSourceImpl.kt
+- core/network/.../apple/AppleMusicTokenProvider.kt
+- core/network/.../apple/HlsPlaylistParser.kt
+- core/network/.../apple/FragmentedMp4Timeline.kt
+
+The scrolling bottom-controls behavior in `Erhu/App/LibraryChromeState.swift` and
+`LibraryBottomChrome.swift` also follows this source's library chrome and capsule navigation:
+
+- feature/library/.../LibraryChromeState.kt
+- feature/library/.../LibraryBottomChrome.kt
+- feature/library/.../LibraryNavigationBar.kt
+
+Original source: https://github.com/MeezaUni/empee3
+The source repository supplies the GNU General Public License version 3, retained in
+`ANDROID-LICENSE`. The Swift adaptation was added on the `personal` branch in October 2026.
+
+Upstream Android project: https://github.com/lochanpthakke/empee3

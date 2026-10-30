@@ -1,6 +1,6 @@
-name: Ehru
+name: Erhu
 options:
-  bundleIdPrefix: com.lochanpthakke
+  bundleIdPrefix: com.erhu
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
@@ -10,25 +10,25 @@ settings:
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
 targets:
-  Ehru:
+  Erhu:
     type: application
     platform: iOS
-    sources: [Ehru]
+    sources: [Erhu]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.lochanpthakke.empee3
+        PRODUCT_BUNDLE_IDENTIFIER: com.erhu
         INFOPLIST_FILE: Support/Info.plist
         TARGETED_DEVICE_FAMILY: "1"
         CODE_SIGN_STYLE: Automatic
     scheme:
       testTargets:
-        - EhruTests
-  EhruTests:
+        - ErhuTests
+  ErhuTests:
     type: bundle.unit-test
     platform: iOS
-    sources: [EhruTests]
+    sources: [ErhuTests]
     dependencies:
-      - target: Ehru
+      - target: Erhu
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
