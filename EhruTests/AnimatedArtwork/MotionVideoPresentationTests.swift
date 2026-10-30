@@ -99,6 +99,56 @@ final class MotionVideoPresentationTests: XCTestCase {
         XCTAssertNil(session.surface.superview)
     }
 
+    @MainActor
+    func testNeighbourKeepsItsOwnPreparedMovieThroughTurnoverAndOldCardTeardown() async throws {
+        let url = try await movie()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let deck = CarouselVideoDeck()
+        defer { deck.stop() }
+        let requests = (-1...1).map { CarouselVideoDeck.Request(key: "\($0)", url: url) }
+        deck.configure(requests, current: "0")
+        let outgoing = try XCTUnwrap(deck.currentSession)
+        let incoming = try XCTUnwrap(deck.slots["1"]?.session)
+        XCTAssertFalse(outgoing === incoming, "Cards on the same album must not steal one shared layer")
+        let first = MotionVideoHost(frame: CGRect(x: 0, y: 0, width: 100, height: 100))
+        let second = MotionVideoHost(frame: first.frame)
+        outgoing.attach(first, url: url, playing: true, frozen: false)
+        incoming.attach(second, url: url, playing: false, frozen: false)
+        let prepared = try XCTUnwrap(incoming.player.currentItem)
+        let surface = incoming.surface
+        XCTAssertTrue(surface.superview === second)
+        XCTAssertFalse(surface.isFrozen)
+        // The approaching card starts before the centre, without replacing its paused layer.
+        incoming.attach(second, url: url, playing: true, frozen: false)
+        deck.configure([requests[1], requests[2], .init(key: "2", url: url)], current: "1", prepareNeighbours: false)
+        XCTAssertTrue(deck.currentSession === incoming)
+        XCTAssertTrue(incoming.player.currentItem === prepared)
+        XCTAssertTrue(incoming.surface === surface)
+        XCTAssertTrue(outgoing.surface.superview === first)
+        outgoing.detach(first)
+        XCTAssertTrue(surface.superview === second)
+        XCTAssertNil(deck.slots["2"], "Do not construct a far neighbour during an active turnover")
+        deck.configure([requests[1], requests[2], .init(key: "2", url: url)], current: "1")
+        XCTAssertEqual(deck.slots.count, 3)
+        deck.retainCurrent()
+        XCTAssertEqual(deck.slots.count, 1)
+        XCTAssertTrue(deck.currentSession === incoming)
+        XCTAssertEqual(incoming.player.rate, 0)
+    }
+
+    @MainActor
+    func testApproachingVideoStartsBeforeCentreAndThePoolStaysBounded() {
+        XCTAssertTrue(CarouselVideoDeck.shouldAnimate(distance: 0, current: true))
+        XCTAssertFalse(CarouselVideoDeck.shouldAnimate(distance: 1, current: false))
+        XCTAssertTrue(CarouselVideoDeck.shouldAnimate(distance: 0.7, current: false))
+        XCTAssertTrue(CarouselVideoDeck.shouldAnimate(distance: -0.7, current: false))
+        XCTAssertFalse(CarouselVideoDeck.shouldAnimate(distance: 1.5, current: false))
+        let deck = CarouselVideoDeck()
+        // Empty construction is cheap; media is only allocated for downloaded cover requests.
+        XCTAssertTrue(deck.slots.isEmpty)
+        XCTAssertNil(deck.currentSession)
+    }
+
     private func movie() async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)

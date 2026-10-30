@@ -11,7 +11,7 @@ struct NowPlayingView: View {
     @Environment(AppRouter.self) private var router
     @Environment(LibraryStore.self) private var library
     @Environment(\.palette) private var palette
-    private var videoSession: MotionVideoSession { player.coverVideoSession }
+    private var videoSession: MotionVideoSession? { player.coverVideos.currentSession }
     @Environment(\.playerArtworkFrames) private var artworkFrames
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var artworkTarget: ArtworkTarget?
@@ -44,11 +44,11 @@ struct NowPlayingView: View {
                             VStack(spacing: Spacing.md) {
                                 TrackCarousel(stacked: stacked, previous: previousEntry(state), current: state.currentEntry,
                                               next: nextEntry(state), previousTwo: neighborhood.previousTwo, nextTwo: neighborhood.nextTwo,
-                                              currentSong: song, isPlaying: state.isPlaying,
+                                              currentSong: song,
                                               skip: { direction in
                                                   if direction > 0 { player.skipNext() } else { player.skipToPreviousItem() }
                                                   return carouselSelection(player.state)
-                                              }, videoSession: videoSession,
+                                              }, videos: player.coverVideos,
                                               setBusy: { player.setVisualMotion(.carousel, active: $0) },
                                               onPull: pulled, onPullEnd: pullEnded)
                                     .frame(maxHeight: .infinity)
@@ -83,7 +83,7 @@ struct NowPlayingView: View {
         .overlay {
             if !reduceMotion, let song = state.currentSong {
                 PlayerArtworkOverlay(progress: drag.progress, frames: artworkFrames, visible: drag.isMoving && drag.isReady) {
-                    MotionCoverView(song: song, playing: state.isPlaying, rendersVideo: drag.isMoving && drag.isReady, animateStill: false, suspended: true, videoSession: videoSession, tracksScrollVisibility: false)
+                    MotionCoverView(song: song, rendersVideo: videoSession != nil && drag.isMoving && drag.isReady, animateStill: false, suspended: true, videoSession: videoSession, tracksScrollVisibility: false)
                         .modifier(PlayerArtworkClip(isCurrent: true, side: artworkFrames.expanded.width))
                 }
                 .environment(\.playerCoverProgress, drag.progress)
@@ -93,7 +93,7 @@ struct NowPlayingView: View {
         .onDisappear {
             player.setVisualMotion(.presentation, active: false)
             player.setVisualMotion(.carousel, active: false)
-            videoSession.pause()
+            player.coverVideos.retainCurrent()
         }
         .background(backdrop(state.currentSong).ignoresSafeArea().modifier(PlayerBackdropFade(drag: drag)))
         .contentShape(Rectangle())

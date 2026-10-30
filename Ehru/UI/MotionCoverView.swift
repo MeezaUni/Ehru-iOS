@@ -10,8 +10,8 @@ extension EnvironmentValues {
     }
 }
 
-/// Only the visible current cover instantiates a decoder. Grid tiles and carousel neighbours
-/// remain still; no network request is made by this view.
+/// Local animated artwork. Carousel neighbours may keep a supplied, paused session warm;
+/// playback of decorative art is independent of the audio transport's paused state.
 struct MotionCoverView: View {
     let song: Song?
     var playing = false
@@ -40,6 +40,8 @@ struct MotionCoverView: View {
                 // has arrived, keeping AVPlayer construction off the opening animation.
                 LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion && !suspended,
                                    frozen: playerInMotion || suspended, session: videoSession)
+                    .id(videoSession.map(ObjectIdentifier.init))
+                    .transition(.identity)
                     .modifier(MotionVideoDissolve())
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)

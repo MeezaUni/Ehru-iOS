@@ -160,16 +160,27 @@ enum PlayerCoverGeometry {
             .concatenating(CGAffineTransform(translationX: -source.minX, y: -source.minY))
     }
 
-    static func chromeOpacity(_ progress: CGFloat) -> Double { Double(((progress - 0.65) / 0.35).clamped(0, 1)) }
+    static func chromeOpacity(_ progress: CGFloat) -> Double {
+        let p = progress.clamped(0, 1)
+        return Double(p * p * (3 - 2 * p))
+    }
 }
 
-/// Header, controls, neighbours and card chrome disappear before the cover reaches the bar.
+/// Chrome joins the cover's motion, rather than waiting for an all-or-nothing completion flag.
 struct PlayerChromeFade: ViewModifier {
     @Environment(PlayerDragState.self) private var drag
     func body(content: Content) -> some View {
-        content.opacity(drag.isMoving ? 0 : 1)
-            .animation(.easeOut(duration: 0.12), value: drag.isMoving)
+        content.modifier(PlayerChromeOpacity(progress: drag.progress))
     }
+}
+
+struct PlayerChromeOpacity: AnimatableModifier {
+    var progress: CGFloat
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+    func body(content: Content) -> some View { content.opacity(PlayerCoverGeometry.chromeOpacity(progress)) }
 }
 
 /// Compensate the artwork's local corner radius for the shrinking foreground scale.
@@ -200,9 +211,9 @@ struct MiniArtworkVisibility: ViewModifier {
 }
 
 enum PlayerMotionTiming {
-    static let duration: TimeInterval = 0.30
+    static let duration: TimeInterval = 0.40
     static func presentation(reduceMotion: Bool) -> Animation {
-        .timingCurve(0.22, 0.8, 0.25, 1, duration: reduceMotion ? 0.16 : duration)
+        .timingCurve(0.25, 0.1, 0.25, 1, duration: reduceMotion ? 0.16 : duration)
     }
 }
 

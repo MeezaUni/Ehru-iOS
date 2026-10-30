@@ -33,7 +33,7 @@ final class PlayerRenderingTests: XCTestCase {
         func strip(_ focus: CGFloat, front: Int) -> some View {
             CarouselStrip(items: scene.items, focus: focus, frontOrdinal: front, stack: 0,
                           viewport: CGSize(width: 390, height: 450), cardSize: CGSize(width: 280, height: 380),
-                          hideLeft: false, reduceMotion: false, meter: CarouselPresentationMeter()) { item in
+                          reduceMotion: false, meter: CarouselPresentationMeter()) { item in
                 Rectangle().fill(colors[item.entry.id] ?? .white).frame(width: 280, height: 380)
             }
             .background(Color.black)
@@ -46,12 +46,27 @@ final class PlayerRenderingTests: XCTestCase {
         assertColor(forward, at: CGPoint(x: 195, y: 225), dominant: 2)
         let reverse = try pixels(strip(0.25, front: 0), size: CGSize(width: 390, height: 450))
         assertColor(reverse, at: CGPoint(x: 195, y: 225), dominant: 1)
+        let midpoint = try pixels(strip(0.5, front: 1), size: CGSize(width: 390, height: 450))
+        for x in 192...198 {
+            XCTAssertLessThan(midpoint.color(x: x, y: 225).max() ?? 1, 0.05, "The two covers must have a visible gap")
+        }
         scene.select(CarouselSelection(previous: entries[1], current: entries[2], next: entries[3]))
         scene.settle()
         let afterSkip = try pixels(strip(1, front: 1), size: CGSize(width: 390, height: 450))
         assertColor(afterSkip, at: CGPoint(x: 5, y: 225), dominant: 1)
         assertColor(afterSkip, at: CGPoint(x: 195, y: 225), dominant: 2)
         assertColor(afterSkip, at: CGPoint(x: 385, y: 225), dominant: 0)
+    }
+
+    @MainActor
+    func testOpeningChromeIsVisibleDuringTheCoverFlight() throws {
+        for progress in [CGFloat(0.35), 0.65, 1] {
+            let chrome = Color.green.modifier(PlayerChromeOpacity(progress: progress)).background(Color.black)
+            let rendered = try pixels(chrome, size: CGSize(width: 100, height: 100))
+            let green = rendered.color(x: 50, y: 50)[1]
+            XCTAssertGreaterThan(green, 0.15, "Controls must join the entrance, not wait for its completion")
+            if progress < 1 { XCTAssertLessThan(green, 0.95) }
+        }
     }
 
     @MainActor

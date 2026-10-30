@@ -2,7 +2,7 @@ import AVFoundation
 import CoreImage
 import UIKit
 
-/// One lazy, resident decoder owned by playback. Rebinding the same album keeps its buffer and position;
+/// One lazy, resident decoder per visible/prepared card. Rebinding its host keeps its buffer and position;
 /// an old view's teardown cannot stop the layer that has just taken ownership.
 @MainActor
 final class MotionVideoSession {
@@ -34,8 +34,15 @@ final class MotionVideoSession {
     private var itemObservation: NSKeyValueObservation?
     private weak var outputItem: AVPlayerItem?
     private var output: AVPlayerItemVideoOutput?
+    private var itemReadiness: NSKeyValueObservation?
+    private var generation = UUID()
+    private var wantsPlayback = false
+    private var prerolling = false
+    private var primed = false
 
-    func attach(_ next: MotionVideoHost, url: URL, playing: Bool, frozen: Bool) {
+    /// Prepare local media before a swipe. Preroll decodes its first frame without advancing
+    /// the movie; the paused neighbour keeps its own layer instead of borrowing the main one.
+    func prepare(url: URL) {
         if self.url != url {
             stop()
             self.url = url
@@ -43,9 +50,14 @@ final class MotionVideoSession {
             item.preferredForwardBufferDuration = 3
             looper = AVPlayerLooper(player: player, templateItem: item)
             itemObservation = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
-                DispatchQueue.main.async { self?.bindOutput() }
+                DispatchQueue.main.async { self?.bindOutput(); self?.observeReadiness() }
             }
         }
+    }
+
+    func attach(_ next: MotionVideoHost, url: URL, playing: Bool, frozen: Bool) {
+        prepare(url: url)
+        wantsPlayback = playing && !frozen
         if host !== next {
             host = next
             next.mount(surface)
@@ -65,8 +77,36 @@ final class MotionVideoSession {
             let buffer = output?.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
             surface.freeze(buffer)
         } else if !frozen { surface.unfreeze() }
-        if playing && !frozen { if player.rate == 0 { player.play() } }
-        else { player.pause() }
+        if wantsPlayback {
+            if prerolling { player.cancelPendingPrerolls(); prerolling = false }
+            if player.rate == 0 { player.play() }
+            primed = true
+        } else {
+            if player.rate != 0 { player.pause() }
+            prerollIfReady()
+        }
+    }
+
+    private func observeReadiness() {
+        itemReadiness = nil
+        guard let item = residentPlayer?.currentItem else { return }
+        itemReadiness = item.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.prerollIfReady() }
+        }
+    }
+
+    private func prerollIfReady() {
+        guard !wantsPlayback, !primed, !prerolling, let player = residentPlayer,
+              player.currentItem?.status == .readyToPlay else { return }
+        prerolling = true
+        let token = generation
+        player.preroll(atRate: 1) { [weak self] finished in
+            DispatchQueue.main.async {
+                guard let self, self.generation == token else { return }
+                self.prerolling = false
+                self.primed = finished
+            }
+        }
     }
 
     private func bindOutput() {
@@ -93,12 +133,15 @@ final class MotionVideoSession {
         // Keep the same decoded layer/frame for a card <-> flight-overlay reparent.
     }
 
-    func pause() { residentPlayer?.pause() }
+    func pause() { wantsPlayback = false; residentPlayer?.pause() }
 
     func stop() {
         residentPlayer?.pause()
+        residentPlayer?.cancelPendingPrerolls()
+        generation = UUID(); wantsPlayback = false; prerolling = false; primed = false
         readiness = nil
         itemObservation = nil
+        itemReadiness = nil
         if let output, let outputItem { outputItem.remove(output) }
         output = nil; outputItem = nil
         residentSurface?.videoLayer.player = nil

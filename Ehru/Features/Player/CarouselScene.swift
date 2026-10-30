@@ -92,16 +92,60 @@ struct CarouselPose {
     static func page(width: CGFloat) -> CGFloat { width * 0.66 }
     static func depth(distance: CGFloat) -> Double { 2 - Double(abs(distance)) }
 
-    init(distance: CGFloat, width: CGFloat, stack: CGFloat, hideLeft: Bool, reduceMotion: Bool) {
+    init(distance: CGFloat, width: CGFloat, stack: CGFloat, reduceMotion: Bool) {
         let away = abs(distance), near = min(abs(distance), 1)
         let sideScale: CGFloat = reduceMotion ? 0.86 : 0.78
         scale = (1 - (1 - sideScale) * near) * (1 - stack) + (1 - 0.06 * near) * stack
-        x = distance * (Self.page(width: width) * (1 - stack) + 12 * stack)
+        // Separate projected edges, not just unrotated frame centres. Adjacent cards share
+        // the same pitch even halfway through a swipe, including a stacked-mode turnover.
+        x = Self.position(distance: distance, width: width, stack: stack, reduceMotion: reduceMotion)
         y = -20 * near * stack
         turn = reduceMotion ? 0 : -Double(distance.clamped(-1, 1)) * 32 * Double(1 - stack)
         let vanish = (1 - max(away - 1, 0) / 0.6).clamped(0, 1)
-        let gathered = hideLeft ? min(stack * min(max(-distance, 0), 1) * 1.5, 1) : 0
+        let gathered = stack * near
         opacity = Double(vanish * (1 - gathered))
+    }
+
+    static func gap(width: CGFloat) -> CGFloat { (width * 0.04).clamped(8, 16) }
+
+    private static func edge(_ distance: CGFloat, width: CGFloat, stack: CGFloat, reduceMotion: Bool, inward: Bool) -> CGFloat {
+        let near = min(abs(distance), 1)
+        let scale = (1 - (reduceMotion ? 0.14 : 0.22) * near) * (1 - stack) + (1 - 0.06 * near) * stack
+        let angle = reduceMotion ? 0 : near * 32 * (1 - stack) * .pi / 180
+        // Measure the same projection used to paint a right-hand card. Perspective makes
+        // its inward and outward edges different; assuming a symmetric box hides the peeks.
+        let projection = CarouselProjection.transform(size: CGSize(width: 1, height: 1), scale: scale,
+                                                      turn: -Double(angle) * 180 / .pi)
+        let left = projection.m31 / projection.m33
+        let right = (projection.m11 + projection.m31) / (projection.m13 + projection.m33)
+        return width * (inward ? 0.5 - left : right - 0.5)
+    }
+
+    private static func position(distance: CGFloat, width: CGFloat, stack: CGFloat, reduceMotion: Bool) -> CGFloat {
+        let away = abs(distance), whole = Int(away.rounded(.down)), fraction = away - CGFloat(whole)
+        func half(_ d: CGFloat, inward: Bool = true) -> CGFloat {
+            edge(d, width: width, stack: stack, reduceMotion: reduceMotion, inward: inward)
+        }
+        let gap = gap(width: width)
+        var result = fraction * (half(fraction) + half(1 - fraction) + gap)
+        if whole > 0 {
+            for step in 1...whole {
+                result += half(fraction + CGFloat(step - 1), inward: false) + half(fraction + CGFloat(step)) + gap
+            }
+        }
+        return distance < 0 ? -result : result
+    }
+}
+
+enum CarouselProjection {
+    static func transform(size: CGSize, scale: CGFloat, turn: Double, x: CGFloat = 0, y: CGFloat = 0) -> ProjectionTransform {
+        var rotation = CATransform3DIdentity
+        rotation.m34 = -0.45 / max(size.width, 1)
+        rotation = CATransform3DRotate(rotation, CGFloat(turn * .pi / 180), 0, 1, 0)
+        return ProjectionTransform(CGAffineTransform(translationX: -size.width / 2, y: -size.height / 2))
+            .concatenating(ProjectionTransform(rotation))
+            .concatenating(ProjectionTransform(CGAffineTransform(scaleX: scale, y: scale)))
+            .concatenating(ProjectionTransform(CGAffineTransform(translationX: size.width / 2 + x, y: size.height / 2 + y)))
     }
 }
 
@@ -134,20 +178,29 @@ struct CarouselStrip<Card: View>: View {
     let stack: CGFloat
     let viewport: CGSize
     let cardSize: CGSize
-    let hideLeft: Bool
     let reduceMotion: Bool
     let meter: CarouselPresentationMeter
     @ViewBuilder var card: (CarouselScene.Item) -> Card
 
     var body: some View {
         ZStack {
+            // A quiet rear plate preserves the gathered deck at rest. Actual song cards
+            // always have separate lanes, so titles and artwork cannot cross during turnover.
+            RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
+                .fill(Color.white.opacity(0.055))
+                .overlay(RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                .frame(width: cardSize.width * 0.94, height: cardSize.height * 0.94)
+                .offset(x: 10, y: -20)
+                .opacity(Double(stack * (1 - min(abs(focus - focus.rounded()) * 2, 1))))
+                .allowsHitTesting(false).accessibilityHidden(true)
             ForEach(items) { item in
                 let distance = CGFloat(item.ordinal) - focus
                 let pose = CarouselPose(distance: distance, width: cardSize.width, stack: stack,
-                                        hideLeft: hideLeft, reduceMotion: reduceMotion)
+                                        reduceMotion: reduceMotion)
                 card(item)
                     .modifier(DepthCard(distance: distance, width: cardSize.width, stack: stack,
-                                        hideLeft: hideLeft, reduceMotion: reduceMotion))
+                                        reduceMotion: reduceMotion))
                     .opacity(pose.opacity)
                     .zIndex(CarouselPose.depth(distance: CGFloat(item.ordinal - frontOrdinal)))
             }

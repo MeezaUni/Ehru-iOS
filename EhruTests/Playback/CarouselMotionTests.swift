@@ -42,12 +42,12 @@ final class CarouselMotionTests: XCTestCase {
         let drag = PlayerDragState()
         drag.setPresented(true, reduceMotion: false)
         drag.finishEntrance()
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(500))
         XCTAssertFalse(drag.isMoving)
         drag.setPresented(false, reduceMotion: false)
         try await Task.sleep(for: .milliseconds(80))
         drag.setPresented(true, reduceMotion: false)
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(500))
         XCTAssertTrue(drag.isPresented)
         XCTAssertEqual(drag.progress, 1)
         XCTAssertFalse(drag.isMoving)
@@ -124,7 +124,7 @@ final class CarouselMotionTests: XCTestCase {
         var body: some View {
             CarouselStrip(items: items, focus: motion.focus, frontOrdinal: motion.frontOrdinal, stack: motion.stack,
                           viewport: CGSize(width: 390, height: 450), cardSize: CGSize(width: 280, height: 350),
-                          hideLeft: true, reduceMotion: false, meter: motion.meter) { _ in
+                          reduceMotion: false, meter: motion.meter) { _ in
                 Color.blue.frame(width: 280, height: 350)
             }
         }

@@ -145,14 +145,34 @@ final class CarouselSceneTests: XCTestCase {
                        CarouselPresentationSample(focus: 0.42, stack: 0.7))
     }
 
-    func testStackedNeighbourIsSmallerAndSitsBehindTheCurrentCard() {
-        let current = CarouselPose(distance: 0, width: 280, stack: 1, hideLeft: true, reduceMotion: false)
-        let next = CarouselPose(distance: 1, width: 280, stack: 1, hideLeft: true, reduceMotion: false)
+    func testStackedNeighbourUsesASeparateTurnoverLaneAndFadesBehindTheRearPlateAtRest() {
+        let current = CarouselPose(distance: 0, width: 280, stack: 1, reduceMotion: false)
+        let next = CarouselPose(distance: 1, width: 280, stack: 1, reduceMotion: false)
         XCTAssertLessThan(next.scale, current.scale)
         XCTAssertLessThan(next.y, current.y)
         XCTAssertEqual(next.turn, 0)
-        XCTAssertLessThan(next.x, 20)
-        XCTAssertEqual(CarouselPose(distance: -1, width: 280, stack: 1, hideLeft: true, reduceMotion: false).opacity, 0)
+        XCTAssertGreaterThan(next.x, 280 * (current.scale + next.scale) / 2)
+        XCTAssertEqual(next.opacity, 0)
+        XCTAssertEqual(CarouselPose(distance: -1, width: 280, stack: 1, reduceMotion: false).opacity, 0)
+    }
+
+    func testProjectedCardsHaveAGapThroughoutSwipesInBothLayouts() {
+        for width in [CGFloat(160), 280, 480] {
+            let size = CGSize(width: width, height: width + 100)
+            for reduced in [false, true] {
+                for stack in [CGFloat(0), 0.25, 0.5, 0.75, 1] {
+                    for step in -40...40 {
+                        let focus = CGFloat(step) / 40
+                        for ordinal in -2...1 {
+                            let left = bounds(ordinal: ordinal, focus: focus, size: size, reduced: reduced, stack: stack)
+                            let right = bounds(ordinal: ordinal + 1, focus: focus, size: size, reduced: reduced, stack: stack)
+                            XCTAssertGreaterThanOrEqual(right.minX - left.maxX, CarouselPose.gap(width: width) - 0.001,
+                                                       "Cards cross at focus \(focus), layout \(stack), width \(width)")
+                        }
+                    }
+                }
+            }
+        }
     }
 
     func testSwipeDirectionUsesFingerTravelInsteadOfThePreviousSlidePosition() {
@@ -172,9 +192,9 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertEqual(meter.sample(fallback: CarouselPresentationSample(focus: 1, stack: 1)).stack, 0.7, accuracy: 1e-6)
     }
 
-    private func bounds(ordinal: Int, focus: CGFloat, size: CGSize, reduced: Bool) -> CGRect {
-        let effect = DepthCard(distance: CGFloat(ordinal) - focus, width: size.width, stack: 0,
-                               hideLeft: false, reduceMotion: reduced)
+    private func bounds(ordinal: Int, focus: CGFloat, size: CGSize, reduced: Bool, stack: CGFloat = 0) -> CGRect {
+        let effect = DepthCard(distance: CGFloat(ordinal) - focus, width: size.width, stack: stack,
+                               reduceMotion: reduced)
         let m = effect.effectValue(size: size)
         let points = [CGPoint.zero, CGPoint(x: size.width, y: 0), CGPoint(x: 0, y: size.height),
                       CGPoint(x: size.width, y: size.height)].map { p -> CGPoint in
