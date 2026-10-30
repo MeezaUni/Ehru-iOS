@@ -33,7 +33,7 @@ struct TrackCarousel: View {
     @State private var horizontal: Bool?
 
     private var selection: CarouselSelection { CarouselSelection(previous: previous, current: current, next: next, previousTwo: previousTwo, nextTwo: nextTwo) }
-    private var videoRequests: [CarouselVideoDeck.Request] {
+    private func videoRequests() -> [CarouselVideoDeck.Request] {
         guard scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion else { return [] }
         return scene.items.filter { abs($0.ordinal - scene.center) <= 1 }.compactMap { item in
             artwork.url(for: item.entry.song).map { CarouselVideoDeck.Request(key: item.id, url: $0) }
@@ -43,7 +43,7 @@ struct TrackCarousel: View {
     private func refreshVideos() {
         // Cold media construction waits for the entrance. Already prepared surfaces can fly.
         guard !playerInMotion, scene.currentKey != nil else { return }
-        videos.configure(videoRequests, current: scene.currentKey, prepareNeighbours: !motion.moving)
+        videos.configure(videoRequests(), current: scene.currentKey, prepareNeighbours: !motion.moving)
     }
 
     var body: some View {
@@ -67,7 +67,11 @@ struct TrackCarousel: View {
         }
         .onChange(of: selection, initial: true) { _, next in selectionChanged(next) }
         .onChange(of: stacked) { _, _ in settle() }
-        .onChange(of: videoRequests, initial: true) { _, _ in refreshVideos() }
+        // Media lookup is structural work, never a dependency of the per-touch render path.
+        .onChange(of: artwork.saved) { _, _ in refreshVideos() }
+        .onChange(of: scenePhase) { _, _ in refreshVideos() }
+        .onChange(of: budget) { _, _ in refreshVideos() }
+        .onChange(of: reduceMotion) { _, _ in refreshVideos() }
         .onChange(of: playerInMotion) { _, active in
             if !active { refreshVideos(); return }
             guard motion.moving else { return }
@@ -86,7 +90,13 @@ struct TrackCarousel: View {
                             showsMetadata: isCurrent || !stacked,
                             animatesMotion: CarouselVideoDeck.shouldAnimate(distance: distance, current: isCurrent),
                             reportsArtworkFrame: isCurrent && !motion.moving,
-                            videoSession: session, distance: distance, metrics: metrics)
+                            videoSession: session, metrics: metrics)
+            .equatable()
+            .overlay {
+                RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
+                    .fill(.black.opacity(Double(min(abs(distance), 1)) * 0.45))
+                    .allowsHitTesting(false)
+            }
             .modifier(PlayerNeighbourFade(isCurrent: isCurrent))
             .onTapGesture {
                 guard !isCurrent, !stacked else { return }
@@ -108,38 +118,40 @@ struct TrackCarousel: View {
                 guard horizontal == true else { onPullEnd(value.translation.height, value.predictedEndTranslation.height); return }
                 let wanted = CarouselSwipeIntent.direction(translation: value.translation.width,
                                                            predicted: value.predictedEndTranslation.width, page: page)
-                if selection.canMove(wanted) { commitSwipe(wanted) }
-                else { settle() }
+                let velocity = -value.velocity.width / page
+                if selection.canMove(wanted) { commitSwipe(wanted, velocity: velocity) }
+                else { settle(velocity: velocity) }
             }
     }
 
-    private func selectionChanged(_ next: CarouselSelection, preferredDirection: Int? = nil) {
+    private func selectionChanged(_ next: CarouselSelection, preferredDirection: Int? = nil, velocity: CGFloat? = nil) {
         guard next != scene.selection else { return }
         let previousID = scene.selection.current?.id
         let adjacent = scene.select(next, preferredDirection: preferredDirection)
         if previousID == next.current?.id && motion.moving { return }
         if previousID != next.current?.id, adjacent {
-            settle()
+            settle(velocity: velocity)
         } else {
             motion.snap(center: scene.center, stacked: stacked)
             scene.settle()
         }
+        refreshVideos()
     }
 
     /// Commit the real queue immediately so card title, index, duration and audio stay together.
     /// Transport defers non-audio side effects while the compositor settles the strip.
-    private func commitSwipe(_ direction: Int) {
+    private func commitSwipe(_ direction: Int, velocity: CGFloat? = nil) {
         guard !playerInMotion, selection.canMove(direction) else { settle(); return }
         motion.hold()
         setBusy(true)
         let before = scene.selection.current?.id
         let result = skip(direction)
-        selectionChanged(result, preferredDirection: direction)
-        if result.current?.id == before { settle() }
+        selectionChanged(result, preferredDirection: direction, velocity: velocity)
+        if result.current?.id == before { settle(velocity: velocity) }
     }
 
-    private func settle() {
-        motion.settle(center: scene.center, stacked: stacked, reduceMotion: reduceMotion) {
+    private func settle(velocity: CGFloat? = nil) {
+        motion.settle(center: scene.center, stacked: stacked, reduceMotion: reduceMotion, velocity: velocity) {
             scene.settle()
         }
     }
@@ -149,7 +161,7 @@ struct TrackCarousel: View {
 /// The card's size in the room it is given (Android's CarouselCard): the artwork as large as the
 /// width (80 % of it, so the neighbours peek in) and the height allow, and the album line only when
 /// there is height for it.
-struct CardMetrics {
+struct CardMetrics: Equatable, Sendable {
     static let padding: CGFloat = 10
     let showAlbum: Bool
     let metadataHeight: CGFloat
@@ -186,20 +198,25 @@ struct DepthCard: GeometryEffect {
 /// One card: the artwork with the title, artist and (room allowing) album beneath, as one rounded
 /// card in its own artwork's colours. The current card carries the favourite button; neighbours
 /// darken with their distance.
-private struct CarouselCard: View {
+private struct CarouselCard: View, Equatable {
     let song: Song
     let isCurrent: Bool
     let showsMetadata: Bool
     let animatesMotion: Bool
     let reportsArtworkFrame: Bool
     let videoSession: MotionVideoSession?
-    let distance: CGFloat
     let metrics: CardMetrics
     @Environment(LibraryActions.self) private var actions
     @Environment(\.playerArtworkInFlight) private var artworkInFlight
     @Environment(\.palette) private var palette
     @State private var artworkPalette = ArtworkPaletteState()
     @State private var artworkRevision = 0
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.song == rhs.song && lhs.isCurrent == rhs.isCurrent && lhs.showsMetadata == rhs.showsMetadata &&
+        lhs.animatesMotion == rhs.animatesMotion && lhs.reportsArtworkFrame == rhs.reportsArtworkFrame &&
+        lhs.videoSession === rhs.videoSession && lhs.metrics == rhs.metrics
+    }
 
     var body: some View {
         let colors = LyricsColors(artworkPalette.palette(for: song.url))
@@ -245,7 +262,6 @@ private struct CarouselCard: View {
         }
         .padding(CardMetrics.padding)
         .background(CardSurface(colors: colors, shape: shape).modifier(PlayerChromeFade()))
-        .overlay(shape.fill(.black.opacity(Double(min(abs(distance), 1)) * 0.45)).allowsHitTesting(false))
         .shadow(color: .black.opacity(0.28), radius: 20, y: 12)
         .accessibilityElement(children: isCurrent ? .contain : .combine)
         .accessibilityHint(isCurrent ? "" : "Plays this track")

@@ -98,9 +98,11 @@ struct CarouselPose {
         let away = abs(distance), near = min(abs(distance), 1)
         let sideScale: CGFloat = reduceMotion ? 0.86 : 0.78
         scale = (1 - (1 - sideScale) * near) * (1 - stack) + (1 - 0.06 * near) * stack
-        // Spread cards keep separate projected edges. The layout blend gathers those
-        // lanes into a centred depth deck; swiping never unfolds that deck sideways.
-        x = stack == 1 ? 0 : Self.position(distance: distance, width: width, stack: stack, reduceMotion: reduceMotion) * (1 - stack)
+        // A stacked card starts directly behind the centre, peeks out along the appropriate
+        // side halfway through the turnover, then returns to the centre as the front card.
+        // Its short arc is distinct from the spread layout's full sideways page travel.
+        let deckX = Self.deckOffset(distance: distance, width: width, reduceMotion: reduceMotion)
+        x = stack == 1 ? deckX : Self.position(distance: distance, width: width, stack: stack, reduceMotion: reduceMotion) * (1 - stack) + deckX * stack
         y = -20 * near * stack
         turn = reduceMotion ? 0 : -Double(distance.clamped(-1, 1)) * 32 * Double(1 - stack)
         let vanish = (1 - max(away - 1, 0) / 0.6).clamped(0, 1)
@@ -109,6 +111,11 @@ struct CarouselPose {
     }
 
     static func gap(width: CGFloat) -> CGFloat { (width * 0.04).clamped(8, 16) }
+
+    private static func deckOffset(distance: CGFloat, width: CGFloat, reduceMotion: Bool) -> CGFloat {
+        guard !reduceMotion, abs(distance) < 1 else { return 0 }
+        return sin(distance * .pi) * width * 0.24
+    }
 
     private static func edge(_ distance: CGFloat, width: CGFloat, stack: CGFloat, reduceMotion: Bool, inward: Bool) -> CGFloat {
         let near = min(abs(distance), 1)

@@ -15,7 +15,7 @@ final class CarouselMotion {
     @ObservationIgnored private var settlement: Task<Void, Never>?
     @ObservationIgnored private var origin: CarouselPresentationSample?
 
-    static let duration: TimeInterval = 0.28
+    static let duration = CarouselSettlementTiming.standardDuration
 
     func hold() {
         settlement?.cancel(); settlement = nil
@@ -36,29 +36,31 @@ final class CarouselMotion {
             focus = CarouselDragLimit.focus(origin.focus + distance, center: center, canPrevious: canPrevious, canNext: canNext)
             // A depth-deck swipe remains a depth-deck swipe; only the layout button spreads it.
             stack = origin.stack
-            frontOrdinal = Int(focus.rounded())
+            // Keep the existing layer order throughout the touch. Reordering AVPlayer-backed
+            // surfaces at the half-page boundary adds a discrete repaint to a continuous drag.
         }
     }
 
-    func settle(center: Int, stacked: Bool, reduceMotion: Bool, completion: @escaping () -> Void = {}) {
+    func settle(center: Int, stacked: Bool, reduceMotion: Bool, velocity: CGFloat? = nil, completion: @escaping () -> Void = {}) {
         origin = nil
         settlement?.cancel()
         let token = UUID(); generation = token
-        let duration = reduceMotion ? 0.16 : Self.duration
-        let animation = Animation.timingCurve(0.22, 0.8, 0.25, 1, duration: duration)
-        withAnimation(animation) {
+        let targetStack: CGFloat = stacked ? 1 : 0
+        let timing = CarouselSettlementTiming(delta: CGFloat(center) - focus, layoutDelta: targetStack - stack,
+                                             velocity: velocity, reduceMotion: reduceMotion)
+        withAnimation(timing.animation) {
             moving = true
             focus = CGFloat(center)
-            stack = stacked ? 1 : 0
-            frontOrdinal = center
+            stack = targetStack
         }
         // Cleanup is bounded independently of SwiftUI's render/visibility completion callbacks.
         // Native interpolation still draws every frame; this task only releases interaction state.
         settlement = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(duration)) } catch { return }
+            do { try await Task.sleep(for: .seconds(timing.duration)) } catch { return }
             guard let self, self.generation == token, !Task.isCancelled else { return }
             self.settlement = nil
             self.meter.record(self.focus, stack: self.stack)
+            self.frontOrdinal = center
             self.moving = false
             completion()
         }
@@ -78,6 +80,37 @@ final class CarouselMotion {
 
     func endGesture() { origin = nil }
     func cancel() { settlement?.cancel(); settlement = nil; generation = UUID(); origin = nil; moving = false }
+}
+
+/// Buttons traverse a whole page. A released finger only has the remaining travel to cover,
+/// and the initial curve slope follows its measured velocity instead of starting a new fling.
+struct CarouselSettlementTiming {
+    static let standardDuration: TimeInterval = 0.28
+    let duration: TimeInterval
+    let firstX: Double
+    let firstY: Double
+    let secondX: Double
+
+    init(delta: CGFloat, layoutDelta: CGFloat = 0, velocity: CGFloat?, reduceMotion: Bool) {
+        guard let velocity, !reduceMotion else {
+            duration = reduceMotion ? 0.16 : Self.standardDuration
+            firstX = 0.22; firstY = 0.8; secondX = 0.25
+            return
+        }
+        let distance = Double(abs(delta))
+        let travel = min(max(distance, Double(abs(layoutDelta))), 1)
+        let speed = velocity.isFinite ? max(Double(velocity) * (delta < 0 ? -1 : 1), 0) : 0
+        var time = (Self.standardDuration * sqrt(travel)).clamped(0.10, Self.standardDuration)
+        if distance > 0.001, speed > 0, abs(layoutDelta) < 0.01 {
+            time = min(time, 2 * distance / speed).clamped(0.10, Self.standardDuration)
+        }
+        duration = time
+        firstX = 0.25
+        firstY = distance > 0.001 ? (speed * time / distance * firstX).clamped(0, 0.9) : 0
+        secondX = 0.6
+    }
+
+    var animation: Animation { .timingCurve(firstX, firstY, secondX, 1, duration: duration) }
 }
 
 enum CarouselSwipeIntent {

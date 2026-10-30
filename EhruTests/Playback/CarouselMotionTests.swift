@@ -32,6 +32,40 @@ final class CarouselMotionTests: XCTestCase {
     }
 
     @MainActor
+    func testDraggingAcrossHalfwayDoesNotReorderTheNativeCardLayers() async throws {
+        let motion = CarouselMotion()
+        motion.snap(center: 0, stacked: true)
+        for translation in [CGFloat(-90), -110, -160] {
+            motion.drag(translation: translation, page: 200, center: 0, canPrevious: true, canNext: true)
+            XCTAssertEqual(motion.frontOrdinal, 0, "The outgoing layer must remain in front throughout a touch")
+        }
+        motion.settle(center: 1, stacked: true, reduceMotion: false, velocity: 1)
+        XCTAssertEqual(motion.frontOrdinal, 0, "An incoming card must emerge from behind the outgoing card")
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertEqual(motion.frontOrdinal, 1)
+        XCTAssertFalse(motion.moving)
+    }
+
+    func testReleasedFingerUsesRemainingDistanceAndMatchesItsSpeedInBothDirections() {
+        let button = CarouselSettlementTiming(delta: 1, velocity: nil, reduceMotion: false)
+        let slow = CarouselSettlementTiming(delta: 0.4, velocity: 1, reduceMotion: false)
+        let fast = CarouselSettlementTiming(delta: 0.4, velocity: 6, reduceMotion: false)
+        let reverse = CarouselSettlementTiming(delta: -0.4, velocity: -1, reduceMotion: false)
+        let near = CarouselSettlementTiming(delta: 0.05, velocity: 1, reduceMotion: false)
+        XCTAssertLessThan(slow.duration, button.duration)
+        XCTAssertLessThan(fast.duration, slow.duration)
+        XCTAssertLessThan(near.duration, slow.duration)
+        // Bézier's starting slope, converted back to pages/second, matches the real release.
+        XCTAssertEqual(slow.firstY / slow.firstX * 0.4 / slow.duration, 1, accuracy: 1e-6)
+        XCTAssertEqual(fast.firstY / fast.firstX * 0.4 / fast.duration, 6, accuracy: 1e-6)
+        XCTAssertEqual(reverse.duration, slow.duration)
+        XCTAssertEqual(reverse.firstY, slow.firstY)
+        XCTAssertEqual(CarouselSettlementTiming(delta: 0.4, velocity: -1, reduceMotion: false).firstY, 0)
+        XCTAssertEqual(CarouselSettlementTiming(delta: 0.4, velocity: .nan, reduceMotion: false).firstY, 0)
+        XCTAssertEqual(CarouselSettlementTiming(delta: 0.4, velocity: 6, reduceMotion: true).duration, 0.16)
+    }
+
+    @MainActor
     func testCleanupDeadlineDoesNotDependOnAVisibleSwiftUIRenderer() async throws {
         let motion = CarouselMotion()
         var completed = 0

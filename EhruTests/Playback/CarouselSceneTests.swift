@@ -173,15 +173,21 @@ final class CarouselSceneTests: XCTestCase {
         }
     }
 
-    func testStackedTurnoversNeverEnterFromTheSideInEitherDirection() {
+    func testStackedTurnoversFollowAShortMirroredArcFromBehind() {
         for step in -40...40 {
             let focus = CGFloat(step) / 40
-            for ordinal in -1...1 {
-                let pose = CarouselPose(distance: CGFloat(ordinal) - focus, width: 280, stack: 1, reduceMotion: false)
-                XCTAssertEqual(pose.x, 0)
-                XCTAssertEqual(pose.turn, 0)
-            }
+            let right = CarouselPose(distance: focus, width: 280, stack: 1, reduceMotion: false)
+            let left = CarouselPose(distance: -focus, width: 280, stack: 1, reduceMotion: false)
+            XCTAssertEqual(right.x, -left.x, accuracy: 1e-6)
+            XCTAssertLessThanOrEqual(abs(right.x), 280 * 0.24 + 1e-6)
+            XCTAssertEqual(right.turn, 0)
         }
+        XCTAssertGreaterThan(CarouselPose(distance: 0.5, width: 280, stack: 1, reduceMotion: false).x, 50)
+        XCTAssertLessThan(CarouselPose(distance: -0.5, width: 280, stack: 1, reduceMotion: false).x, -50)
+        for distance in [CGFloat(-1), 0, 1] {
+            XCTAssertEqual(CarouselPose(distance: distance, width: 280, stack: 1, reduceMotion: false).x, 0)
+        }
+        XCTAssertEqual(CarouselPose(distance: 0.5, width: 280, stack: 1, reduceMotion: true).x, 0)
     }
 
     func testSwipeDirectionUsesFingerTravelInsteadOfThePreviousSlidePosition() {

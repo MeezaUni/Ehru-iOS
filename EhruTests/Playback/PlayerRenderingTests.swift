@@ -93,7 +93,7 @@ final class PlayerRenderingTests: XCTestCase {
     }
 
     @MainActor
-    func testDepthTurnoverPaintsCentredCardsWithoutSidePreviews() throws {
+    func testDepthTurnoverKeepsItsCompactFootprint() throws {
         let items = (-1...1).map { CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 2)))) }
         for focus in [CGFloat(-0.75), -0.25, 0.25, 0.75] {
             let content = CarouselStrip(items: items, focus: focus, frontOrdinal: Int(focus.rounded()), stack: 1,
@@ -105,6 +105,23 @@ final class PlayerRenderingTests: XCTestCase {
             assertColor(rendered, at: CGPoint(x: 195, y: 225), dominant: 2)
             XCTAssertLessThan(rendered.color(x: 5, y: 225).max() ?? 1, 0.05)
             XCTAssertLessThan(rendered.color(x: 385, y: 225).max() ?? 1, 0.05)
+        }
+    }
+
+    @MainActor
+    func testDepthCardEmergesFromBehindOnTheAppropriateSide() throws {
+        let items = (-1...1).map { CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 2)))) }
+        for focus in [CGFloat(-0.5), 0.5] {
+            let content = CarouselStrip(items: items, focus: focus, frontOrdinal: 0, stack: 1,
+                                        viewport: CGSize(width: 390, height: 450), cardSize: CGSize(width: 280, height: 380),
+                                        reduceMotion: false, meter: CarouselPresentationMeter()) { item in
+                Rectangle().fill(item.ordinal == 0 ? Color(red: 0, green: 1, blue: 0) : Color(red: 0, green: 0, blue: 1))
+                    .frame(width: 280, height: 380)
+            }.background(Color.black)
+            let rendered = try pixels(content, size: CGSize(width: 390, height: 450))
+            assertColor(rendered, at: CGPoint(x: focus > 0 ? 350 : 40, y: 225), dominant: 2)
+            assertColor(rendered, at: CGPoint(x: focus > 0 ? 40 : 350, y: 225), dominant: 1)
+            assertColor(rendered, at: CGPoint(x: 195, y: 225), dominant: 1)
         }
     }
 
