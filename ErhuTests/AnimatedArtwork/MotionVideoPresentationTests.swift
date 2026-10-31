@@ -359,6 +359,12 @@ final class MotionVideoPresentationTests: XCTestCase {
     private func movie(firstFrameTime: CMTime = .zero) async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
+        defer {
+            if writer.status != .completed {
+                writer.cancelWriting()
+                try? FileManager.default.removeItem(at: url)
+            }
+        }
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
             AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 64, AVVideoHeightKey: 64,
         ])
@@ -375,13 +381,17 @@ final class MotionVideoPresentationTests: XCTestCase {
         CVPixelBufferLockBaseAddress(buffer, [])
         memset(CVPixelBufferGetBaseAddress(buffer)!, 255, CVPixelBufferGetBytesPerRow(buffer) * 64)
         CVPixelBufferUnlockBaseAddress(buffer, [])
-        let deadline = Date().addingTimeInterval(5)
         // Keep identity assertions away from the looper's intentional end-of-file item swap.
         for frame in 0..<60 {
-            while !input.isReadyForMoreMediaData, writer.status == .writing, Date() < deadline {
+            // Bound a stalled encoder, rather than the total time for all 60 frames on a
+            // shared simulator runner. Every successful append starts a fresh progress budget.
+            let deadline = ContinuousClock.now.advanced(by: .seconds(15))
+            while !input.isReadyForMoreMediaData, writer.status == .writing, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(10))
             }
-            guard input.isReadyForMoreMediaData else { throw MotionArtworkError("Test movie writer timed out") }
+            guard input.isReadyForMoreMediaData else {
+                throw writer.error ?? MotionArtworkError("Test movie writer stalled at frame \(frame) (status \(writer.status.rawValue))")
+            }
             XCTAssertTrue(adapter.append(buffer, withPresentationTime: CMTimeAdd(firstFrameTime, CMTime(value: Int64(frame), timescale: 30))))
         }
         input.markAsFinished()
