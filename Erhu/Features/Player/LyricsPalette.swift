@@ -1,6 +1,20 @@
 import SwiftUI
 import UIKit
 
+/// Embedded album artwork and a saved artist photo need different decoding paths.
+enum ArtworkPaletteSource: Equatable, Sendable {
+    case track(URL?)
+    case image(URL?)
+
+    var url: URL? {
+        switch self {
+        case .track(let url), .image(let url): url
+        }
+    }
+
+    var isImage: Bool { if case .image = self { true } else { false } }
+}
+
 /// Now Playing's lyrics colours, taken from the album artwork: a calm [surface] in the artwork's
 /// own hue (muted, so text reads well), a [gradient] around it (a lighter tone, the
 /// surface and a deeper tone in the same hue),
@@ -294,15 +308,30 @@ actor LyricsPaletteCache {
 
     /// Safe to read while constructing a view: no actor hop, file IO, decoding or placeholder frame.
     nonisolated func cachedPalette(for url: URL) -> LyricsPalette? {
-        memory.get(url, revision: ArtworkLoader.shared.revision(for: url.path))
+        cachedPalette(for: .track(url))
+    }
+
+    nonisolated func cachedPalette(for source: ArtworkPaletteSource) -> LyricsPalette? {
+        guard let url = source.url else { return nil }
+        return memory.get(source, revision: ArtworkLoader.shared.revision(for: url.path))
     }
 
     func palette(for url: URL) async -> LyricsPalette {
+        await palette(for: .track(url))
+    }
+
+    func palette(for source: ArtworkPaletteSource) async -> LyricsPalette {
+        guard let url = source.url else { return .fallback }
         let revision = ArtworkLoader.shared.revision(for: url.path)
-        if let cached = memory.get(url, revision: revision) { return cached }
-        let image = await ArtworkLoader.shared.image(for: url, maxPixels: Self.samplePixels * 4)
+        if let cached = memory.get(source, revision: revision) { return cached }
+        let image: UIImage?
+        if source.isImage {
+            image = await ArtworkLoader.shared.image(atPath: url.path, maxPixels: Self.samplePixels * 4)
+        } else {
+            image = await ArtworkLoader.shared.image(for: url, maxPixels: Self.samplePixels * 4)
+        }
         let palette = image?.cgImage.flatMap(Self.sample).map(LyricsPalette.fromPixels) ?? .fallback
-        memory.put(palette, url: url, revision: revision)
+        memory.put(palette, source: source, revision: revision)
         return palette
     }
 
@@ -352,24 +381,32 @@ private final class PaletteMemory: @unchecked Sendable {
     }
     private let cache = NSCache<NSString, Entry>()
     init() { cache.countLimit = 64 }
-    private func key(_ url: URL, _ revision: Int) -> NSString { "\(url.path)|\(revision)" as NSString }
-    func get(_ url: URL, revision: Int) -> LyricsPalette? { cache.object(forKey: key(url, revision))?.value }
-    func put(_ value: LyricsPalette, url: URL, revision: Int) { cache.setObject(Entry(value), forKey: key(url, revision)) }
+    private func key(_ source: ArtworkPaletteSource, _ revision: Int) -> NSString {
+        "\(source.isImage ? "image" : "track")|\(source.url?.path ?? "")|\(revision)" as NSString
+    }
+    func get(_ source: ArtworkPaletteSource, revision: Int) -> LyricsPalette? { cache.object(forKey: key(source, revision))?.value }
+    func put(_ value: LyricsPalette, source: ArtworkPaletteSource, revision: Int) { cache.setObject(Entry(value), forKey: key(source, revision)) }
 }
 
-/// A view's async result belongs to one file revision. Never reuse its colour for a new song.
+/// A view's async result belongs to one source and file revision, including saved artist photos.
 struct ArtworkPaletteState {
-    private var url: URL?
+    private var source: ArtworkPaletteSource?
     private var revision: Int = -1
     private var value: LyricsPalette?
 
     func palette(for url: URL?) -> LyricsPalette {
-        guard let url else { return .fallback }
-        if self.url == url, revision == ArtworkLoader.shared.revision(for: url.path), let value { return value }
-        return LyricsPaletteCache.shared.cachedPalette(for: url) ?? .fallback
+        palette(for: .track(url))
+    }
+    func palette(for source: ArtworkPaletteSource) -> LyricsPalette {
+        guard let url = source.url else { return .fallback }
+        if self.source == source, revision == ArtworkLoader.shared.revision(for: url.path), let value { return value }
+        return LyricsPaletteCache.shared.cachedPalette(for: source) ?? .fallback
     }
     mutating func set(_ value: LyricsPalette, for url: URL, revision: Int) {
-        self.url = url
+        set(value, for: .track(url), revision: revision)
+    }
+    mutating func set(_ value: LyricsPalette, for source: ArtworkPaletteSource, revision: Int) {
+        self.source = source
         self.revision = revision
         self.value = value
     }
