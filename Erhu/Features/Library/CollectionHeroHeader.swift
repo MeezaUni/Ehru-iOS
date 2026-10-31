@@ -16,14 +16,6 @@ struct CollectionHeroHeader<Cover: View>: View {
         VStack(spacing: 0) {
             CollectionHeroLayout() {
                 cover()
-                    .overlay {
-                        LinearGradient(stops: [
-                            .init(color: .clear, location: 0.25),
-                            .init(color: palette.background.opacity(0.2), location: 0.48),
-                            .init(color: palette.background.opacity(0.94), location: 0.82),
-                            .init(color: palette.background, location: 1),
-                        ], startPoint: .top, endPoint: .bottom)
-                    }
                     .accessibilityHidden(true)
                 VStack(spacing: Spacing.sm) {
                     Text(title).font(.largeTitle.weight(.bold)).lineLimit(3)
@@ -34,6 +26,14 @@ struct CollectionHeroHeader<Cover: View>: View {
                 .foregroundStyle(palette.onSurface)
                 .padding(.horizontal, Spacing.heroGutter)
                 .padding(.bottom, Spacing.lg)
+                // Anchor the fade to the measured title, rather than a percentage of the
+                // image: long names and large text must still sit on a readable background.
+                .background(palette.background)
+                .background(alignment: .top) {
+                    LinearGradient(colors: [.clear, palette.background], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 140)
+                        .offset(y: -140)
+                }
             }
             .clipped()
             HStack(spacing: Spacing.md) {
