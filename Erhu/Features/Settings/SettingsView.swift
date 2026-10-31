@@ -3,44 +3,133 @@ import UniformTypeIdentifiers
 
 /// The Android settings groups, adapted to the controls and tools available on iOS.
 struct SettingsView: View {
+    var body: some View {
+        SettingsPage {
+            SettingsGroup("Personalize") {
+                SettingsLink("Themes & Appearance", subtitle: "Colours, themes and appearance", icon: "paintpalette.fill") {
+                    AppearanceSettingsView()
+                }
+            }
+            SettingsGroup("Sound") {
+                SettingsLink("Audio & Equalizer", subtitle: "8-band equalizer, presets and audio effects", icon: "chart.bar.fill") {
+                    EqualizerView()
+                }
+                SettingsLink("Visualizer", subtitle: "Style and feel of the Now Playing visualizer", icon: "waveform") {
+                    VisualizerSettingsView()
+                }
+            }
+            SettingsGroup("Library") {
+                SettingsLink("Music Library", subtitle: "Music folder, scanning and your collection", icon: "folder.fill") {
+                    LibrarySettingsView()
+                }
+                SettingsLink("Metadata & Artwork", subtitle: "Tags, cover art and online sources", icon: "number") {
+                    MetadataSettingsView()
+                }
+            }
+            SettingsGroup("About") {
+                SettingsLink("About Erhu", subtitle: "Version, privacy and source code", icon: "info.circle.fill") {
+                    AboutSettingsView()
+                }
+            }
+        }
+        .navigationTitle("Settings")
+    }
+}
+
+private struct SettingsPage<Content: View>: View {
+    @ViewBuilder let content: Content
     @Environment(\.palette) private var palette
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 26) {
-                SettingsGroup("Personalize") {
-                    SettingsLink("Themes & Appearance", subtitle: "Colours, themes and appearance", icon: "paintpalette.fill") {
-                        AppearanceSettingsView()
-                    }
-                }
-                SettingsGroup("Sound") {
-                    SettingsLink("Audio & Equalizer", subtitle: "8-band equalizer, presets and audio effects", icon: "chart.bar.fill") {
-                        EqualizerView()
-                    }
-                    SettingsLink("Visualizer", subtitle: "Style and feel of the Now Playing visualizer", icon: "waveform") {
-                        VisualizerSettingsView()
-                    }
-                }
-                SettingsGroup("Library") {
-                    SettingsLink("Music Library", subtitle: "Music folder, scanning and your collection", icon: "folder.fill") {
-                        LibrarySettingsView()
-                    }
-                    SettingsLink("Metadata & Artwork", subtitle: "Tags, cover art and online sources", icon: "number") {
-                        MetadataSettingsView()
-                    }
-                }
-                SettingsGroup("About") {
-                    SettingsLink("About Erhu", subtitle: "Version, privacy and source code", icon: "info.circle.fill") {
-                        AboutSettingsView()
-                    }
-                }
-            }
-            .padding(Spacing.lg)
-            .padding(.bottom, Spacing.lg)
+            VStack(spacing: 26) { content }
+                .padding(Spacing.lg)
+                .padding(.bottom, Spacing.lg)
         }
         .background(palette.background)
-        .navigationTitle("Settings")
+        .foregroundStyle(palette.onSurface)
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct SettingsChoice<Leading: View>: View {
+    let title: String
+    let subtitle: String
+    let selected: Bool
+    let choose: () -> Void
+    @ViewBuilder let leading: Leading
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        Button(action: choose) {
+            HStack(spacing: Spacing.lg) {
+                leading.frame(width: 40, height: 40).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: Spacing.xs) {
+                    Text(title).font(.body.weight(.semibold)).foregroundStyle(palette.onSurface)
+                    Text(subtitle).font(.subheadline).foregroundStyle(palette.onSurfaceVariant)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: selected ? "largecircle.fill.circle" : "circle")
+                    .font(.title3).foregroundStyle(selected ? palette.primary : palette.onSurfaceVariant)
+            }
+            .padding(Spacing.lg)
+            .frame(minHeight: 88)
+            .contentShape(Rectangle())
+        }
+        .pressable()
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+private struct SettingsValueRow<Value: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let value: Value
+
+    var body: some View {
+        HStack(spacing: Spacing.lg) {
+            SettingsIcon(symbol: icon)
+            Text(title).frame(maxWidth: .infinity, alignment: .leading)
+            value.labelsHidden()
+        }
+        .padding(Spacing.lg)
+    }
+}
+
+private struct ThemeSwatch: View {
+    let choice: ThemeChoice
+    @Environment(PlayerController.self) private var player
+    @Environment(\.palette) private var palette
+
+    var body: some View {
+        switch choice {
+        case .system:
+            Image(systemName: "circle.lefthalf.filled").resizable().foregroundStyle(palette.onSurface)
+        case .light:
+            Circle().fill(.white).overlay(Circle().strokeBorder(.gray.opacity(0.5)))
+                .overlay(Circle().fill(.black.opacity(0.8)).padding(13))
+        case .dark:
+            Circle().fill(.black).overlay(Circle().strokeBorder(.white.opacity(0.2)))
+                .overlay(Circle().fill(.white).padding(13))
+        case .artwork:
+            if let song = player.state.currentSong {
+                SongArtworkView(song: song, maxPixels: 100).clipShape(Circle())
+            } else {
+                Circle().fill(AngularGradient(colors: [.cyan, .blue, .purple, .pink, .cyan], center: .center))
+            }
+        }
+    }
+}
+
+private extension ThemeChoice {
+    var settingsDescription: String {
+        switch self {
+        case .system: "Light or dark, following your iPhone"
+        case .light: "A bright, clean appearance"
+        case .dark: "A darker look for your library"
+        case .artwork: "Colours from the current album artwork"
+        }
     }
 }
 
@@ -132,18 +221,6 @@ private struct SettingsDetailClearance: ViewModifier {
     }
 }
 
-/// Keep native controls, pickers and back navigation on each detail page.
-private struct SettingsFormStyle: ViewModifier {
-    @Environment(\.palette) private var palette
-
-    func body(content: Content) -> some View {
-        content
-            .scrollContentBackground(.hidden)
-            .background(palette.background)
-            .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 private struct AppearanceSettingsView: View {
     @Environment(AppSettings.self) private var settings
     @State private var importingTheme = false
@@ -151,40 +228,45 @@ private struct AppearanceSettingsView: View {
 
     var body: some View {
         @Bindable var settings = settings
-        Form {
-            Section {
-                Picker("Theme", selection: Binding(get: { settings.customTheme?.id ?? settings.theme.rawValue }, set: { value in
-                    if let choice = ThemeChoice(rawValue: value) {
+        SettingsPage {
+            SettingsGroup("App theme") {
+                ForEach(ThemeChoice.allCases) { choice in
+                    SettingsChoice(title: choice.label, subtitle: choice.settingsDescription,
+                                   selected: settings.customTheme == nil && settings.theme == choice, choose: {
                         settings.useCustomTheme(nil)
                         settings.theme = choice
-                    } else {
-                        settings.useCustomTheme(value)
-                    }
-                })) {
-                    ForEach(ThemeChoice.allCases) { Text($0.label).tag($0.rawValue) }
-                    ForEach(settings.importedThemes) { Text("\($0.name) (\($0.author))").tag($0.id) }
+                    }) { ThemeSwatch(choice: choice) }
                 }
+                ForEach(settings.importedThemes) { theme in
+                    SettingsChoice(title: theme.name, subtitle: "By \(theme.author)",
+                                   selected: settings.customTheme?.id == theme.id, choose: { settings.useCustomTheme(theme.id) }) {
+                        Circle().fill(theme.palette.surface).overlay(Circle().fill(theme.palette.primary).padding(10))
+                    }
+                }
+            }
+            SettingsGroup("Your themes") {
                 Button { importingTheme = true } label: {
                     Label("Import a theme…", systemImage: "square.and.arrow.down")
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.lg)
                 }
                 if let theme = settings.customTheme {
                     Button(role: .destructive) { settings.deleteTheme(theme.id) } label: {
                         Label("Delete \(theme.name)", systemImage: "trash")
+                            .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.lg)
                     }
                 }
-                if let themeMessage { Text(themeMessage).font(.footnote).foregroundStyle(.secondary) }
-            } header: {
-                Text("Theme")
-            } footer: {
-                Text("Import colours from an Android theme ZIP or its manifest.json. Fonts and widget skins are not imported.")
+                if let themeMessage { Text(themeMessage).font(.footnote).foregroundStyle(.secondary).padding(Spacing.lg) }
             }
+            Text("Import colours from an Android theme ZIP or its manifest.json.")
+                .font(.footnote).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
             if Tool(rawValue: "animatedArtwork") != nil {
-                Section {
-                    Toggle("Moving artwork in Now Playing", isOn: $settings.movingArtwork)
-                } header: {
-                    Text("Player artwork")
-                } footer: {
-                    Text("Gently moves the cover while music plays. iOS Reduce Motion and Low Power Mode are respected.")
+                SettingsGroup("Player artwork") {
+                    Toggle(isOn: $settings.movingArtwork) {
+                        HStack(spacing: Spacing.lg) {
+                            SettingsIcon(symbol: "photo")
+                            Text("Moving artwork in Now Playing")
+                        }
+                    }.padding(Spacing.lg)
                 }
             }
         }
@@ -201,7 +283,6 @@ private struct AppearanceSettingsView: View {
             }
         }
         .navigationTitle("Themes & Appearance")
-        .modifier(SettingsFormStyle())
     }
 }
 
@@ -211,36 +292,51 @@ private struct VisualizerSettingsView: View {
 
     var body: some View {
         @Bindable var settings = settings
-        Form {
-            Section("Style") {
-                Picker("Mode", selection: $settings.visualizer.mode) {
-                    ForEach(VisualizerMode.allCases, id: \.self) { Text($0.label).tag($0) }
+        SettingsPage {
+            SettingsGroup("Style") {
+                ForEach(VisualizerMode.allCases, id: \.self) { mode in
+                    SettingsChoice(title: mode.label, subtitle: description(mode), selected: settings.visualizer.mode == mode,
+                                   choose: { settings.visualizer.mode = mode }) {
+                        SettingsIcon(symbol: mode == .circularSpectrum ? "circle.dotted" : mode == .spectrumBars ? "chart.bar.fill" : "waveform")
+                    }
                 }
             }
-            Section("Response") {
-                Picker("Sensitivity", selection: $settings.visualizer.sensitivity) {
-                    Text("Low").tag(VisualizerSensitivity.low)
-                    Text("Normal").tag(VisualizerSensitivity.normal)
-                    Text("High").tag(VisualizerSensitivity.high)
+            SettingsGroup("Response") {
+                SettingsValueRow(title: "Sensitivity", icon: "waveform.path") {
+                    Picker("Sensitivity", selection: $settings.visualizer.sensitivity) {
+                        Text("Low").tag(VisualizerSensitivity.low)
+                        Text("Normal").tag(VisualizerSensitivity.normal)
+                        Text("High").tag(VisualizerSensitivity.high)
+                    }
                 }
-                Picker("Smoothing", selection: $settings.visualizer.smoothing) {
-                    Text("Responsive").tag(VisualizerSmoothing.responsive)
-                    Text("Balanced").tag(VisualizerSmoothing.balanced)
-                    Text("Smooth").tag(VisualizerSmoothing.smooth)
+                SettingsValueRow(title: "Smoothing", icon: "slider.horizontal.3") {
+                    Picker("Smoothing", selection: $settings.visualizer.smoothing) {
+                        Text("Responsive").tag(VisualizerSmoothing.responsive)
+                        Text("Balanced").tag(VisualizerSmoothing.balanced)
+                        Text("Smooth").tag(VisualizerSmoothing.smooth)
+                    }
                 }
-                Toggle("Reduce motion", isOn: $settings.visualizer.reduceMotion)
+                SettingsValueRow(title: "Reduce motion", icon: "figure.walk.motion") {
+                    Toggle("Reduce motion", isOn: $settings.visualizer.reduceMotion)
+                }
             }
-            Section {
+            SettingsGroup("Now Playing") {
                 Button { showingVisualizer = true } label: {
                     Label("Open visualizer", systemImage: "waveform")
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.lg)
                 }
-            } footer: {
-                Text("These options also apply when you open the visualizer from Now Playing.")
             }
         }
         .sheet(isPresented: $showingVisualizer) { VisualizerView() }
         .navigationTitle("Visualizer")
-        .modifier(SettingsFormStyle())
+    }
+
+    private func description(_ mode: VisualizerMode) -> String {
+        switch mode {
+        case .spectrumBars: "Frequency bars that follow the music"
+        case .circularSpectrum: "A spectrum around the album artwork"
+        case .oscilloscope: "A flowing waveform of the audio"
+        }
     }
 }
 
@@ -248,66 +344,74 @@ private struct LibrarySettingsView: View {
     @Environment(LibraryStore.self) private var library
 
     var body: some View {
-        Form {
-            Section {
-                Label("On My iPhone › Erhu", systemImage: "folder.fill")
-            } header: {
-                Text("Music folder")
-            } footer: {
-                Text("Add music with the Files app, the + button, or Wi-Fi Transfer. Erhu scans its Documents folder.")
+        SettingsPage {
+            SettingsGroup("Music folder") {
+                HStack(spacing: Spacing.lg) {
+                    SettingsIcon(symbol: "folder.fill")
+                    VStack(alignment: .leading, spacing: Spacing.xs) {
+                        Text("On My iPhone › Erhu").font(.headline)
+                        Text("Add music with Files, the + button, or Wi-Fi Transfer.").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }.padding(Spacing.lg)
             }
-            Section("Scan") {
+            SettingsGroup("Scan") {
                 Button { library.scan() } label: {
-                    Label("Rescan library now", systemImage: "arrow.clockwise")
+                    HStack(spacing: Spacing.lg) {
+                        SettingsIcon(symbol: "arrow.clockwise")
+                        VStack(alignment: .leading, spacing: Spacing.xs) {
+                            Text("Rescan library now").font(.headline)
+                            Text("Find new, changed and removed music").font(.subheadline).foregroundStyle(.secondary)
+                        }.frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(Spacing.lg)
                 }
+                .buttonStyle(.plain)
                 .disabled(library.isScanning)
                 if let progress = library.scanProgress {
                     HStack(spacing: Spacing.md) {
                         ProgressView()
                         Text("Scanning \(progress.scanned) of \(progress.total)…")
                             .foregroundStyle(.secondary)
-                    }
+                    }.padding(Spacing.lg)
                 }
             }
-            Section("Your collection") {
-                LabeledContent("Songs", value: "\(library.songs.count)")
-                LabeledContent("Albums", value: "\(library.albums.count)")
-                LabeledContent("Artists", value: "\(library.artists.count)")
+            SettingsGroup("Your collection") {
+                SettingsValueRow(title: "Songs", icon: "music.note") { Text("\(library.songs.count)").monospacedDigit() }
+                SettingsValueRow(title: "Albums", icon: "square.stack") { Text("\(library.albums.count)").monospacedDigit() }
+                SettingsValueRow(title: "Artists", icon: "person.2") { Text("\(library.artists.count)").monospacedDigit() }
             }
         }
         .navigationTitle("Music Library")
-        .modifier(SettingsFormStyle())
     }
 }
 
 private struct MetadataSettingsView: View {
     var body: some View {
-        Form {
-            Section("Tags & cover art") {
-                NavigationLink { FixTagsView().modifier(SettingsDetailClearance()) } label: {
-                    Label("Auto Fix Tags", systemImage: "wand.and.stars")
+        SettingsPage {
+            SettingsGroup("Tags & cover art") {
+                SettingsLink("Auto Fix Tags", subtitle: "Correct tags and fill in missing details", icon: "wand.and.stars") {
+                    FixTagsView()
                 }
-                NavigationLink { ArtworkFetcherView().modifier(SettingsDetailClearance()) } label: {
-                    Label("Artwork Fetcher", systemImage: "photo.on.rectangle.angled")
+                SettingsLink("Artwork Fetcher", subtitle: "Find album covers or change artist photos", icon: "photo.on.rectangle.angled") {
+                    ArtworkFetcherView()
                 }
                 // The tool exists only in the animated-art branch; never offer a dead destination.
                 if let motion = Tool(rawValue: "animatedArtwork"), Tool.available.contains(motion) {
-                    NavigationLink { ToolView(tool: motion).modifier(SettingsDetailClearance()) } label: {
-                        Label(motion.label, systemImage: motion.icon)
+                    SettingsLink(motion.label, subtitle: "Manage your downloaded album covers", icon: motion.icon) {
+                        ToolView(tool: motion)
                     }
                 }
             }
             OnlineSourcesSection()
         }
         .navigationTitle("Metadata & Artwork")
-        .modifier(SettingsFormStyle())
     }
 }
 
 private struct AboutSettingsView: View {
     var body: some View {
-        Form {
-            Section {
+        SettingsPage {
+            SettingsGroup("Erhu") {
                 HStack(spacing: Spacing.lg) {
                     SettingsIcon(symbol: "music.note")
                     VStack(alignment: .leading, spacing: Spacing.xs) {
@@ -315,23 +419,23 @@ private struct AboutSettingsView: View {
                         Text("Your music, on your iPhone.").font(.subheadline).foregroundStyle(.secondary)
                     }
                     .padding(.vertical, Spacing.sm)
-                }
-                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–")
-                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "–")
+                }.padding(Spacing.lg).frame(maxWidth: .infinity, alignment: .leading)
+                LabeledContent("Version", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "–").padding(Spacing.lg)
+                LabeledContent("Build", value: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "–").padding(Spacing.lg)
             }
-            Section("Privacy") {
-                Label("Music stays on your iPhone", systemImage: "iphone")
+            SettingsGroup("Privacy") {
+                Label("Music stays on your iPhone", systemImage: "iphone").padding(Spacing.lg)
                 Text("Your music files, library index and VYBE processing stay on this device. Online lyrics, metadata and artwork searches use the song or artist details needed for the request.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .font(.footnote).foregroundStyle(.secondary).padding([.horizontal, .bottom], Spacing.lg)
             }
-            Section {
+            SettingsGroup("Project") {
                 Link(destination: URL(string: "https://github.com/MeezaUni/Erhu-iOS")!) {
                     Label("Source code on GitHub", systemImage: "chevron.left.forwardslash.chevron.right")
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(Spacing.lg)
                 }
             }
         }
         .navigationTitle("About Erhu")
-        .modifier(SettingsFormStyle())
     }
 }
 
@@ -341,7 +445,7 @@ private struct OnlineSourcesSection: View {
     @State private var saved: [APIKeyKind: Bool] = Dictionary(uniqueKeysWithValues: APIKeyKind.allCases.map { ($0, APIKeys.shared.isSet($0)) })
 
     var body: some View {
-        Section {
+        SettingsGroup("Online sources") {
             ForEach(APIKeyKind.allCases) { kind in
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     HStack {
@@ -362,14 +466,12 @@ private struct OnlineSourcesSection: View {
                             Button("Remove", role: .destructive) { save(kind, nil) }
                         }
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.bordered)
                     Text(kind.help).font(.caption2).foregroundStyle(.secondary)
-                }
+                }.padding(Spacing.lg)
             }
-        } header: {
-            Text("Online sources")
-        } footer: {
             Text("Optional. Each key is your own, stored in this iPhone's Keychain only: never in the app's files or the repository, and not carried over to other devices. Without a key that source is simply skipped.")
+                .font(.footnote).foregroundStyle(.secondary).padding(Spacing.lg)
         }
     }
 

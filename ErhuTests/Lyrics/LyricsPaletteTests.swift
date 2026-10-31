@@ -32,8 +32,7 @@ final class LyricsPaletteTests: XCTestCase {
         XCTAssertEqual(middle, palette.surface)
         XCTAssertGreaterThan(relativeLuminance(top), relativeLuminance(middle))
         XCTAssertLessThan(relativeLuminance(bottom), relativeLuminance(middle))
-        // The deeper stop turns away from the dominant hue (not the same colour darker).
-        XCTAssertGreaterThan(hueDistance(hueOf(bottom), hueOf(middle)), 10)
+        XCTAssertLessThan(hueDistance(hueOf(bottom), hueOf(middle)), 2, "Depth must not invent an orange/brown hue")
     }
 
     func testTwoColourArtworkCardGradientEndsInTheSecondColour() {
@@ -47,6 +46,15 @@ final class LyricsPaletteTests: XCTestCase {
         let palette = LyricsPalette.fromPixels(artwork(0xFFE0_202A))
         for stop in palette.cardGradient { XCTAssertLessThan(hueDistance(hueOf(stop), 0), 40) }
         XCTAssertEqual(Set(palette.cardGradient).count, 3)
+    }
+
+    func testRedAndSilverArtworkDoesNotIntroduceBrown() {
+        let palette = LyricsPalette.fromPixels(artwork(0xFFE0_202A, 0xFFFF_FFFF, 0xFFAA_AAAA, 0xFF33_CCDD))
+        for stop in palette.gradient + [palette.surface, palette.accent] {
+            XCTAssertLessThan(hueDistance(hueOf(stop), 0), 10)
+        }
+        XCTAssertLessThan(hueDistance(hueOf(palette.cardGradient.last!), 185), 15, "The second colour must come from the actual cyan reflection")
+        assertReadable(palette)
     }
 
     func testMonochromeArtworkGivesAGreyGradient() {

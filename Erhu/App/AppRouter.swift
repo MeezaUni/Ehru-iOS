@@ -95,6 +95,7 @@ enum Route: Hashable {
 final class AppRouter {
     var section: LibrarySection = .home
     var paths: [LibrarySection: NavigationPath] = Dictionary(uniqueKeysWithValues: LibrarySection.allCases.map { ($0, NavigationPath()) })
+    var scrollToTopRequests: [LibrarySection: Int] = [:]
     var showsSearch = false
     var showsDrawer = false
     var showsNowPlaying = false
@@ -117,13 +118,14 @@ final class AppRouter {
         open(.tool(tool))
     }
 
-    /// Selecting the current section again returns it to its first page.
+    /// A tab always opens its root. Reselecting it also scrolls that root back to the top.
     func select(_ target: LibrarySection) {
-        if target == section {
-            paths[target] = NavigationPath()
-        } else {
-            section = target
-        }
+        let reselecting = target == section
+        paths[target] = NavigationPath()
+        section = target
+        artworkFocus = nil
+        showsDrawer = false
+        if reselecting { scrollToTopRequests[target, default: 0] += 1 }
     }
 
     func binding(for section: LibrarySection) -> Binding<NavigationPath> {

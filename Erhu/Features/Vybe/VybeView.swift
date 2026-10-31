@@ -15,7 +15,7 @@ struct VybeView: View {
     ]
 
     var body: some View {
-        ScrollView {
+        LibraryRootScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.md) {
                 Text("Find music in your library by mood, genre, tempo or artist. Runs on this phone.")
                     .font(.subheadline)
