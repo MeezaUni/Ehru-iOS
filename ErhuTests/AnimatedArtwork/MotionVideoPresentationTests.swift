@@ -59,7 +59,9 @@ final class MotionVideoPresentationTests: XCTestCase {
         let session = MotionVideoSession()
         let visibility = CoverVisibility()
         let controller = UIHostingController(rootView: CoverProbe(url: url, session: session, visibility: visibility)
-            .environment(AnimatedArtworkStore()).ignoresSafeArea())
+            // MovingArtwork is a production modifier with its own required environment,
+            // even when this fixture supplies a video and disables still-image motion.
+            .environment(AnimatedArtworkStore()).environment(AppSettings()).ignoresSafeArea())
         controller.safeAreaRegions = []
         window.rootViewController = controller
         window.makeKeyAndVisible()
