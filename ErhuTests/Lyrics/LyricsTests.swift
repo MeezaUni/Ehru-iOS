@@ -257,6 +257,24 @@ final class LrclibProviderTests: XCTestCase {
         if case .failed = await provider.exact(query) {} else { XCTFail("expected failure") }
     }
 
+    func testHealthyExactArtistAliasStillSuppliesSyncWhenTheSearchEndpointIsDown() async throws {
+        let q = LyricsQuery(title: "Black Skinhead", artist: "Ye", album: "Yeezus", durationMs: 188_000)
+        let object: [String: Any] = ["id": 51, "trackName": "Black Skinhead", "artistName": "Kanye West",
+                                   "albumName": "Yeezus", "duration": 188, "syncedLyrics": "[00:01.000]Test words"]
+        let record = try JSONSerialization.data(withJSONObject: object)
+        var exactArtists: [String] = []
+        http.respond = { url in
+            if url.path == "/api/search" { return (502, [:], Data()) }
+            let artist = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "artist_name" }?.value ?? ""
+            exactArtists.append(artist)
+            return artist == "Ye" ? (404, [:], Data()) : (200, [:], record)
+        }
+        let repository = OnlineLyricsRepository(providers: [provider], cache: MemoryCache())
+        guard case .found(let found, _, _, _) = await repository.lookup(LyricsTrack(songId: 8, query: q)) else { return XCTFail("A search outage must not discard real synchronization from exact lookup") }
+        XCTAssertEqual(exactArtists, ["Ye", "Kanye West"])
+        XCTAssertEqual(found.timing, .line)
+    }
+
     func testKnownArtistAliasIsQueriedOnlyAfterHealthyEmptyAutomaticSearch() async throws {
         let q = LyricsQuery(title: "Black Skinhead", artist: "Ye", album: "Yeezus", durationMs: 188_000)
         let object: [String: Any] = ["id": 50, "trackName": "Black Skinhead", "artistName": "Kanye West",
