@@ -16,7 +16,7 @@ means availability could not be checked. It does not establish that synchronizat
 In this situation the player shows the service-unavailable message and keeps any genuine saved
 sync; it does not automatically substitute newly fetched or cached plain text.
 
-**Search online** is the separate place for available alternatives. Synced choices appear first.
+**Search online** loads available alternatives as soon as it opens. Synced choices appear first.
 If LRCLIB fails but a plain source returns options, the list states that synchronized availability
 could not be checked, and labels the actual source/timing of each option. Picking an option there
 is an explicit action, unlike automatic lookup. **Search the web** still opens a browser query.

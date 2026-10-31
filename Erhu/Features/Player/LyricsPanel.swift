@@ -105,7 +105,9 @@ private struct LyricsPanelContent: View {
             }
         }
         .task(id: song.id) { store.shown(song) }
-        .sheet(isPresented: $searching, onDismiss: { store.closeSearch() }) { searchSheet }
+        .sheet(isPresented: $searching, onDismiss: { store.closeSearch() }) {
+            searchSheet.task { if !searchText.isBlank { store.search(searchText) } }
+        }
     }
 
     private func cardHeader(_ lyrics: SongLyrics?, _ onExpand: @escaping () -> Void) -> some View {
