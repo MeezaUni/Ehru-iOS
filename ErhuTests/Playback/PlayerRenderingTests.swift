@@ -127,8 +127,11 @@ final class PlayerRenderingTests: XCTestCase {
 
     @MainActor
     func testDepthCardEmergesFromBehindOnTheAppropriateSide() throws {
-        let items = (-1...1).map { CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 2)))) }
         for focus in [CGFloat(-0.5), 0.5] {
+            // Isolate the exchanging pair: a third rear cover may legitimately fill their gap.
+            let items = [0, focus > 0 ? 1 : -1].map {
+                CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 2))))
+            }
             let content = CarouselStrip(items: items, focus: focus, frontOrdinal: 0, stack: 1,
                                         viewport: CGSize(width: 390, height: 450), cardSize: CGSize(width: 280, height: 380),
                                         reduceMotion: false, meter: CarouselPresentationMeter()) { item in
