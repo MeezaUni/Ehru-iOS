@@ -12,8 +12,11 @@ extension EnvironmentValues {
 
 /// Local animated artwork. Carousel neighbours may keep a supplied, paused session warm;
 /// playback of decorative art is independent of the audio transport's paused state.
+/// Occlusion and scrolling pause the mounted layer; only power/accessibility fallback removes it.
 struct MotionCoverView: View {
     let song: Song?
+    /// Callers that already resolved the local asset can avoid looking it up again.
+    var videoURL: URL? = nil
     var playing = false
     var rendersVideo = true
     var maxPixels = 1200
@@ -30,19 +33,18 @@ struct MotionCoverView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let url = song.flatMap { store.url(for: $0) }
+        let url = videoURL ?? song.flatMap { store.url(for: $0) }
         ZStack {
             MotionCoverPoster(song: song, maxPixels: maxPixels)
                 .modifier(MovingArtwork(isPlaying: animateStill && playing && !suspended && url == nil,
                                         enabled: animateStill && url == nil))
-            if rendersVideo, visible, sectionVisible, scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion, let url, (!playerInMotion || videoSession?.url == url) {
+            if rendersVideo, !reduceMotion, budget.allowsDecorativeMotion, let url, (!playerInMotion || videoSession?.url == url) {
                 // Reuse a prepared decoder during flight. A cold video waits until the cover
                 // has arrived, keeping AVPlayer construction off the opening animation.
-                LoopingMotionVideo(url: url, isPlaying: playing && !playerInMotion && !suspended,
+                LoopingMotionVideo(url: url, isPlaying: playing && visible && sectionVisible && scenePhase == .active && !playerInMotion && !suspended,
                                    frozen: playerInMotion || suspended, session: videoSession)
                     .id(videoSession.map(ObjectIdentifier.init))
                     .transition(.identity)
-                    .modifier(MotionVideoDissolve())
                     .allowsHitTesting(false)
                     .accessibilityHidden(true)
             }
@@ -82,11 +84,4 @@ private struct LoopingMotionVideo: UIViewRepresentable {
         coordinator.session.detach(surface)
         if coordinator.ownsSession { coordinator.session.stop() }
     }
-}
-
-/// The frozen video frame blends into the same poster the mini-player will show. Native
-/// opacity animation follows the cover transform, without resizing or restarting the decoder.
-private struct MotionVideoDissolve: ViewModifier {
-    @Environment(\.playerCoverProgress) private var progress
-    func body(content: Content) -> some View { content.opacity(Double(progress.clamped(0, 1))) }
 }

@@ -37,7 +37,7 @@ struct TrackCarousel: View {
 
     private var selection: CarouselSelection { CarouselSelection(previous: previous, current: current, next: next, previousTwo: previousTwo, nextTwo: nextTwo) }
     private func videoRequests() -> [CarouselVideoDeck.Request] {
-        guard scenePhase == .active, !reduceMotion, budget.allowsDecorativeMotion else { return [] }
+        guard !reduceMotion, budget.allowsDecorativeMotion else { return [] }
         return scene.items.filter { abs($0.ordinal - scene.center) <= 1 }.compactMap { item in
             artwork.url(for: item.entry.song).map { CarouselVideoDeck.Request(key: item.id, url: $0) }
         }
@@ -47,13 +47,16 @@ struct TrackCarousel: View {
         videoWarmup?.cancel(); videoWarmup = nil
         // Ready surfaces and recycled neighbours can rebind immediately. Native decoder
         // construction waits until the final cover frame has painted and input is idle.
-        guard !playerInMotion, let key = scene.currentKey else { return }
+        guard let key = scene.currentKey else { return }
         let requests = videoRequests()
-        videos.configure(requests, current: key, prepareNeighbours: !motion.moving, allowNewSessions: false)
-        guard !motion.moving, !requests.isEmpty else { return }
+        // Rekey an already prepared mini-player surface even during entrance, so the inline
+        // card owns it on the exact frame the flight finishes. No native player is built here.
+        videos.configure(requests, current: key, prepareNeighbours: !motion.moving && !playerInMotion,
+                         allowNewSessions: false)
+        guard scenePhase == .active, !playerInMotion, !motion.moving, !requests.isEmpty else { return }
         videoWarmup = Task { @MainActor in
             do { try await Task.sleep(for: .milliseconds(60)) } catch { return }
-            guard !Task.isCancelled, !motion.moving, !playerInMotion, scene.currentKey == key else { return }
+            guard !Task.isCancelled, scenePhase == .active, !motion.moving, !playerInMotion, scene.currentKey == key else { return }
             videos.configure(requests, current: key)
             videoWarmup = nil
         }

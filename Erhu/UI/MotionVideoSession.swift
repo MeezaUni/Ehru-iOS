@@ -1,5 +1,4 @@
 import AVFoundation
-import CoreImage
 import UIKit
 
 /// One lazy, resident decoder per visible/prepared card. Rebinding its host keeps its buffer and position;
@@ -33,8 +32,6 @@ final class MotionVideoSession {
     private weak var host: MotionVideoHost?
     private var readiness: NSKeyValueObservation?
     private var itemObservation: NSKeyValueObservation?
-    private weak var outputItem: AVPlayerItem?
-    private var output: AVPlayerItemVideoOutput?
     private var itemReadiness: NSKeyValueObservation?
     private var playerReadiness: NSKeyValueObservation?
     private var generation = UUID()
@@ -55,7 +52,7 @@ final class MotionVideoSession {
                 DispatchQueue.main.async { self?.prerollIfReady() }
             }
             itemObservation = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
-                DispatchQueue.main.async { self?.bindOutput(); self?.observeReadiness() }
+                DispatchQueue.main.async { self?.observeReadiness() }
             }
         }
     }
@@ -78,9 +75,7 @@ final class MotionVideoSession {
         }
         if frozen && !surface.isFrozen {
             player.pause()
-            bindOutput()
-            let buffer = output?.copyPixelBuffer(forItemTime: player.currentTime(), itemTimeForDisplay: nil)
-            surface.freeze(buffer)
+            surface.freeze()
         } else if !frozen { surface.unfreeze() }
         if wantsPlayback {
             if prerolling { player.cancelPendingPrerolls(); prerolling = false }
@@ -114,28 +109,12 @@ final class MotionVideoSession {
         }
     }
 
-    private func bindOutput() {
-        guard let player = residentPlayer else { return }
-        guard outputItem !== player.currentItem else { return }
-        if let output, let outputItem { outputItem.remove(output) }
-        output = nil
-        outputItem = player.currentItem
-        if let item = outputItem {
-            // Native decoded pixels; no second player or continuous snapshot polling.
-            let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
-                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
-            ])
-            item.add(output)
-            self.output = output
-        }
-    }
-
     func detach(_ old: MotionVideoHost) {
         guard host === old else { return }
         residentPlayer?.pause()
         residentSurface?.removeFromSuperview()
         host = nil
-        // Keep the same decoded layer/frame for a card <-> flight-overlay reparent.
+        // Keep the same decoded layer/frame for mini <-> flight <-> card handoffs.
     }
 
     func pause() { wantsPlayback = false; residentPlayer?.pause() }
@@ -148,8 +127,6 @@ final class MotionVideoSession {
         itemObservation = nil
         itemReadiness = nil
         playerReadiness = nil
-        if let output, let outputItem { outputItem.remove(output) }
-        output = nil; outputItem = nil
         residentSurface?.videoLayer.player = nil
         residentSurface?.removeFromSuperview()
         residentSurface?.reset()
@@ -161,7 +138,7 @@ final class MotionVideoSession {
 }
 
 /// SwiftUI owns these lightweight hosts. The session moves its one resident video surface
-/// between them, retaining the exact AVPlayerLayer, frozen frame and readiness during flight.
+/// between them, retaining the exact paused AVPlayerLayer and readiness during flight.
 @MainActor
 final class MotionVideoHost: UIView {
     func mount(_ surface: MotionVideoSurface) {
@@ -185,20 +162,16 @@ final class MotionVideoHost: UIView {
 @MainActor
 final class MotionVideoSurface: UIView {
     let videoLayer = AVPlayerLayer()
-    private let still = UIImageView()
     private(set) var isFrozen = false
     private var ready = false
-    private var generation = UUID()
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
         clipsToBounds = true
         videoLayer.videoGravity = .resizeAspectFill
+        videoLayer.opacity = 0
         layer.addSublayer(videoLayer)
-        still.contentMode = .scaleAspectFill
-        still.clipsToBounds = true
-        addSubview(still)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
@@ -207,24 +180,23 @@ final class MotionVideoSurface: UIView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         videoLayer.frame = bounds
-        still.frame = bounds
         CATransaction.commit()
     }
 
     func reset() {
-        generation = UUID(); isFrozen = false; ready = false
-        still.image = nil
+        isFrozen = false; ready = false
         videoLayer.removeAnimation(forKey: "first-frame")
         updateVisibility()
     }
 
     func setReady(_ value: Bool) {
-        let firstFrame = value && !ready && still.image == nil
-        ready = value
-        if ready && !isFrozen { still.image = nil }
+        // Once displayed, keep the last decoded picture during temporary readiness changes.
+        // Only a new asset/power fallback resets it; visibility never exposes the poster again.
+        guard value else { return }
+        let firstFrame = !ready
+        ready = true
         updateVisibility()
         if firstFrame {
-            // The matching video poster remains underneath while the first decoded layer arrives.
             let reveal = CABasicAnimation(keyPath: "opacity")
             reveal.fromValue = 0
             reveal.toValue = 1
@@ -233,49 +205,15 @@ final class MotionVideoSurface: UIView {
         }
     }
 
-    func freeze(_ buffer: CVPixelBuffer?) {
-        isFrozen = true
-        let token = UUID(); generation = token
-        guard let buffer else { return } // Keep the paused live frame if no output frame is ready yet.
-        MotionFrameRasterizer.shared.image(buffer) { [weak self] image in
-            DispatchQueue.main.async {
-                guard let self, self.isFrozen, self.generation == token, let image else { return }
-                self.still.image = UIImage(cgImage: image)
-                self.updateVisibility()
-            }
-        }
-    }
-
-    func unfreeze() {
-        guard isFrozen else { return }
-        generation = UUID(); isFrozen = false
-        if ready { still.image = nil }
-        updateVisibility()
-    }
+    /// Pausing AVPlayer preserves the native decoded surface. A flight transforms its host;
+    /// it does not sample, rasterize or replace the picture with a separate image.
+    func freeze() { isFrozen = true }
+    func unfreeze() { isFrozen = false }
 
     private func updateVisibility() {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        videoLayer.opacity = ready && still.image == nil ? 1 : 0
-        still.isHidden = still.image == nil
+        videoLayer.opacity = ready ? 1 : 0
         CATransaction.commit()
-    }
-}
-
-/// One bounded conversion per gesture, off the UI thread. The full video is never decoded
-/// into images; the current pixel buffer is retained only until this conversion finishes.
-private final class MotionFrameRasterizer: @unchecked Sendable {
-    static let shared = MotionFrameRasterizer()
-    private let queue = DispatchQueue(label: "erhu.motion-frame", qos: .userInitiated)
-    // Accessed only by the serial conversion queue below; even the first GPU-context
-    // construction must stay off the gesture/UI thread.
-    private lazy var context = CIContext(options: [.cacheIntermediates: false])
-    func image(_ buffer: CVPixelBuffer, completion: @escaping (CGImage?) -> Void) {
-        queue.async {
-            let input = CIImage(cvPixelBuffer: buffer)
-            let scale = min(1200 / max(input.extent.width, input.extent.height), 1)
-            let image = input.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-            completion(self.context.createCGImage(image, from: image.extent))
-        }
     }
 }

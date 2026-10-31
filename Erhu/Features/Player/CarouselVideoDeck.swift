@@ -17,10 +17,14 @@ final class CarouselVideoDeck {
     private(set) var slots: [String: Slot] = [:]
     private(set) var currentKey: String?
     @ObservationIgnored private var parked: Slot?
+    @ObservationIgnored private var miniOwner = false
     var currentSession: MotionVideoSession? { currentKey.flatMap { slots[$0]?.session } }
+    var currentURL: URL? { currentKey.flatMap { slots[$0]?.url } }
     var residentCount: Int { slots.count + (parked == nil ? 0 : 1) }
 
     func configure(_ requests: [Request], current: String?, prepareNeighbours: Bool = true, allowNewSessions: Bool = true) {
+        let adoptingMini = miniOwner
+        miniOwner = false
         let wanted = Array(requests.prefix(3))
         let keys = Set(wanted.map(\.key))
         // A newly opened carousel starts its coordinates at zero. Carry the current
@@ -28,7 +32,8 @@ final class CarouselVideoDeck {
         // immediately after its cover has flown into place.
         if let current, slots[current] == nil,
            let request = wanted.first(where: { $0.key == current }),
-           let oldKey = currentKey, !keys.contains(oldKey), let old = slots[oldKey], old.url == request.url {
+           let oldKey = currentKey, (adoptingMini || !keys.contains(oldKey)),
+           let old = slots[oldKey], old.url == request.url {
             slots.removeValue(forKey: oldKey)
             slots[current] = old
         }
@@ -63,11 +68,25 @@ final class CarouselVideoDeck {
         }
     }
 
+    /// A mini-player uses the very same movie as the expanded card and flight. Switching songs
+    /// within one album keeps its time; a new carousel can adopt this slot without a cold decoder.
+    func prepareMini(url: URL, entryID: UUID) {
+        defer { miniOwner = true }
+        if currentURL == url, let session = currentSession {
+            session.prepare(url: url)
+            retainCurrent(pause: false)
+        } else {
+            let key = "mini-\(entryID)"
+            configure([Request(key: key, url: url)], current: key)
+        }
+    }
+
     /// Keep the current frame warm for reopening; hidden neighbour decoders are released.
-    func retainCurrent() {
+    /// Ownership-aware native teardown handles pausing when the mini player takes the layer.
+    func retainCurrent(pause: Bool = true) {
         parked?.session.stop(); parked = nil
         for key in Array(slots.keys) {
-            if key == currentKey { slots[key]?.session.pause() }
+            if key == currentKey { if pause { slots[key]?.session.pause() } }
             else { slots.removeValue(forKey: key)?.session.stop() }
         }
     }

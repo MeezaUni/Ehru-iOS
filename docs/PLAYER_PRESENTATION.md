@@ -4,8 +4,11 @@ Only the current artwork scales and translates from its expanded rectangle to th
 artwork rectangle. The header, controls and lyrics stay in place and fade; they never shrink
 or travel with the cover. Both expanded and compact navigation layouts supply the
 real destination frame. Drag progress follows the finger; opening, dismissal and a cancelled
-pull settle with the same geometry. The backdrop fades separately, and header, controls,
-neighbours and card metadata fade before the cover reaches the bar. The mini artwork becomes
+pull settle with the same geometry. The stationary backdrop, header, controls,
+neighbours and metadata fade with a smoothstep over the first 90 points of a downward pull.
+The library is revealed progressively, rather than appearing on the first touch; beyond that
+short fade only the cover travels. A cancelled or interrupted pull picks up both the displayed
+cover position and chrome opacity. The mini artwork becomes
 visible when the expanded presentation finishes. The expanded view stays mounted until the
 animation completion, so dismissal cannot strand a header at the bottom.
 
@@ -31,22 +34,25 @@ not establish a device frame-rate or thermal measurement.
 ## Animated covers and interrupted swipes
 
 Motion video lives in an ordinary UIKit container with an AVPlayerLayer sublayer; layout disables
-implicit layer resizing. Gesture start pauses the current decoder and copies its current decoded
-pixel buffer once, converting a bounded image off the main thread. That flat frozen frame follows
-the same cover transform as static artwork, and the video surface fades into the poster used by
-the mini-player. Animated-video posters bypass the separate still-art drift/zoom, so their final
-crop matches the mini-player exactly. If a decoded buffer is not ready, the paused native frame remains as fallback.
-There is no continuous snapshot polling, second video decode, or screen-sized rendering capture.
-Cancelled motion restores the existing layer; obsolete snapshot callbacks are ignored.
-The session owns the actual video surface, not just the AVQueuePlayer. Lightweight native hosts
-reparent that same surface between inline artwork and the root overlay. Readiness, frozen pixels
-and AVPlayerLayer identity survive the handoff; stale host teardown cannot detach the new host.
+implicit layer resizing. Gesture start pauses the existing decoder. Its native paused layer follows
+the cover transform, without copying pixels, constructing a bitmap, or fading into a first-frame
+poster. The mini-player, flight overlay and current card reparent that same surface. Player item,
+readiness, frame and layer identity survive each handoff; stale host teardown cannot detach or
+pause a newly rebound host. A transient readiness change never exposes the poster after a real
+frame has been presented. Static fallback remains available for initial loading, Low Power Mode,
+thermal restrictions, Reduce Motion and missing/disabled artwork.
 
-The carousel owns one motion session. An adjacent song from the same album rebinds that session
-without recreating its looper or resetting its position. The moving scene retains its original
-video host until settlement, and enables the newly current video's host after the slide finishes.
-Old-surface teardown checks ownership and cannot pause a newly rebound host. Background, Reduce
-Motion, offscreen, low-power and thermal restrictions retain their existing behavior.
+The carousel keeps up to three occurrence-owned sessions: current and two paused, prerolled
+neighbours. The approaching cover resumes before it reaches centre. Departing neighbours are
+recycled when the next card uses the same album, without reopening its video. Closing releases
+neighbours and keeps the current movie for the mini-player. Reopening adopts that same movie
+before entrance completes, even when its previous coordinate is now a repeat neighbour.
+Cold native decoder construction waits until after presentation and active card motion.
+
+The album header retains its own mounted video when covered by the player, scrolled away, or
+backgrounded. These visibility changes pause it; revealing the album resumes the same frame.
+Decorative video is independent of whether music is playing. Power/accessibility restrictions
+may remove the video layer and show the static cover instead.
 
 The strip uses stable page ordinals and entry-occurrence keys instead of rebasing by a page on
 a later main-loop turn. Shared cards keep their loaded artwork and identity when the queue moves.
@@ -86,8 +92,8 @@ replaced downloads invalidate the cache and get a new artwork identity.
 CI checks continuous page identities across forward/reverse/repeat changes, visible side previews
 and interpolated depth order, cover-only geometry with stationary controls,
 rendered preview visibility and cursor height, artwork escaping a clipped viewport, first-frame
-cache painting, interrupted focus, implicit-layer-resize suppression, real-pixel frame freezing and cancellation,
-same-asset session reuse, stale-host teardown, and bounded single-use file preparation/invalidation.
+cache painting, interrupted focus, implicit-layer-resize suppression, mounted-frame retention through occlusion, Low Power Mode
+fallback, mini-to-carousel reuse, same-asset session reuse, stale-host teardown, and bounded single-use file preparation/invalidation.
 Device video compositing and frame pacing still require verification on an iPhone.
 
 ## Finite motion and decoder lifetime
@@ -100,14 +106,12 @@ gesture direction comes from finger travel, independently of the previous slide'
 Generation guards prevent an interrupted completion from pruning the active scene or clearing
 its movement flag. Mode toggles retarget the same motion owner.
 
-Opening/dismissal uses a finite 300 ms cubic curve. Generation-guarded monotonic tasks release
-chrome/input and prune settled pages at the declared duration, independently of SwiftUI
-render-completion callbacks. They do not drive frame positions or the audio playhead. This
-also prevents an offscreen or interrupted render transaction from leaving the player busy. The playback controller owns
-one lazy MotionVideoSession. Constructing or reconstructing a SwiftUI view does not create an
-AVQueuePlayer or AVPlayerLayer. Close/background pauses the existing session and re-opening the
-same album reuses it. A cold animated asset is attached after entrance finishes; already-ready
-video can accompany the cover flight. Non-animated covers never create a native video player.
+Opening uses a finite 400 ms cubic curve; dismissal duration follows its remaining travel and
+finger velocity. Generation-guarded monotonic tasks release chrome/input and prune settled pages
+at the declared duration, independently of SwiftUI render-completion callbacks. They do not drive
+frame positions or the audio playhead. This prevents an offscreen or interrupted render transaction
+from leaving the player busy. Native video resources are lazy: constructing a SwiftUI cover does
+not construct a decoder, and non-animated covers never create a native player.
 
 CI hosts the actual motion state in a UIWindow and checks intermediate frames, prompt completion,
 mode changes, interrupted gestures and reopening. It also verifies lazy native allocation and
@@ -120,6 +124,5 @@ Playback-order helpers supply these neighbours, including repeat wraparound. Ret
 bounded to seven occurrences; side covers request 600 px and the current cover refines to 1200 px.
 
 The passive presentation sample is recorded in the probe's animatable-data setter, which
-receives interpolated values. Target/layout calls to effectValue do not overwrite it. First
-creation of the Core Image snapshot context occurs on its serial conversion queue, keeping
-GPU-context setup off the first swipe's UI thread as well as the conversion itself.
+receives interpolated values. Target/layout calls to effectValue do not overwrite it. The collapse
+opacity has a separate passive sample so a retouch during restoration does not jump its fade.

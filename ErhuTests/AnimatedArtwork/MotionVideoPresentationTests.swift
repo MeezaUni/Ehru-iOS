@@ -1,5 +1,7 @@
 import AVFoundation
 import UIKit
+import SwiftUI
+import Observation
 import XCTest
 @testable import Erhu
 
@@ -31,34 +33,97 @@ final class MotionVideoPresentationTests: XCTestCase {
     }
 
     @MainActor
-    func testCurrentVideoFrameFreezesIntoAnImageAndRestoresWithoutASecondPlayer() async throws {
+    func testTemporaryReadinessChangesKeepThePresentedVideoLayerVisible() {
         let surface = MotionVideoSurface(frame: CGRect(x: 0, y: 0, width: 64, height: 64))
-        var optionalBuffer: CVPixelBuffer?
-        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 64, 64, kCVPixelFormatType_32BGRA,
-                                          nil, &optionalBuffer), kCVReturnSuccess)
-        let buffer = try XCTUnwrap(optionalBuffer)
-        CVPixelBufferLockBaseAddress(buffer, [])
-        memset(CVPixelBufferGetBaseAddress(buffer)!, 255, CVPixelBufferGetBytesPerRow(buffer) * 64)
-        CVPixelBufferUnlockBaseAddress(buffer, [])
         surface.setReady(true)
-        surface.freeze(buffer)
-        let image = try XCTUnwrap(surface.subviews.compactMap { $0 as? UIImageView }.first)
-        for _ in 0..<100 {
-            if image.image != nil { break }
+        surface.freeze()
+        surface.setReady(false)
+        XCTAssertTrue(surface.isFrozen)
+        XCTAssertEqual(surface.videoLayer.opacity, 1, "An occluded cover must hold its decoded frame, not expose the poster")
+        XCTAssertTrue(surface.subviews.isEmpty, "Dragging must not allocate a bitmap snapshot view")
+        surface.unfreeze()
+        XCTAssertEqual(surface.videoLayer.opacity, 1)
+        surface.reset()
+        XCTAssertEqual(surface.videoLayer.opacity, 0, "A new asset must still start with its loading fallback")
+    }
+
+    @MainActor
+    func testOcclusionPausesTheMountedMovieAndPowerModeAloneUsesStaticFallback() async throws {
+        let url = try await movie()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let previous = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows).first(where: \.isKeyWindow)
+        let scene = try XCTUnwrap(previous?.windowScene ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 100, height: 100)
+        let session = MotionVideoSession()
+        let visibility = CoverVisibility()
+        let controller = UIHostingController(rootView: CoverProbe(url: url, session: session, visibility: visibility)
+            .environment(AnimatedArtworkStore()).ignoresSafeArea())
+        controller.safeAreaRegions = []
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        window.layoutIfNeeded()
+        defer {
+            session.stop(); window.isHidden = true; window.rootViewController = nil
+            previous?.makeKeyAndVisible()
+        }
+        for _ in 0..<250 {
+            if session.hasResidentSurface && session.surface.videoLayer.isReadyForDisplay { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        XCTAssertTrue(surface.isFrozen)
-        XCTAssertNotNil(image.image)
-        XCTAssertEqual(surface.videoLayer.opacity, 0)
-        surface.unfreeze()
-        XCTAssertFalse(surface.isFrozen)
-        XCTAssertNil(image.image)
-        XCTAssertEqual(surface.videoLayer.opacity, 1)
-        // A result completing after cancellation must not put a snapshot back over live video.
-        surface.freeze(buffer)
-        surface.unfreeze()
+        XCTAssertTrue(session.surface.videoLayer.isReadyForDisplay)
+        let item = try XCTUnwrap(session.player.currentItem)
+        let surface = session.surface
+        let host = try XCTUnwrap(surface.superview)
+        visibility.visible = false
         try await Task.sleep(for: .milliseconds(100))
-        XCTAssertNil(image.image)
+        XCTAssertTrue(surface.superview === host, "Opening the player must pause the album layer without dismantling it")
+        XCTAssertTrue(session.player.currentItem === item)
+        XCTAssertEqual(session.player.rate, 0)
+        let paused = session.player.currentTime().seconds
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(session.player.currentTime().seconds, paused, accuracy: 1.0 / 30)
+        visibility.moving = true
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertTrue(surface.isFrozen)
+        XCTAssertTrue(surface.superview === host)
+        XCTAssertEqual(surface.videoLayer.opacity, 1)
+        visibility.moving = false
+        visibility.visible = true
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(surface.superview === host)
+        XCTAssertEqual(session.player.rate, 1)
+        visibility.lowPower = true
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(surface.superview, "Low Power Mode may use the static fallback")
+        XCTAssertEqual(session.player.rate, 0)
+        visibility.lowPower = false
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertTrue(session.surface === surface)
+        XCTAssertNotNil(surface.superview)
+        XCTAssertTrue(session.player.currentItem === item)
+    }
+
+    @MainActor @Observable
+    private final class CoverVisibility {
+        var visible = true
+        var moving = false
+        var lowPower = false
+    }
+
+    private struct CoverProbe: View {
+        let url: URL
+        let session: MotionVideoSession
+        let visibility: CoverVisibility
+        var body: some View {
+            MotionCoverView(song: nil, videoURL: url, playing: true, videoSession: session, tracksScrollVisibility: false)
+                .environment(\.motionCoverVisible, visibility.visible)
+                .environment(\.playerInMotion, visibility.moving)
+                .environment(\.scenePhase, .active)
+                .environment(\.visualWorkBudget, VisualWorkBudget(lowPower: visibility.lowPower, thermalState: .nominal))
+                .frame(width: 100, height: 100)
+        }
     }
 
     @MainActor
@@ -197,6 +262,31 @@ final class MotionVideoPresentationTests: XCTestCase {
         // Empty construction is cheap; media is only allocated for downloaded cover requests.
         XCTAssertTrue(deck.slots.isEmpty)
         XCTAssertNil(deck.currentSession)
+    }
+
+    @MainActor
+    func testMiniPlayerHandsTheSameMovieToAnOpeningCarouselEvenWithRepeatNeighbours() async throws {
+        let url = try await movie()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let deck = CarouselVideoDeck()
+        defer { deck.stop() }
+        deck.configure([.init(key: "old#1", url: url)], current: "old#1")
+        let original = try XCTUnwrap(deck.currentSession)
+        let player = original.player
+        deck.prepareMini(url: url, entryID: UUID())
+        XCTAssertTrue(deck.currentSession === original)
+        // The old coordinate is also a repeat neighbour. The mini's layer must become current,
+        // with a separate neighbour filled later, rather than moving to the back card.
+        deck.configure([.init(key: "new#0", url: url), .init(key: "old#1", url: url)], current: "new#0",
+                       prepareNeighbours: false, allowNewSessions: false)
+        XCTAssertTrue(deck.currentSession === original)
+        XCTAssertTrue(deck.currentSession?.player === player)
+        XCTAssertNil(deck.slots["old#1"])
+        deck.configure([.init(key: "new#0", url: url), .init(key: "old#1", url: url)], current: "new#0")
+        XCTAssertFalse(deck.slots["old#1"]?.session === original)
+        XCTAssertLessThanOrEqual(deck.residentCount, 3)
+        deck.retainCurrent(pause: false)
+        XCTAssertTrue(deck.currentSession === original)
     }
 
     @MainActor

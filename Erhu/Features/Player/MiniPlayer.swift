@@ -14,7 +14,7 @@ struct MiniPlayer: View {
         HStack(spacing: 4) {
             Button(action: onOpen) {
                 HStack(spacing: Spacing.md) {
-                    MotionCoverPoster(song: song, maxPixels: 132)
+                    MiniPlayerArtwork(song: song)
                         .frame(width: ArtworkSize.miniPlayer, height: ArtworkSize.miniPlayer)
                         .clipShape(RoundedRectangle(cornerRadius: Radius.small, style: .continuous))
                         .playerArtworkFrame(expanded: false)
@@ -58,6 +58,47 @@ struct MiniPlayer: View {
                 .frame(height: 3)
                 .padding(.horizontal, Spacing.md)
         }
+    }
+}
+
+/// Media preparation is structural, not driven by the playhead. The mini, flight and carousel
+/// pass ownership of one native layer instead of replacing it with a first-frame photograph.
+private struct MiniPlayerArtwork: View {
+    let song: Song
+    @Environment(PlayerController.self) private var player
+    @Environment(AnimatedArtworkStore.self) private var artwork
+    @Environment(PlayerDragState.self) private var drag
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.visualWorkBudget) private var budget
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private struct Request: Equatable {
+        let url: URL?
+        let entryID: UUID?
+        let ownsLayer: Bool
+        let mayAnimate: Bool
+        let active: Bool
+    }
+
+    var body: some View {
+        let ownsLayer = !drag.isPresented || !drag.isReady
+        let url = artwork.url(for: song)
+        let request = Request(url: url, entryID: player.state.currentEntry?.id, ownsLayer: ownsLayer,
+                              mayAnimate: !reduceMotion && budget.allowsDecorativeMotion, active: scenePhase == .active)
+        let session = player.coverVideos.currentSession
+        MotionCoverView(song: song, videoURL: url, playing: true,
+                        rendersVideo: ownsLayer && player.coverVideos.currentURL == url,
+                        maxPixels: 132, suspended: drag.isPresented && drag.isMoving,
+                        videoSession: session, tracksScrollVisibility: false)
+            .onChange(of: request, initial: true) { _, next in
+                guard next.ownsLayer else { return }
+                guard next.mayAnimate, let url = next.url, let id = next.entryID else {
+                    player.coverVideos.stop()
+                    return
+                }
+                guard next.active else { return }
+                player.coverVideos.prepareMini(url: url, entryID: id)
+            }
     }
 }
 

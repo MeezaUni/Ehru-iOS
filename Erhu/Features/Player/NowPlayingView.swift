@@ -97,7 +97,7 @@ struct NowPlayingView: View {
         .onDisappear {
             player.setVisualMotion(.presentation, active: false)
             player.setVisualMotion(.carousel, active: false)
-            player.coverVideos.retainCurrent()
+            player.coverVideos.retainCurrent(pause: false)
         }
         .background(backdrop(state.currentSong).ignoresSafeArea().modifier(PlayerBackdropFade(drag: drag)))
         .contentShape(Rectangle())
@@ -137,7 +137,7 @@ struct NowPlayingView: View {
 
     private func close(velocity: CGFloat? = nil) {
         drag.beginDismissal(reduceMotion: reduceMotion, velocity: velocity)
-        withAnimation(.smooth(duration: 0.32)) { router.showsNowPlaying = false }
+        router.showsNowPlaying = false
     }
 
     private func previousEntry(_ state: PlaybackState) -> QueueEntry? {
@@ -188,7 +188,7 @@ struct NowPlayingView: View {
             Button {
                 guard let source = player.state.currentEntry?.source else { return }
                 drag.beginDismissal(reduceMotion: reduceMotion)
-                withAnimation(.smooth(duration: 0.32)) { router.reveal(source) }
+                router.reveal(source)
             } label: {
                 Text(playbackSourceTitle)
                     .font(.subheadline.weight(.medium)).lineLimit(1)

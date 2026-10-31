@@ -15,12 +15,17 @@ that target, it uses the smallest available resolution. The downloader limits sa
 64 MB, checks playability, and removes partial files on failure or cancellation. Single-track
 fragment decode times are rebased to zero, preserving video bytes and relative timing.
 
-The current Now Playing card and the visible album header loop muted video. The library grid and
-carousel neighbours remain still. Video pauses its existing player when music is paused (Now
-Playing). It releases its player when scrolled out of view, the view is hidden, the app backgrounds,
-Low Power Mode activates, the device reaches serious/critical thermal state, or Reduce Motion is enabled.
-The existing cover remains underneath until the first video frame is ready, and remains visible
-if video playback fails.
+The current Now Playing card, mini-player and visible album header loop muted video, including
+when music is paused. Library grids remain still. Adjacent carousel covers keep separate paused,
+prerolled movies and start moving as they approach the centre. The mini-player, flying cover and
+current card share one native video surface rather than switching between static and animated
+pictures. A cover pauses on its last decoded frame during presentation gestures; no bitmap
+conversion runs at drag start.
+
+Album headers keep their native video mounted when scrolled offscreen, hidden under Now Playing,
+or backgrounded. They pause and resume in place as visibility changes. Low Power Mode, serious/
+critical thermal state and Reduce Motion may use static artwork. A poster is also used for initial
+loading, missing downloads or disabled motion covers; it is not substituted on ordinary occlusion.
 
 ## Lock screen and system Now Playing
 
