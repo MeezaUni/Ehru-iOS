@@ -1,36 +1,39 @@
-# Synced-first lyrics
+# Lyrics source failover
 
-Automatic lookup chooses a confident word-synced match, then a line-synced match. It never
-interrupts playback with a choose-a-result screen. Artist/title, recording-version and duration
-checks still apply. The known Ye/Kanye West identity is used for matching and, after a healthy
-empty response, an alternative LRCLIB lookup; local file tags are never changed.
+Automatic lookup prefers real word-synced lyrics, then line-synced lyrics. Matching still checks
+title, artist, recording version and duration; there is no automatic choose-a-result screen.
+The Ye/Kanye West alias is used for matching and healthy empty exact/search lookups without
+rewriting local tags. Timing is classified from actual timestamps, never just an API field name.
 
-Embedded synchronized lyrics and saved synchronized results can be used immediately and offline.
-Embedded plain lyrics no longer bypass the online sync check. Old plain caches and legacy missing
-entries are rechecked; valid saved synchronization is retained. Real timestamps are parsed to
-classify timing, so an untimed string in a field named syncedLyrics is still plain text.
+On a provider failure, immediately try the other available sources. LRCLIB gateway responses
+(5xx, including 502) get no automatic retry or retry-delay sleep. A gateway Retry-After header is
+not a 429. If present it only suppresses further requests to that unavailable provider internally;
+it never creates a user-facing wait. Real 429 limits are also respected by skipping that provider
+and continuing failover. Healthy requests keep their existing courtesy spacing.
 
-Plain text is used automatically only after synchronized sources successfully answered without
-an appropriate synced match. LRCLIB returning 502, a timeout, an offline error or rate limiting
-means availability could not be checked. It does not establish that synchronization is missing.
-In this situation the player shows the service-unavailable message and keeps any genuine saved
-sync; it does not automatically substitute newly fetched or cached plain text.
+The player gets the failure reason as soon as failover starts, including for coalesced lookups.
+Request-generation and pending-state checks prevent a late progress event from overwriting a
+new song, a manual selection or completed lyrics. File lyrics can appear immediately after the
+failure even while the alternate request is still pending. There is no countdown or paused-
+lyrics screen. Normal network response time is still required when no local result exists.
 
-**Search online** loads available alternatives as soon as it opens. Synced choices appear first.
-If LRCLIB fails but a plain source returns options, the list states that synchronized availability
-could not be checked, and labels the actual source/timing of each option. Picking an option there
-is an explicit action, unlike automatic lookup. **Search the web** still opens a browser query.
+Real saved synchronization stays ahead of plain text. If only plain text is available from a
+file, saved result or another provider, it is shown with the source and **not synced** label,
+plus the original reason near the Lyrics heading, such as **LRCLIB unavailable (HTTP 502)**.
+This is temporary failover, not a claim that synchronized lyrics do not exist. Actual fallback
+content may be cached, but the transient outage reason is not persisted as a permanent status.
+Errors never become seven-day missing-lyrics cache entries. Plain caches are rechecked for
+synchronization on later lookups, and old missing entries are rechecked under the current policy.
 
-LRCLIB retains its bounded retry and Retry-After behavior. Lyrics requests bypass the local HTTP
-response cache. The optional plain source is [lyrics.ovh's documented API](https://github.com/NTag/lyrics.ovh#api),
-using real catalog metadata/IDs and returned text. It does not supply timing; Erhu never estimates
-it. This service may itself use LRCLIB and other sources, so it cannot guarantee availability.
-Only search/track metadata is sent; music files are never uploaded.
+**Search online** loads alternatives as soon as it opens, with real synced options first. It also
+keeps a source-failure notice when another service provides options. **Search the web** is a
+separate browser action. The plain source is [lyrics.ovh's documented API](https://github.com/NTag/lyrics.ovh#api),
+which supplies real catalog metadata/IDs and returned text. It does not provide synchronization,
+and Erhu never fabricates timestamps. This service may itself use LRCLIB and other sources, so
+availability is not guaranteed. Only search/track metadata is sent, never audio files.
 
-Tests cover synced-over-plain priority, embedded plain lyrics, old caches, partial outages,
-continued use of saved sync, explicit manual alternatives, artist aliases and recording-version
-rejection, actual timestamp classification, gateway recovery, backoff and stale search responses.
-Live provider calls remain blocked by this development environment's outbound proxy (CONNECT
-403); that does not establish the service's availability on a phone. The user's desktop 502 and
-third-party degraded-status screenshot are consistent with the API failing while its website
-still loads; they do not expose the provider's internal cause.
+Tests cover gateway-versus-429 classification, one-request gateway failure, immediate provider
+switching, a pending alternate with already-visible local lyrics/reason, saved sync, plain-source
+labelling, cache recovery, aliases, version matching and stale asynchronous results. The native
+iOS workflow builds and tests both variants. Live provider hosts have been blocked by the
+development proxy (CONNECT 403); this does not establish their availability on a phone.
