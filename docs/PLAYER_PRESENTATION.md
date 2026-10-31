@@ -59,11 +59,13 @@ a later main-loop turn. Shared cards keep their loaded artwork and identity when
 Departing cards are retained through settlement and then pruned, with at most seven nearby
 occurrences even during repeatedly interrupted swipes. A compositor meter lets a rapid
 new touch pick up the visible interpolated position. Generation tokens discard stale completions.
-Cover Flow spacing leaves a visible previous/next preview at both edges. Z-index is a direct trait on each ZStack child, outside its transform. Finger movement chooses
-the nearest card while dragging; a released slide keeps the destination in front. The compositor
-probe only records position and stack amount for an interrupted gesture. It never publishes
-view state from rendering or interrupts the native animation with a midpoint callback. Stack mode gathers neighbours
-only at rest. Expanded artwork geometry is not republished on every horizontal frame.
+Cover Flow spacing leaves a previous/next preview at both edges. The depth deck uses real
+opaque neighbouring covers and a mirrored perspective turn. The incoming cover rises from
+behind while the outgoing cover turns away; their projected edges clear before layer order
+changes. The animatable layer stack updates pose, shading and depth together, retaining the
+same card/video hosts. Its passive interpolation sample supports retouch without publishing
+state from rendering. Card contents are built outside that per-frame layer stack. Reduce Motion
+uses the simpler fade. Expanded artwork geometry is not republished on every horizontal frame.
 
 Playback opens up to two adjacent file headers at user-initiated priority off the main thread.
 Each prepared AVAudioFile reader is consumed once and checked against file size/mtime, so decks
@@ -98,11 +100,11 @@ Device video compositing and frame pacing still require verification on an iPhon
 
 ## Finite motion and decoder lifetime
 
-CarouselMotion owns one 280 ms cubic animation for both position and stack layout. A stacked
-drag unfolds in proportion to the finger; it never switches layouts instantly at touch-down.
-Release restores the chosen layout within that same animation. Stacked neighbours are smaller
-and slightly raised behind the current card. Mid-slide retouch reads both presented values;
-gesture direction comes from finger travel, independently of the previous slide's destination.
+CarouselMotion owns one finite animation for position and layout: 280 ms for spread mode and
+400 ms for depth mode, shortened according to remaining travel and release velocity. A stacked
+drag retains its depth layout. The rear preview is actual neighbouring artwork, and the cards
+keep their titles while exchanging positions. Mid-slide retouch reads both presented values;
+gesture direction comes from finger travel, independently of the previous destination.
 Generation guards prevent an interrupted completion from pruning the active scene or clearing
 its movement flag. Mode toggles retarget the same motion owner.
 
@@ -123,6 +125,6 @@ positioned cover instead of inserting a new card directly at its destination mid
 Playback-order helpers supply these neighbours, including repeat wraparound. Retention remains
 bounded to seven occurrences; side covers request 600 px and the current cover refines to 1200 px.
 
-The passive presentation sample is recorded in the probe's animatable-data setter, which
+The passive presentation sample is recorded in the visible layer stack's animatable-data setter, which
 receives interpolated values. Target/layout calls to effectValue do not overwrite it. The collapse
 opacity has a separate passive sample so a retouch during restoration does not jump its fade.
