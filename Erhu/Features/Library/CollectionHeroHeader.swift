@@ -11,11 +11,23 @@ struct CollectionHeroHeader<Cover: View>: View {
     let onShuffle: () -> Void
     @ViewBuilder let cover: () -> Cover
     @Environment(\.palette) private var palette
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         VStack(spacing: 0) {
             CollectionHeroLayout() {
                 cover()
+                    .overlay(alignment: .top) {
+                        // The photo extends under the status bar. Match its text appearance
+                        // without changing the artist/album colours used by the page controls.
+                        let shade: Color = scheme == .dark ? .black : .white
+                        LinearGradient(stops: [
+                            .init(color: shade.opacity(0.65), location: 0),
+                            .init(color: shade.opacity(0.65), location: 0.4),
+                            .init(color: .clear, location: 1),
+                        ], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 140)
+                    }
                     .accessibilityHidden(true)
                 VStack(spacing: Spacing.sm) {
                     Text(title).font(.largeTitle.weight(.bold)).lineLimit(3)
