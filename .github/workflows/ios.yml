@@ -86,24 +86,55 @@ jobs:
             -destination "id=$SIMULATOR_ID" -resultBundlePath build/TestResults.xcresult CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build/tests.log; then
             python3 - <<'PY'
+          import json
           import os
           import re
+          import subprocess
           from pathlib import Path
           lines = Path('build/tests.log').read_text(errors='replace').splitlines()
           def is_failure(line):
-              # Malformed-media fixtures intentionally produce CoreAudio/ImageIO diagnostics.
-              # Report compiler and XCTest failures without turning those system logs into errors.
+              # Media fixtures deliberately produce system diagnostics. Report test/compiler
+              # failures, including Xcode's parallel runner, without promoting those to errors.
               return (re.search(r'\.(?:swift|m|mm|h):\d+(?::\d+)?:\s*(?:fatal )?error:', line) is not None
                       or line.lstrip().startswith(('error:', 'fatal error:', 'xcodebuild: error:', 'Testing failed:'))
                       or ('XCTAssert' in line and 'failed' in line)
-                      or (line.startswith('Test Case ') and ' failed (' in line)
+                      or re.search(r'Test [Cc]ase .* failed(?: on | \()', line) is not None
                       or (line.startswith('Test Suite ') and ' failed at ' in line)
                       or '** TEST FAILED **' in line)
           failures = [line for line in lines if is_failure(line)]
-          for failure in failures[:20]:
+          result_detail = []
+          bundle = Path('build/TestResults.xcresult')
+          if bundle.exists():
+              commands = [
+                  ['xcrun', 'xcresulttool', 'get', 'test-results', 'summary', '--path', str(bundle)],
+                  ['xcrun', 'xcresulttool', 'get', 'object', '--legacy', '--path', str(bundle), '--format', 'json'],
+              ]
+              for command in commands:
+                  try:
+                      result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+                      if result.returncode:
+                          result_detail.append(result.stderr[-2000:])
+                          continue
+                      data = json.loads(result.stdout)
+                      if 'testFailures' in data:
+                          result_detail.append(result.stdout[-18000:])
+                          for failure in data.get('testFailures') or []:
+                              name = failure.get('testName') or failure.get('testIdentifier') or 'Test failure'
+                              failures.append(str(name) + ': ' + str(failure.get('failureText') or failure))
+                      else:
+                          for category in ['testFailureSummaries', 'errorSummaries']:
+                              for issue in data.get('issues', {}).get(category, {}).get('_values', []):
+                                  name = issue.get('testCaseName', {}).get('_value', 'Test runner')
+                                  message = issue.get('message', {}).get('_value', '')
+                                  if message:
+                                      failures.append(name + ': ' + message)
+                  except (OSError, ValueError, subprocess.TimeoutExpired) as error:
+                      result_detail.append(str(error))
+          failures = list(dict.fromkeys(failures))
+          for failure in failures[:30]:
               escaped = failure.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
               print('::error::' + escaped, flush=True)
-          detail = '\n'.join(failures or lines[-80:])[-24000:]
+          detail = '\n'.join(failures + result_detail + ['Last test output:'] + lines[-100:])[-40000:]
           with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
               summary.write('## Test errors\n\n```text\n' + detail + '\n```\n')
           PY
