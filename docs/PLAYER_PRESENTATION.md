@@ -2,8 +2,10 @@
 
 This branch uses static album artwork. Only the current cover scales and translates between
 its expanded rectangle and the actual mini-player artwork rectangle. Controls, metadata,
-lyrics, carousel neighbours and backdrop hide immediately when a downward pull begins;
-the library remains visible underneath the flying cover. A cancelled pull restores them.
+lyrics, carousel neighbours and backdrop fade smoothly over the first 90 points of a downward
+pull, revealing the library progressively. Beyond that fade only the cover travels. A cancelled
+pull restores the stationary player; retouching its animation picks up both the displayed cover
+position and opacity.
 Opening uses a finite 400 ms curve, with the chrome joining through a smooth fade.
 Reduce Motion uses a fade without flying the artwork.
 
