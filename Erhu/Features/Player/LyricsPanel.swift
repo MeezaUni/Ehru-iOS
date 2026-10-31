@@ -222,6 +222,9 @@ private struct LyricsPanelContent: View {
                             searching = true
                         }
                     }
+                    if let url = LyricsWebSearch.url(for: "\(song.title) \(song.artist)") {
+                        Link("Search the web", destination: url)
+                    }
                 }
                 Spacer()
             }
@@ -238,8 +241,8 @@ private struct LyricsPanelContent: View {
         case .offline: return ("You are offline. Lyrics will be looked up when you are back online.", true)
         case .rateLimited(let at):
             let seconds = max(Int((Double(at) / 1000 - Date().timeIntervalSince1970).rounded()), 1)
-            return ("LRCLIB asked to wait (\(seconds) s). Try again shortly.", true)
-        case .failed(let reason): return ("Could not look up lyrics (\(reason)).", true)
+            return ("A lyrics service asked to wait (\(seconds) s). Try again shortly.", true)
+        case .failed(let reason): return (LyricsFailureMessage.text(reason), true)
         case .idle, .needsChoice: return ("This file has no embedded lyrics.", false)
         }
     }
@@ -248,7 +251,7 @@ private struct LyricsPanelContent: View {
         Button { store.choose(candidate) } label: {
             VStack(alignment: .leading, spacing: 2) {
                 Text(candidate.trackName).font(.body.weight(.semibold)).foregroundStyle(palette.onSurface).lineLimit(1)
-                let details = [candidate.artistName, candidate.albumName, candidate.durationSec.map { formatDuration(Int64($0 * 1000)) },
+                let details = [candidate.artistName, candidate.provider, candidate.albumName, candidate.durationSec.map { formatDuration(Int64($0 * 1000)) },
                                candidate.timing.label].compactMap { $0 }.filter { !$0.isBlank }
                 Text(details.joined(separator: " · ")).font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(2)
             }
@@ -268,6 +271,13 @@ private struct LyricsPanelContent: View {
                         .onSubmit { store.search(searchText) }
                     Button("Search") { store.search(searchText) }.disabled(searchText.isBlank)
                 }
+                Section {
+                    if let url = LyricsWebSearch.url(for: searchText) {
+                        Link(destination: url) { Label("Search the web", systemImage: "safari") }
+                    }
+                } footer: {
+                    Text("Opens in your browser.")
+                }
                 switch store.current?.search ?? .idle {
                 case .idle: EmptyView()
                 case .searching: ProgressView()
@@ -281,7 +291,7 @@ private struct LyricsPanelContent: View {
                         } label: {
                             VStack(alignment: .leading) {
                                 Text(candidate.trackName).foregroundStyle(.primary)
-                                Text([candidate.artistName, candidate.timing.label].joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                                Text([candidate.artistName, candidate.provider, candidate.timing.label].joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
                             }
                         }
                     }

@@ -116,10 +116,23 @@ actor OnlineLyricsRepository {
         return result
     }
 
-    /// Manual search: everything a provider returns for [freeText] (or the track's own fields).
+    /// Manual search uses the same failover as automatic lookup. An empty or failing primary
+    /// must not strand the search sheet while another source can return real results.
     func search(_ track: LyricsTrack, freeText: String?) async -> ProviderResponse<[LyricsCandidate]> {
-        guard let provider = providers.first else { return .notFound }
-        return await provider.search(track.query, freeText: freeText.flatMap { $0.isBlank ? nil : $0 })
+        var failure: ProviderResponse<[LyricsCandidate]>?
+        for provider in providers {
+            guard !Task.isCancelled else { return .failed("cancelled") }
+            switch await provider.search(track.query, freeText: freeText?.nonBlank) {
+            case .success(let candidates):
+                let usable = candidates.filter { $0.instrumental || $0.bestText != nil }
+                if !usable.isEmpty { return .success(usable) }
+            case .notFound: break
+            case .offline: if failure == nil { failure = .offline }
+            case .rateLimited(let at): if failure == nil { failure = .rateLimited(retryAtMs: at) }
+            case .failed(let reason): if failure == nil { failure = .failed("\(provider.name): \(reason)") }
+            }
+        }
+        return failure ?? .success([])
     }
 
     /// The user picked [candidate] for [track]: it is kept and preferred (also over the file's own lyrics).
@@ -138,22 +151,33 @@ actor OnlineLyricsRepository {
         let query = track.query
         if query.title.isBlank { return .notFound }
         var found: [LyricsCandidate] = []
+        var failure: OnlineLyricsResult?
         for provider in providers {
-            if let outcome = await ask(provider, query, &found) { return outcome }
+            if let outcome = await ask(provider, query, &found), failure == nil {
+                if case .failed(let reason) = outcome { failure = .failed("\(provider.name): \(reason)") }
+                else { failure = outcome }
+            }
+            // A healthy primary keeps its existing word/line preference. Only an unavailable
+            // or inconclusive source invokes the next service, including on manual search.
+            if let best = LyricsMatcher.best(query, found) { return await store(track, best) }
         }
-        if let best = LyricsMatcher.best(query, found) { return await store(track, best) }
         let options = LyricsMatcher.plausible(query, found)
         if !options.isEmpty { return .needsChoice(options) }
+        // A gateway outage (even when another provider has no result) is not proof that lyrics
+        // do not exist. Never turn it into a seven-day NOT_FOUND cache entry.
+        if let failure { return failure }
         await cache.put(CachedLyrics(songId: track.songId, fingerprint: lyricsFingerprint(query), status: .notFound, fetchedAtMs: now()))
         return .notFound
     }
 
-    /// Collects [provider]'s results into [found]; returns an outcome only when the lookup must stop.
+    /// Collects a provider's results, retaining failures so another service can recover them.
     private func ask(_ provider: OnlineLyricsProvider, _ query: LyricsQuery, _ found: inout [LyricsCandidate]) async -> OnlineLyricsResult? {
+        var exactFailure: OnlineLyricsResult?
         if query.durationMs > 0 && !query.artist.isBlank {
             switch await provider.exact(query) {
             case .success(let candidate): found.append(candidate)
-            case .notFound, .failed: break
+            case .notFound: break
+            case .failed(let reason): exactFailure = .failed(reason)
             case let other: return stop(other)
             }
             if let last = found.last, LyricsMatcher.score(query, last).confident, last.timing == .word { return nil }
@@ -161,13 +185,13 @@ actor OnlineLyricsRepository {
         switch await provider.search(query, freeText: nil) {
         case .success(let candidates):
             let known = found
-            found += candidates.filter { candidate in !known.contains { $0.providerId == candidate.providerId } }
+            found += candidates.filter { candidate in !known.contains { $0.id == candidate.id } }
         case .notFound:
             break
         case let other:
             if LyricsMatcher.best(query, found) == nil { return stop(other) }
         }
-        return nil
+        return LyricsMatcher.best(query, found) == nil ? exactFailure : nil
     }
 
     private func stop<T>(_ response: ProviderResponse<T>) -> OnlineLyricsResult {
@@ -184,7 +208,7 @@ actor OnlineLyricsRepository {
         switch entry.status {
         case .instrumental: return .instrumental
         case .found:
-            guard let candidate = entry.candidate else { return nil }
+            guard let candidate = entry.candidate, candidate.instrumental || candidate.bestText != nil else { return nil }
             return .found(candidate, fromCache: true, userChosen: entry.userChosen, fetchedAtMs: entry.fetchedAtMs)
         case .notFound:
             // "Not found" is remembered for a while, then asked again (lyrics get added over time).

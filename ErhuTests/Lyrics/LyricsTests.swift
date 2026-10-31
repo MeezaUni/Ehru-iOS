@@ -217,7 +217,7 @@ private final class Clock: @unchecked Sendable {
 final class LrclibProviderTests: XCTestCase {
     private let http = FakeHTTP()
     private let clock = Clock()
-    private lazy var provider = LrclibProvider(http: http, now: { [clock] in clock.now }, minGapMs: 0)
+    private lazy var provider = LrclibProvider(http: http, now: { [clock] in clock.now }, minGapMs: 0, retryDelayMs: 0)
 
     private func json(_ record: LrclibRecord) -> Data {
         let dict: [String: Any] = ["id": record.id!, "trackName": record.trackName!, "artistName": record.artistName!,
@@ -255,6 +255,25 @@ final class LrclibProviderTests: XCTestCase {
         if case .offline = await provider.exact(query) {} else { XCTFail("expected offline") }
         http.respond = { _ in (500, [:], Data()) }
         if case .failed = await provider.exact(query) {} else { XCTFail("expected failure") }
+    }
+
+    func testGatewayRetryRecoversButPersistentFailuresAreBounded() async {
+        let body = json(lrclibRecord())
+        http.respond = { [http] _ in http.calls == 1 ? (502, [:], Data()) : (200, [:], body) }
+        guard case .success = await provider.exact(query) else { return XCTFail("Transient gateway should recover") }
+        XCTAssertEqual(http.calls, 2)
+        http.respond = { _ in (502, [:], Data()) }
+        guard case .failed(let reason) = await provider.search(query, freeText: "song") else { return XCTFail("Persistent gateway should surface") }
+        XCTAssertEqual(reason, "HTTP 502")
+        XCTAssertEqual(http.calls, 4, "Only one retry per request, not an outage loop")
+    }
+
+    func testGatewayWithExplicitRetryAfterIsNotImmediatelyRepeated() async {
+        http.respond = { _ in (503, ["Retry-After": "60"], Data()) }
+        guard case .rateLimited(let at) = await provider.exact(query) else { return XCTFail("Expected service backoff") }
+        XCTAssertEqual(at, clock.now + 60_000)
+        _ = await provider.search(query, freeText: nil)
+        XCTAssertEqual(http.calls, 1)
     }
 
     func testOnlyTrackMetadataIsSent() async {
@@ -379,5 +398,239 @@ final class OnlineLyricsRepositoryTests: XCTestCase {
         XCTAssertEqual(.instrumental, second)
         let exacts = await fake.exactCalls
         XCTAssertEqual(1, exacts)
+    }
+}
+
+final class LyricsFallbackTests: XCTestCase {
+    func testAutomaticAndManualSearchRecoverFromPrimaryGatewayFailure() async {
+        let primary = FakeProvider()
+        let backup = FakeProvider()
+        let cache = MemoryCache()
+        await primary.set(exact: .failed("HTTP 502"), search: .failed("HTTP 502"))
+        var plain = candidate(synced: nil)
+        plain.provider = "lyrics.ovh"
+        await backup.set(search: .success([plain]))
+        let repository = OnlineLyricsRepository(providers: [primary, backup], cache: cache)
+        let track = LyricsTrack(songId: 9, query: query)
+        guard case .found(let found, _, _, _) = await repository.lookup(track) else { return XCTFail("Expected fallback") }
+        XCTAssertEqual(found.provider, "lyrics.ovh")
+        XCTAssertEqual(found.timing, .plain)
+        let exacts = await primary.exactCalls
+        guard case .success(let manual) = await repository.search(track, freeText: "edited query") else { return XCTFail("Manual search also needs failover") }
+        XCTAssertEqual(manual, [plain])
+        let unchanged = await primary.exactCalls
+        XCTAssertEqual(exacts, unchanged, "Manual search must not run the automatic exact endpoint")
+    }
+
+    func testUnavailableSourceIsNotCachedAsMissingEvenWhenBackupHasNoMatch() async {
+        let primary = FakeProvider()
+        let backup = FakeProvider()
+        let cache = MemoryCache()
+        await primary.set(exact: .failed("HTTP 502"), search: .success([]))
+        let repository = OnlineLyricsRepository(providers: [primary, backup], cache: cache)
+        let track = LyricsTrack(songId: 9, query: query)
+        guard case .failed = await repository.lookup(track) else { return XCTFail("An incomplete lookup is not a seven-day miss") }
+        let stored = await cache.get(track.songId)
+        XCTAssertNil(stored)
+        await primary.set(exact: .success(candidate()), search: .success([]))
+        guard case .found = await repository.lookup(track) else { return XCTFail("Retry must reach the recovered source") }
+    }
+
+    func testHealthyPrimaryDoesNotContactBackupAndRetainsRealWordTiming() async {
+        let primary = FakeProvider()
+        let backup = FakeProvider()
+        await primary.set(exact: .success(candidate(word: "[00:01.000]<00:01.000>test")))
+        let repository = OnlineLyricsRepository(providers: [primary, backup], cache: MemoryCache())
+        guard case .found(let found, _, _, _) = await repository.lookup(LyricsTrack(songId: 9, query: query)) else { return XCTFail("Expected primary") }
+        XCTAssertEqual(found.timing, .word)
+        let exacts = await backup.exactCalls
+        let searches = await backup.searchCalls
+        XCTAssertEqual(exacts + searches, 0)
+    }
+
+    func testMetadataWithoutTextCannotSuppressAWorkingFallback() async {
+        let primary = FakeProvider()
+        let backup = FakeProvider()
+        var empty = candidate(synced: nil)
+        empty.plainLyrics = nil
+        await primary.set(exact: .success(empty), search: .success([empty]))
+        await backup.set(search: .success([candidate(id: 8, synced: nil)]))
+        let repository = OnlineLyricsRepository(providers: [primary, backup], cache: MemoryCache())
+        guard case .found(let found, _, _, _) = await repository.lookup(LyricsTrack(songId: 9, query: query)) else { return XCTFail("Expected actual text") }
+        XCTAssertEqual(found.providerId, 8)
+        XCTAssertNotNil(found.bestText)
+        guard case .success(let manual) = await repository.search(LyricsTrack(songId: 9, query: query), freeText: "song") else { return XCTFail("Manual search also needs usable text") }
+        XCTAssertEqual(manual.first?.providerId, 8)
+    }
+
+    func testManualEmptyPrimaryCanFindBackupAndAllFailuresStayFailures() async {
+        let primary = FakeProvider()
+        let backup = FakeProvider()
+        await backup.set(search: .success([candidate(id: 2)]))
+        let repository = OnlineLyricsRepository(providers: [primary, backup], cache: MemoryCache())
+        let track = LyricsTrack(songId: 9, query: query)
+        guard case .success(let found) = await repository.search(track, freeText: "song") else { return XCTFail("Expected fallback search") }
+        XCTAssertEqual(found.first?.providerId, 2)
+        await primary.set(search: .failed("HTTP 502"))
+        await backup.set(search: .failed("HTTP 503"))
+        guard case .failed = await repository.search(track, freeText: "song") else { return XCTFail("Do not report an outage as no results") }
+    }
+
+    func testBrowserSearchEncodesEditedTextAsAQueryRatherThanAURL() throws {
+        let input = "AC/DC & someone? #Title"
+        let url = try XCTUnwrap(LyricsWebSearch.url(for: input))
+        let components = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(url.host, "www.google.com")
+        XCTAssertEqual(components.queryItems?.first?.value, input + " lyrics")
+        XCTAssertNil(components.fragment)
+        XCTAssertNil(LyricsWebSearch.url(for: "  "))
+    }
+}
+
+final class LyricsOvhProviderTests: XCTestCase {
+    private let http = FakeHTTP()
+    private let clock = Clock()
+    private lazy var provider = LyricsOvhProvider(http: http, now: { [clock] in clock.now })
+
+    private func suggestions(title: String = "Test Song", artist: String = "Someone") -> Data {
+        try! JSONSerialization.data(withJSONObject: ["data": [
+            ["id": 123, "title": title, "duration": 200, "artist": ["name": artist], "album": ["title": "Album"]],
+        ]])
+    }
+
+    func testCatalogMetadataAndReturnedPlainTextAreRealAndNeverArtificiallySynced() async throws {
+        let page = suggestions()
+        let lyrics = try JSONSerialization.data(withJSONObject: ["lyrics": "First line\nSecond line"])
+        var urls: [URL] = []
+        http.respond = { url in
+            urls.append(url)
+            return (200, [:], url.path.hasPrefix("/suggest/") ? page : lyrics)
+        }
+        guard case .success(let found) = await provider.search(query, freeText: nil), let result = found.first else { return XCTFail("Expected real text") }
+        XCTAssertEqual(result.providerId, 123)
+        XCTAssertEqual(result.trackName, "Test Song")
+        XCTAssertEqual(result.provider, "lyrics.ovh")
+        XCTAssertEqual(result.durationSec, 200)
+        XCTAssertEqual(result.plainLyrics, "First line\nSecond line")
+        XCTAssertEqual(result.timing, .plain)
+        XCTAssertNil(result.syncedLyrics)
+        XCTAssertNil(result.wordSyncedLrc)
+        XCTAssertEqual(urls.count, 2)
+        XCTAssertEqual(urls.last?.path, "/v1/Someone/Test Song")
+    }
+
+    func testDifferentVersionIsNotAutomaticallyFetchedButEditedManualSearchIsHonoured() async {
+        let page = suggestions(title: "Test Song (Live)")
+        var requested: [URL] = []
+        http.respond = { url in requested.append(url); return (200, [:], page) }
+        guard case .success(let found) = await provider.search(query, freeText: nil) else { return XCTFail("Expected empty filtered suggestions") }
+        XCTAssertTrue(found.isEmpty)
+        XCTAssertEqual(requested.count, 1, "A different recording must not fetch lyrics automatically")
+        _ = await provider.search(query, freeText: "edited artist/title")
+        XCTAssertEqual(requested[1].lastPathComponent, "edited artist/title")
+    }
+
+    func testReservedCharactersRemainOneArtistOrTitleComponent() async throws {
+        let page = suggestions(title: "Question? #1", artist: "AC/DC")
+        var urls: [URL] = []
+        http.respond = { url in
+            urls.append(url)
+            return (200, [:], url.path.hasPrefix("/suggest/") ? page : Data("{\"lyrics\":\"text\"}".utf8))
+        }
+        _ = await provider.search(query, freeText: "AC/DC Question? #1")
+        let url = try XCTUnwrap(urls.last)
+        XCTAssertEqual(url.host, "api.lyrics.ovh")
+        let parts = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertTrue(parts.percentEncodedPath.contains("AC%2FDC"))
+        XCTAssertNil(parts.query)
+        XCTAssertNil(parts.fragment)
+    }
+
+    func testRateLimitBlocksFurtherRequestsAndMissingTextIsNotAResult() async {
+        http.respond = { _ in (429, ["Retry-After": "30"], Data()) }
+        guard case .rateLimited(let at) = await provider.search(query, freeText: nil) else { return XCTFail("Expected rate limit") }
+        XCTAssertEqual(at, clock.now + 30_000)
+        _ = await provider.search(query, freeText: nil)
+        XCTAssertEqual(http.calls, 1)
+        clock.now += 31_000
+        let page = suggestions()
+        http.respond = { url in (200, [:], url.path.hasPrefix("/suggest/") ? page : Data("{\"lyrics\":\"   \"}".utf8)) }
+        guard case .success(let found) = await provider.search(query, freeText: nil) else { return XCTFail("Expected no usable text") }
+        XCTAssertTrue(found.isEmpty)
+    }
+}
+
+
+/// Deliberately ignores cancellation so a genuinely late network response reaches the store.
+private actor DelayedLyricsSearch: OnlineLyricsProvider {
+    nonisolated let name = "Delayed"
+    private var old: CheckedContinuation<ProviderResponse<[LyricsCandidate]>, Never>?
+    private(set) var oldStarted = false
+    private(set) var oldReturned = false
+
+    func exact(_ query: LyricsQuery) async -> ProviderResponse<LyricsCandidate> { .notFound }
+    func search(_ query: LyricsQuery, freeText: String?) async -> ProviderResponse<[LyricsCandidate]> {
+        if freeText == "old" {
+            let result: ProviderResponse<[LyricsCandidate]> = await withCheckedContinuation {
+                old = $0
+                oldStarted = true
+            }
+            oldReturned = true
+            return result
+        }
+        return .success(freeText == "new" ? [candidate(id: 99)] : [])
+    }
+    func resetOld() { oldStarted = false; oldReturned = false }
+    func finishOld() {
+        old?.resume(returning: .failed("HTTP 502"))
+        old = nil
+    }
+}
+
+final class LyricsSearchStateTests: XCTestCase {
+    @MainActor
+    func testOlderFailedSearchCannotReplaceNewerResultsOrReopenAClosedSearch() async throws {
+        let provider = DelayedLyricsSearch()
+        let repository = OnlineLyricsRepository(providers: [provider], cache: MemoryCache())
+        let store = LyricsStore(database: try LibraryDatabase.inMemory(), repository: repository)
+        store.shown(testSong(7))
+        store.search("old")
+        for _ in 0..<50 {
+            let started = await provider.oldStarted
+            if started { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let started = await provider.oldStarted
+        XCTAssertTrue(started)
+        store.search("new")
+        for _ in 0..<50 {
+            if store.current?.search == .results([candidate(id: 99)]) { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(store.current?.search, .results([candidate(id: 99)]))
+        await provider.finishOld()
+        for _ in 0..<50 {
+            let returned = await provider.oldReturned
+            if returned { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(store.current?.search, .results([candidate(id: 99)]), "An old 502 must not overwrite the recovered search")
+        await provider.resetOld()
+        store.search("old")
+        for _ in 0..<50 {
+            let started = await provider.oldStarted
+            if started { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        store.closeSearch()
+        await provider.finishOld()
+        for _ in 0..<50 {
+            let returned = await provider.oldReturned
+            if returned { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertEqual(store.current?.search, .idle, "Closing search must suppress its late network error")
     }
 }

@@ -57,6 +57,7 @@ final class LyricsStore {
     @ObservationIgnored private var online: OnlineView?
     @ObservationIgnored private var manual: ManualLyricsSearch = .idle
     @ObservationIgnored private var lookupTask: Task<Void, Never>?
+    @ObservationIgnored private var searchTask: Task<Void, Never>?
 
     /// The online lookup state of one song.
     private struct OnlineView {
@@ -75,6 +76,7 @@ final class LyricsStore {
     /// The lyrics page shows [song]: read its file lyrics and look online if needed (once per song).
     func shown(_ song: Song) {
         if self.song?.id != song.id || embedded == nil {
+            cancelSearch()
             self.song = song
             embedded = try? database.lyrics(songId: song.id)
             manual = .idle
@@ -87,18 +89,20 @@ final class LyricsStore {
 
     func search(_ text: String) {
         guard let song else { return }
+        cancelSearch()
         manual = .searching
         publish()
         let repository = repository
-        Task {
+        searchTask = Task {
             let response = await repository.search(song.lyricsTrack, freeText: text)
-            guard self.song?.id == song.id else { return }
+            guard !Task.isCancelled, self.song?.id == song.id else { return }
+            searchTask = nil
             switch response {
             case .success(let candidates): manual = .results(candidates)
             case .notFound: manual = .results([])
             case .offline: manual = .error("You are offline.")
-            case .rateLimited: manual = .error("LRCLIB asked to wait a moment. Try again shortly.")
-            case .failed(let reason): manual = .error("The search failed (\(reason)).")
+            case .rateLimited: manual = .error("A lyrics service asked to wait a moment. Try again shortly.")
+            case .failed(let reason): manual = .error(LyricsFailureMessage.text(reason))
             }
             publish()
         }
@@ -108,6 +112,7 @@ final class LyricsStore {
     func choose(_ candidate: LyricsCandidate) {
         guard let song else { return }
         lookupTask?.cancel()
+        cancelSearch()
         manual = .idle
         let repository = repository
         Task {
@@ -122,6 +127,7 @@ final class LyricsStore {
     func useFileLyrics() {
         guard let song else { return }
         lookupTask?.cancel()
+        cancelSearch()
         let repository = repository
         Task {
             await repository.forget(song.lyricsTrack)
@@ -131,13 +137,20 @@ final class LyricsStore {
     }
 
     func closeSearch() {
+        cancelSearch()
         manual = .idle
         publish()
+    }
+
+    private func cancelSearch() {
+        searchTask?.cancel()
+        searchTask = nil
     }
 
     private func startLookup(refresh: Bool) {
         guard let song else { return }
         lookupTask?.cancel()
+        cancelSearch()
         manual = .idle
         let track = song.lyricsTrack
         let repository = repository
@@ -156,7 +169,7 @@ final class LyricsStore {
                                 fromCache: previous?.fromCache == true, userChosen: previous?.userChosen == true)
             publish()
             let result = await repository.lookup(track, refresh: refresh)
-            guard self.song?.id == song.id else { return }
+            guard !Task.isCancelled, self.song?.id == song.id else { return }
             online = view(of: result, songId: song.id, previous: previous?.candidate)
             publish()
         }
