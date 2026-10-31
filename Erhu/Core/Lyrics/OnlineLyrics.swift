@@ -560,9 +560,7 @@ enum LyricsWebSearch {
 
 enum LyricsFailureMessage {
     static func text(_ reason: String) -> String {
-        if reason.contains("LRCLIB") {
-            return "LRCLIB is temporarily unavailable. Synced lyrics couldn’t be checked."
-        }
+        if reason.contains("LRCLIB") { return reason + "." }
         if reason.contains("HTTP 5") || reason.contains("timed out") {
             return "Online lyrics are temporarily unavailable. You can search the web instead."
         }

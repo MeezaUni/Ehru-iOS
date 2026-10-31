@@ -92,17 +92,17 @@ actor LrclibProvider: OnlineLyricsProvider {
     private let http: HTTPClient
     private let now: @Sendable () -> Int64
     private let minGapMs: Int64
-    private let retryDelayMs: Int64
     private var lastRequestMs: Int64 = 0
     private var blockedUntilMs: Int64 = 0
+    private var unavailableUntilMs: Int64 = 0
+    private var unavailableReason = "service unavailable"
     private var tail: Task<Void, Never>?
 
     init(http: HTTPClient = URLSessionHTTPClient(cachePolicy: .reloadIgnoringLocalCacheData), now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
-         minGapMs: Int64 = 400, retryDelayMs: Int64 = 750) {
+         minGapMs: Int64 = 400) {
         self.http = http
         self.now = now
         self.minGapMs = minGapMs
-        self.retryDelayMs = max(retryDelayMs, 0)
     }
 
     func exact(_ query: LyricsQuery) async -> ProviderResponse<LyricsCandidate> {
@@ -169,45 +169,35 @@ actor LrclibProvider: OnlineLyricsProvider {
     private func perform<T: Decodable & Sendable>(path: String, items: [URLQueryItem]) async -> ProviderResponse<T> {
         var components = URLComponents(url: Self.base.appending(path: path), resolvingAgainstBaseURL: false)!
         components.queryItems = items
-        for attempt in 0..<2 {
-            guard !Task.isCancelled else { return .failed("cancelled") }
-            let start = now()
-            if start < blockedUntilMs { return .rateLimited(retryAtMs: blockedUntilMs) }
-            let wait = lastRequestMs + minGapMs - start
-            do {
-                if wait > 0 { try await Task.sleep(for: .milliseconds(wait)) }
-                try Task.checkCancellation()
-                lastRequestMs = now()
-                let (data, response) = try await http.get(components.url!, headers: LyricsHTTP.headers)
-                switch response.statusCode {
-                case 429:
-                    blockedUntilMs = now() + retryAfterMs(response.value(forHTTPHeaderField: "Retry-After"))
-                    return .rateLimited(retryAtMs: blockedUntilMs)
-                case 404:
-                    return .notFound
-                case 200..<300:
-                    do { return .success(try JSONDecoder().decode(T.self, from: data)) }
-                    catch { return .failed("malformed response") }
-                case 502, 503, 504:
-                    // One bounded retry for transient gateways. Do not hammer an outage or
-                    // ignore an explicit server wait, and never reuse a cached gateway page.
-                    if let retry = response.value(forHTTPHeaderField: "Retry-After") {
-                        blockedUntilMs = now() + retryAfterMs(retry)
-                        return .rateLimited(retryAtMs: blockedUntilMs)
-                    }
-                    if attempt == 0 {
-                        try await Task.sleep(for: .milliseconds(retryDelayMs))
-                        continue
-                    }
-                    return .failed("HTTP \(response.statusCode)")
-                default:
-                    return .failed("HTTP \(response.statusCode)")
+        guard !Task.isCancelled else { return .failed("cancelled") }
+        let start = now()
+        // Respect server limits internally while callers immediately try another provider.
+        // Gateway Retry-After is not a 429 and must never become a user-facing countdown.
+        if start < unavailableUntilMs { return .failed(unavailableReason) }
+        if start < blockedUntilMs { return .rateLimited(retryAtMs: blockedUntilMs) }
+        let wait = lastRequestMs + minGapMs - start
+        do {
+            if wait > 0 { try await Task.sleep(for: .milliseconds(wait)) }
+            try Task.checkCancellation()
+            lastRequestMs = now()
+            let (data, response) = try await http.get(components.url!, headers: LyricsHTTP.headers)
+            switch response.statusCode {
+            case 429:
+                blockedUntilMs = now() + retryAfterMs(response.value(forHTTPHeaderField: "Retry-After"))
+                return .rateLimited(retryAtMs: blockedUntilMs)
+            case 404: return .notFound
+            case 200..<300:
+                do { return .success(try JSONDecoder().decode(T.self, from: data)) }
+                catch { return .failed("malformed response") }
+            case 500..<600:
+                unavailableReason = "HTTP \(response.statusCode)"
+                if let retry = response.value(forHTTPHeaderField: "Retry-After") {
+                    unavailableUntilMs = now() + retryAfterMs(retry)
                 }
-            } catch {
-                return LyricsHTTP.failure(error)
+                return .failed(unavailableReason)
+            default: return .failed("HTTP \(response.statusCode)")
             }
-        }
-        return .failed("service unavailable")
+        } catch { return LyricsHTTP.failure(error) }
     }
 
     /// Retry-After in seconds or as an HTTP date; a minute when missing or unreadable.

@@ -14,8 +14,16 @@ enum LyricsOrigin: Equatable {
 /// The online lookup for the playing song, as the lyrics page shows it.
 enum LyricsLookup: Equatable {
     case idle, searching, notFound, instrumental, offline
-    case rateLimited(retryAtMs: Int64)
+    case rateLimited
     case failed(String)
+    case switching(String)
+    case usingFallback(String)
+
+    var isSearching: Bool {
+        if case .searching = self { return true }
+        if case .switching = self { return true }
+        return false
+    }
 }
 
 /// A manual online search started from the lyrics page.
@@ -40,17 +48,28 @@ struct SongLyrics: Equatable {
 
     var parsed: Lyrics? { LyricsParser.parse(text) }
     var syncedServiceNotice: String? {
+        let reason: String
         switch lookup {
-        case .failed(let reason): return LyricsFailureMessage.text(reason)
-        case .offline: return "Synced lyrics couldn’t be checked while offline."
-        case .rateLimited: return "The synced lyrics service is temporarily limiting requests."
+        case .failed(let message), .switching(let message), .usingFallback(let message): reason = message
+        case .offline: reason = "Lyrics services couldn’t be reached"
+        case .rateLimited: reason = "LRCLIB is rate-limited"
         default: return nil
         }
+        if text != nil {
+            let source = provider ?? (origin == .file ? "file lyrics" : "saved lyrics")
+            let kind = (timing ?? .none) >= .line ? "synced" : "not synced"
+            let saved = origin == .onlineSaved ? "saved " : ""
+            return "\(reason). Using \(saved)\(source) · \(kind)."
+        }
+        if lookup.isSearching { return "\(reason). Switching lyrics source…" }
+        return reason + ". No alternate lyrics could be loaded."
     }
+
 }
 
 /// The playing song's lyrics: real embedded/saved synchronization can paint immediately;
-/// embedded or saved plain text waits for a successful check that no synced match is available. Lookups start when the lyrics are shown,
+/// provider failures immediately switch to available alternatives with an explicit reason.
+/// Plain fallback is labelled unsynced. Lookups start when the lyrics are shown,
 /// send only title, artist, album and duration, and are kept so they work offline.
 @MainActor
 @Observable
@@ -65,6 +84,7 @@ final class LyricsStore {
     @ObservationIgnored private var manual: ManualLyricsSearch = .idle
     @ObservationIgnored private var lookupTask: Task<Void, Never>?
     @ObservationIgnored private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var lookupID = UUID()
 
     /// The online lookup state of one song.
     private struct OnlineView {
@@ -110,7 +130,7 @@ final class LyricsStore {
                 else { manual = .results(result.candidates) }
             case .notFound: manual = .results([])
             case .offline: manual = .error("You are offline.")
-            case .rateLimited: manual = .error("A lyrics service asked to wait a moment. Try again shortly.")
+            case .rateLimited: manual = .error("Lyrics sources are unavailable or rate-limited. No alternate results could be loaded.")
             case .failed(let reason): manual = .error(LyricsFailureMessage.text(reason))
             }
             publish()
@@ -121,6 +141,7 @@ final class LyricsStore {
     func choose(_ candidate: LyricsCandidate) {
         guard let song else { return }
         lookupTask?.cancel()
+        lookupID = UUID()
         cancelSearch()
         manual = .idle
         let repository = repository
@@ -136,6 +157,7 @@ final class LyricsStore {
     func useFileLyrics() {
         guard let song else { return }
         lookupTask?.cancel()
+        lookupID = UUID()
         cancelSearch()
         let repository = repository
         Task {
@@ -159,8 +181,10 @@ final class LyricsStore {
     private func startLookup(refresh: Bool) {
         guard let song else { return }
         lookupTask?.cancel()
+        lookupID = UUID()
         cancelSearch()
         manual = .idle
+        let requestID = lookupID
         let track = song.lyricsTrack
         let repository = repository
         let previous = online?.songId == song.id ? online : nil
@@ -186,7 +210,14 @@ final class LyricsStore {
                                 userChosen: cached?.userChosen == true)
             publish()
             let recheckEmbeddedPlain = Self.timing(embedded) == .plain && savedSync == nil
-            let result = await repository.lookup(track, refresh: refresh || recheckEmbeddedPlain)
+            let result = await repository.lookup(track, refresh: refresh || recheckEmbeddedPlain) { [weak self] reason in
+                Task { @MainActor [weak self] in
+                    guard let self, self.lookupID == requestID, self.song?.id == song.id,
+                          self.online?.lookup.isSearching == true else { return }
+                    self.online?.lookup = .switching(reason)
+                    self.publish()
+                }
+            }
             guard !Task.isCancelled, self.song?.id == song.id else { return }
             online = view(of: result, songId: song.id, previous: keep)
             publish()
@@ -205,10 +236,13 @@ final class LyricsStore {
         switch result {
         case .found(let candidate, let fromCache, let userChosen, _):
             return OnlineView(songId: songId, lookup: .idle, candidate: candidate, fromCache: fromCache, userChosen: userChosen)
+        case .fallback(let fallback):
+            return OnlineView(songId: songId, lookup: .usingFallback(fallback.reason), candidate: fallback.candidate,
+                              fromCache: fallback.fromCache, userChosen: fallback.userChosen)
         case .notFound: return OnlineView(songId: songId, lookup: .notFound, candidate: previous, fromCache: previous != nil)
         case .instrumental: return OnlineView(songId: songId, lookup: .instrumental)
         case .offline: return OnlineView(songId: songId, lookup: .offline, candidate: previous, fromCache: previous != nil)
-        case .rateLimited(let at): return OnlineView(songId: songId, lookup: .rateLimited(retryAtMs: at), candidate: previous, fromCache: previous != nil)
+        case .rateLimited: return OnlineView(songId: songId, lookup: .rateLimited, candidate: previous, fromCache: previous != nil)
         case .failed(let reason): return OnlineView(songId: songId, lookup: .failed(reason), candidate: previous, fromCache: previous != nil)
         }
     }
@@ -223,7 +257,11 @@ final class LyricsStore {
         let view = online?.songId == song.id ? online : nil
         let fileTiming = Self.timing(embedded)
         let fileUsable = fileTiming != .none
-        let permitsPlain = view?.lookup == .idle || view?.lookup == .notFound
+        let permitsPlain: Bool
+        switch view?.lookup {
+        case .idle?, .notFound?, .failed?, .offline?, .rateLimited?, .switching?, .usingFallback?: permitsPlain = true
+        default: permitsPlain = false
+        }
         if let view, let candidate = view.candidate, let text = candidate.bestText,
            (candidate.timing >= .line || permitsPlain || view.userChosen),
            (view.userChosen || candidate.timing > fileTiming || !fileUsable) {

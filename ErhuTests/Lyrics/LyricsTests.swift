@@ -217,7 +217,7 @@ private final class Clock: @unchecked Sendable {
 final class LrclibProviderTests: XCTestCase {
     private let http = FakeHTTP()
     private let clock = Clock()
-    private lazy var provider = LrclibProvider(http: http, now: { [clock] in clock.now }, minGapMs: 0, retryDelayMs: 0)
+    private lazy var provider = LrclibProvider(http: http, now: { [clock] in clock.now }, minGapMs: 0)
 
     private func json(_ record: LrclibRecord) -> Data {
         let dict: [String: Any] = ["id": record.id!, "trackName": record.trackName!, "artistName": record.artistName!,
@@ -293,23 +293,27 @@ final class LrclibProviderTests: XCTestCase {
         XCTAssertEqual(q.artist, "Ye", "Lookup aliases never retag the file")
     }
 
-    func testGatewayRetryRecoversButPersistentFailuresAreBounded() async {
+    func testGatewayFailureReturnsAfterOneRequestAndExplicitRetryCanRecover() async {
         let body = json(lrclibRecord())
         http.respond = { [http] _ in http.calls == 1 ? (502, [:], Data()) : (200, [:], body) }
-        guard case .success = await provider.exact(query) else { return XCTFail("Transient gateway should recover") }
-        XCTAssertEqual(http.calls, 2)
-        http.respond = { _ in (502, [:], Data()) }
-        guard case .failed(let reason) = await provider.search(query, freeText: "song") else { return XCTFail("Persistent gateway should surface") }
+        guard case .failed(let reason) = await provider.exact(query) else { return XCTFail("502 must return immediately for failover") }
         XCTAssertEqual(reason, "HTTP 502")
-        XCTAssertEqual(http.calls, 4, "Only one retry per request, not an outage loop")
+        XCTAssertEqual(http.calls, 1, "No automatic gateway retry or retry-delay timer")
+        guard case .success = await provider.exact(query) else { return XCTFail("An explicit later attempt can recover") }
+        XCTAssertEqual(http.calls, 2)
     }
 
-    func testGatewayWithExplicitRetryAfterIsNotImmediatelyRepeated() async {
-        http.respond = { _ in (503, ["Retry-After": "60"], Data()) }
-        guard case .rateLimited(let at) = await provider.exact(query) else { return XCTFail("Expected service backoff") }
-        XCTAssertEqual(at, clock.now + 60_000)
-        _ = await provider.search(query, freeText: nil)
-        XCTAssertEqual(http.calls, 1)
+    func testGatewayRetryAfterIsNotMisclassifiedAsARateLimit() async {
+        for status in [502, 503, 504] {
+            let transport = FakeHTTP()
+            transport.respond = { _ in (status, ["Retry-After": "60"], Data()) }
+            let source = LrclibProvider(http: transport, now: { [clock] in clock.now }, minGapMs: 0)
+            guard case .failed(let reason) = await source.exact(query) else { return XCTFail("A gateway is not a 429 countdown") }
+            XCTAssertEqual(reason, "HTTP \(status)")
+            guard case .failed(let repeated) = await source.search(query, freeText: nil) else { return XCTFail("Skip the unavailable endpoint and continue failover") }
+            XCTAssertEqual(repeated, reason)
+            XCTAssertEqual(transport.calls, 1, "Respect the server header internally without blocking other sources")
+        }
     }
 
     func testOnlyTrackMetadataIsSent() async {
@@ -420,11 +424,13 @@ final class OnlineLyricsRepositoryTests: XCTestCase {
         await cache.clear()
         await fake.set(exact: .offline)
         let offline = await repository.lookup(track)
-        XCTAssertEqual(.offline, offline)
+        guard case .failed(let reason) = offline else { return XCTFail("Expected unavailable source") }
+        XCTAssertTrue(reason.contains("Couldn’t reach"))
         var entries = await cache.entries
         XCTAssertTrue(entries.isEmpty)
         await fake.set(exact: .rateLimited(retryAtMs: clock.now + 5_000))
-        if case .rateLimited = await repository.lookup(track) {} else { XCTFail("expected rate limit") }
+        guard case .failed(let rateReason) = await repository.lookup(track) else { return XCTFail("No user-facing rate-limit wait") }
+        XCTAssertTrue(rateReason.contains("rate-limited"))
         entries = await cache.entries
         XCTAssertTrue(entries.isEmpty)
     }
@@ -445,7 +451,7 @@ final class OnlineLyricsRepositoryTests: XCTestCase {
 }
 
 final class LyricsFallbackTests: XCTestCase {
-    func testOutageHoldsAutomaticPlainTextButManualSearchShowsOptionsWithAnOutageNotice() async {
+    func testOutageAutomaticallySwitchesSourceAndKeepsTheReasonInManualResults() async {
         let primary = FakeProvider(name: "LRCLIB")
         let backup = FakeProvider(name: "lyrics.ovh", supportsSyncedLyrics: false)
         let cache = MemoryCache()
@@ -455,17 +461,55 @@ final class LyricsFallbackTests: XCTestCase {
         await backup.set(search: .success([plain]))
         let repository = OnlineLyricsRepository(providers: [primary, backup], cache: cache)
         let track = LyricsTrack(songId: 9, query: query)
-        guard case .failed = await repository.lookup(track) else { return XCTFail("An outage cannot prove synchronization is missing") }
+        guard case .fallback(let result) = await repository.lookup(track) else { return XCTFail("Switch immediately to the available source") }
+        XCTAssertEqual(result.candidate, plain)
+        XCTAssertTrue(result.reason.contains("LRCLIB"))
+        XCTAssertTrue(result.reason.contains("HTTP 502"))
+        XCTAssertEqual(result.candidate.timing, .plain)
+        let primarySearches = await primary.searchCalls
+        XCTAssertEqual(primarySearches, 0, "Do not call the failed source again before switching")
         let autoPlainCalls = await backup.searchCalls
-        XCTAssertEqual(autoPlainCalls, 0)
+        XCTAssertEqual(autoPlainCalls, 1)
         let cached = await cache.get(track.songId)
-        XCTAssertNil(cached)
+        XCTAssertEqual(cached?.candidate, plain, "Save actual fallback data without persisting an outage claim")
         let exacts = await primary.exactCalls
         guard case .success(let manual) = await repository.search(track, freeText: "edited query") else { return XCTFail("Manual alternatives must remain available") }
         XCTAssertEqual(manual.candidates, [plain])
         XCTAssertTrue(manual.syncedServiceNotice?.contains("LRCLIB") == true)
         let unchanged = await primary.exactCalls
         XCTAssertEqual(exacts, unchanged)
+    }
+
+    func testRealGatewayHeaderSwitchesToBackupWithoutRetryOrAnotherPrimaryRequest() async {
+        let http = FakeHTTP()
+        http.respond = { _ in (502, ["Retry-After": "60"], Data()) }
+        let primary = LrclibProvider(http: http, minGapMs: 0)
+        let backup = FakeProvider(name: "Backup", supportsSyncedLyrics: false)
+        var words = candidate(id: 42, synced: nil)
+        words.provider = "Backup"
+        await backup.set(search: .success([words]))
+        let repository = OnlineLyricsRepository(providers: [primary, backup], cache: MemoryCache())
+        guard case .fallback(let fallback) = await repository.lookup(LyricsTrack(songId: 8, query: query)) else { return XCTFail("502 with Retry-After must switch, not return a 60-second wait") }
+        XCTAssertEqual(http.calls, 1)
+        XCTAssertEqual(fallback.candidate.provider, "Backup")
+        XCTAssertTrue(fallback.reason.contains("HTTP 502"))
+        let calls = await backup.searchCalls
+        XCTAssertEqual(calls, 1)
+    }
+
+    func testRealRateLimitSkipsToAnotherSyncedSourceWithoutAUserWait() async {
+        let primary = FakeProvider(name: "LRCLIB")
+        await primary.set(exact: .rateLimited(retryAtMs: Int64.max))
+        let alternate = FakeProvider(name: "Other synced source")
+        var timed = candidate(id: 22)
+        timed.provider = "Other synced source"
+        await alternate.set(exact: .success(timed))
+        let repository = OnlineLyricsRepository(providers: [primary, alternate], cache: MemoryCache())
+        guard case .fallback(let fallback) = await repository.lookup(LyricsTrack(songId: 8, query: query)) else { return XCTFail("Rate limiting must not block other sources") }
+        XCTAssertEqual(fallback.candidate.timing, .line)
+        XCTAssertTrue(fallback.reason.contains("rate-limited"))
+        let primarySearches = await primary.searchCalls
+        XCTAssertEqual(primarySearches, 0)
     }
 
     func testUnavailableSourceIsNotCachedAsMissingEvenWhenBackupHasNoMatch() async {
@@ -684,7 +728,7 @@ final class LyricsSearchStateTests: XCTestCase {
 final class SyncedLyricsPolicyTests: XCTestCase {
     private let track = LyricsTrack(songId: 7, query: query)
 
-    func testHealthySyncedMissAllowsPlainTextButOutageDoesNot() async {
+    func testHealthyMissingSyncAndAnOutageBothUseAvailableTextButOnlyTheOutageHasANotice() async {
         let primary = FakeProvider(name: "LRCLIB")
         let plainSource = FakeProvider(name: "Plain source", supportsSyncedLyrics: false)
         await plainSource.set(search: .success([candidate(id: 2, synced: nil)]))
@@ -693,20 +737,24 @@ final class SyncedLyricsPolicyTests: XCTestCase {
         XCTAssertEqual(plain.timing, .plain)
         await primary.set(exact: .failed("HTTP 502"), search: .failed("HTTP 502"))
         let before = await plainSource.searchCalls
-        guard case .failed = await repository.lookup(track, refresh: true) else { return XCTFail("A saved plain result must not mask a sync outage") }
+        guard case .fallback(let switched) = await repository.lookup(track, refresh: true) else { return XCTFail("Switch instead of making the listener wait") }
+        XCTAssertEqual(switched.candidate.timing, .plain)
+        XCTAssertTrue(switched.reason.contains("HTTP 502"))
         let after = await plainSource.searchCalls
-        XCTAssertEqual(before, after)
+        XCTAssertEqual(after, before + 1)
     }
 
-    func testPlainExactMatchDoesNotHideFailedSynchronizedSearch() async {
+    func testAvailablePlainExactDataKeepsTheFailedSyncedSearchReason() async {
         let primary = FakeProvider(name: "LRCLIB")
         await primary.set(exact: .success(candidate(synced: nil)), search: .failed("HTTP 502"))
         let cache = MemoryCache()
         let repository = OnlineLyricsRepository(providers: [primary], cache: cache)
-        guard case .failed(let reason) = await repository.lookup(track) else { return XCTFail("An exact plain hit does not prove synchronized lyrics are missing") }
-        XCTAssertTrue(reason.contains("LRCLIB"))
+        guard case .fallback(let fallback) = await repository.lookup(track) else { return XCTFail("Keep valid words and explain the search failure") }
+        XCTAssertTrue(fallback.reason.contains("LRCLIB"))
+        XCTAssertTrue(fallback.reason.contains("HTTP 502"))
+        XCTAssertEqual(fallback.candidate.timing, .plain)
         let stored = await cache.get(track.songId)
-        XCTAssertNil(stored)
+        XCTAssertEqual(stored?.status, .found)
     }
 
     func testSyncedSourceAlwaysBeatsAnEarlierPlainHit() async {
@@ -739,13 +787,16 @@ final class SyncedLyricsPolicyTests: XCTestCase {
         XCTAssertEqual(recovered.providerId, 3)
     }
 
-    func testPlainCachedChoiceIsNotUsedDuringAnOutage() async {
+    func testPlainCachedChoiceRemainsAvailableAsAnExplainedFallbackDuringAnOutage() async {
         let primary = FakeProvider(name: "LRCLIB")
         let cache = MemoryCache()
         let repository = OnlineLyricsRepository(providers: [primary], cache: cache)
         _ = await repository.choose(track, candidate(synced: nil))
         await primary.set(exact: .failed("HTTP 502"), search: .failed("HTTP 502"))
-        guard case .failed = await repository.lookup(track) else { return XCTFail("Even an old chosen plain result must recheck sync on the next lookup") }
+        guard case .fallback(let fallback) = await repository.lookup(track) else { return XCTFail("Saved words should be available without a forced wait") }
+        XCTAssertTrue(fallback.fromCache)
+        XCTAssertEqual(fallback.candidate.timing, .plain)
+        XCTAssertTrue(fallback.reason.contains("HTTP 502"))
     }
 
     func testManualOptionsAreSortedSyncedFirstAndKeepTheirActualTiming() async {
@@ -787,7 +838,7 @@ final class EmbeddedSyncedLyricsPreferenceTests: XCTestCase {
     @MainActor
     private func waitForLookup(_ store: LyricsStore) async throws {
         for _ in 0..<100 {
-            if let state = store.current, state.lookup != .searching { return }
+            if let state = store.current, !state.lookup.isSearching { return }
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("Lyrics lookup did not settle")
@@ -814,7 +865,7 @@ final class EmbeddedSyncedLyricsPreferenceTests: XCTestCase {
     }
 
     @MainActor
-    func testEmbeddedPlainLyricsWaitForAHealthyMissingSyncResponse() async throws {
+    func testEmbeddedPlainLyricsAreUsedWithTheActualSourceFailureReason() async throws {
         let primary = FakeProvider(name: "LRCLIB")
         await primary.set(exact: .failed("HTTP 502"), search: .failed("HTTP 502"))
         let store = LyricsStore(database: try databaseWithPlainLyrics(),
@@ -822,8 +873,10 @@ final class EmbeddedSyncedLyricsPreferenceTests: XCTestCase {
         let song = Song(id: 7, title: "Test Song", artist: "Someone", album: "Album", durationMs: 200_000, path: "7.mp3")
         store.shown(song)
         try await waitForLookup(store)
-        XCTAssertNil(store.current?.text)
-        XCTAssertTrue(store.current?.syncedServiceNotice?.contains("LRCLIB") == true)
+        XCTAssertEqual(store.current?.text, "Embedded plain words")
+        XCTAssertEqual(store.current?.timing, .plain)
+        XCTAssertTrue(store.current?.syncedServiceNotice?.contains("HTTP 502") == true)
+        XCTAssertTrue(store.current?.syncedServiceNotice?.contains("not synced") == true)
         await primary.set(exact: .notFound, search: .success([]))
         store.refresh()
         try await waitForLookup(store)
@@ -849,5 +902,56 @@ final class EmbeddedSyncedLyricsPreferenceTests: XCTestCase {
         XCTAssertEqual(store.current?.text, candidate().syncedLyrics)
         XCTAssertEqual(store.current?.timing, .line)
         XCTAssertTrue(store.current?.syncedServiceNotice?.contains("LRCLIB") == true)
+    }
+
+    @MainActor
+    func testImmediateFailoverNoticeAndLocalWordsSurvivePendingNetworkAndExplicitSelection() async throws {
+        let primary = FakeProvider(name: "LRCLIB")
+        await primary.set(exact: .failed("HTTP 502"))
+        let alternate = GatedLyricsFallback()
+        let repository = OnlineLyricsRepository(providers: [primary, alternate], cache: MemoryCache())
+        let store = LyricsStore(database: try databaseWithPlainLyrics(), repository: repository)
+        let song = Song(id: 7, title: "Test Song", artist: "Someone", album: "Album", durationMs: 200_000, path: "7.mp3")
+        store.shown(song)
+        for _ in 0..<100 {
+            if store.current?.syncedServiceNotice?.contains("HTTP 502") == true { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        // The alternate is deliberately still pending. The UI must already have useful words
+        // and the actual failure reason instead of a paused/countdown placeholder.
+        XCTAssertTrue(store.current?.lookup.isSearching == true)
+        XCTAssertEqual(store.current?.text, "Embedded plain words")
+        XCTAssertTrue(store.current?.syncedServiceNotice?.contains("HTTP 502") == true)
+        XCTAssertTrue(store.current?.syncedServiceNotice?.contains("not synced") == true)
+        store.choose(candidate())
+        try await waitForLookup(store)
+        XCTAssertEqual(store.current?.text, candidate().syncedLyrics)
+        await alternate.release()
+        for _ in 0..<5 { await Task.yield() }
+        XCTAssertFalse(store.current?.lookup.isSearching ?? true)
+        XCTAssertEqual(store.current?.text, candidate().syncedLyrics, "A late alternate cannot replace an explicit synchronized choice")
+        XCTAssertNil(store.current?.syncedServiceNotice)
+        let saved = await repository.cached(LyricsTrack(songId: 7, query: query))
+        XCTAssertEqual(saved?.candidate?.timing, .line, "A cancelled background fallback cannot overwrite saved synchronization")
+    }
+
+}
+
+
+private actor GatedLyricsFallback: OnlineLyricsProvider {
+    nonisolated let name = "Alternate"
+    nonisolated let supportsSyncedLyrics = false
+    private var pending: CheckedContinuation<ProviderResponse<[LyricsCandidate]>, Never>?
+    private var released = false
+
+    func exact(_ query: LyricsQuery) async -> ProviderResponse<LyricsCandidate> { .notFound }
+    func search(_ query: LyricsQuery, freeText: String?) async -> ProviderResponse<[LyricsCandidate]> {
+        if released { return .success([candidate(synced: nil)]) }
+        return await withCheckedContinuation { pending = $0 }
+    }
+    func release() {
+        released = true
+        pending?.resume(returning: .success([candidate(synced: nil)]))
+        pending = nil
     }
 }

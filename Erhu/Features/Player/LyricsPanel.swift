@@ -89,11 +89,13 @@ private struct LyricsPanelContent: View {
         let lyrics = store.current?.songId == song.id ? store.current : nil
         VStack(spacing: 0) {
             if let onExpand { cardHeader(lyrics, onExpand) } else { header(lyrics) }
+            if let notice = lyrics?.syncedServiceNotice {
+                Text(notice).font(.caption).foregroundStyle(palette.onSurface)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, compact ? Spacing.lg : Spacing.heroGutter)
+                    .padding(.vertical, Spacing.xs)
+            }
             if let lyrics, let parsed = lyrics.parsed {
-                if let notice = lyrics.syncedServiceNotice {
-                    Text(notice).font(.caption).foregroundStyle(palette.onSurfaceVariant)
-                        .padding(.horizontal, Spacing.lg).padding(.vertical, Spacing.xs)
-                }
                 switch parsed {
                 case .synced(let lines): SyncedLyricsView(lyrics: parsed, lines: lines)
                 case .plain(let lines): plain(lines)
@@ -137,8 +139,9 @@ private struct LyricsPanelContent: View {
         case .notFound: "No synced lyrics found · search online"
         case .instrumental: "Instrumental"
         case .offline: "Offline · synced lyrics couldn’t be checked"
-        case .rateLimited: "Lyrics lookup paused for a moment"
-        case .failed(let reason): reason.contains("LRCLIB") ? "LRCLIB synced lyrics are temporarily unavailable" : "Synced lyrics couldn’t be checked · tap to retry"
+        case .rateLimited, .failed: "No alternate lyrics available · search online"
+        case .switching: "Checking another lyrics source…"
+        case .usingFallback: "Lyrics unavailable · search online"
         }
         return Button(action: onExpand) {
             Text(text).font(.headline).foregroundStyle(palette.onSurfaceVariant)
@@ -200,9 +203,9 @@ private struct LyricsPanelContent: View {
         let info = statusText(lookup)
         return VStack(spacing: Spacing.md) {
             Spacer()
-            if lookup == .searching { ProgressView() }
+            if lookup.isSearching { ProgressView() }
             Text(info.0).font(.body).foregroundStyle(palette.onSurfaceVariant).multilineTextAlignment(.center)
-            if lookup != .searching {
+            if !lookup.isSearching {
                 HStack(spacing: Spacing.sm) {
                     if info.1 { Button("Retry") { store.refresh() }.buttonStyle(.bordered) }
                     Button("Search online…") {
@@ -226,10 +229,9 @@ private struct LyricsPanelContent: View {
         case .notFound: return ("No matching synced lyrics found. Search online for available versions.", false)
         case .instrumental: return ("This track is instrumental.", false)
         case .offline: return ("Synced lyrics couldn’t be checked while offline.", true)
-        case .rateLimited(let at):
-            let seconds = max(Int((Double(at) / 1000 - Date().timeIntervalSince1970).rounded()), 1)
-            return ("A lyrics service asked to wait (\(seconds) s). Try again shortly.", true)
-        case .failed(let reason): return (LyricsFailureMessage.text(reason), true)
+        case .rateLimited, .failed: return ("No alternate lyrics could be loaded. Search online for other versions.", true)
+        case .switching: return ("Looking for lyrics from another source…", false)
+        case .usingFallback: return ("No alternate lyrics could be loaded.", true)
         case .idle: return ("No synced lyrics available. Search online for other versions.", false)
         }
     }
