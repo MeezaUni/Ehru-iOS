@@ -93,6 +93,23 @@ final class PlayerRenderingTests: XCTestCase {
     }
 
     @MainActor
+    func testFirstPartOfPullBlendsPlayerAndLibraryInsteadOfCuttingToHome() throws {
+        let drag = PlayerDragState()
+        drag.setPresented(true, reduceMotion: true)
+        drag.finishEntrance(reduceMotion: true)
+        drag.update(PlayerDragState.chromeFadeDistance / 4)
+        let view = ZStack {
+            Color.blue
+            Color(red: 0, green: 1, blue: 0).modifier(PlayerCollapseVisibility())
+        }.environment(drag)
+        let rendered = try pixels(view, size: CGSize(width: 100, height: 100))
+        let color = rendered.color(x: 50, y: 50)
+        XCTAssertGreaterThan(color[1], 0.5, "A small pull must retain most of the player")
+        XCTAssertGreaterThan(color[2], 0.05, "The library must be revealed continuously underneath")
+        drag.beginDismissal(reduceMotion: true)
+    }
+
+    @MainActor
     func testDepthTurnoverKeepsItsCompactFootprint() throws {
         let items = (-1...1).map { CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 2)))) }
         for focus in [CGFloat(-0.75), -0.25, 0.25, 0.75] {

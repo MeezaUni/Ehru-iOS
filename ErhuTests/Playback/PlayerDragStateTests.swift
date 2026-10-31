@@ -150,4 +150,24 @@ final class PlayerDragStateTests: XCTestCase {
         XCTAssertEqual(frames, scrolled, "Missing preferences must not erase a valid endpoint")
     }
 
+    @MainActor
+    func testSmallPullRevealsTheLibraryGraduallyAndRetouchKeepsItsVisibleFade() {
+        let drag = PlayerDragState()
+        drag.setPresented(true, reduceMotion: true)
+        drag.finishEntrance(reduceMotion: true)
+        drag.update(PlayerDragState.chromeFadeDistance / 4)
+        XCTAssertEqual(drag.collapseFraction, 0.25, accuracy: 1e-6)
+        XCTAssertGreaterThan(PlayerCoverGeometry.collapseOpacity(drag.collapseFraction), 0.5)
+        XCTAssertLessThan(PlayerCoverGeometry.collapseOpacity(drag.collapseFraction), 1)
+        drag.update(PlayerDragState.chromeFadeDistance)
+        XCTAssertEqual(PlayerCoverGeometry.collapseOpacity(drag.collapseFraction), 0)
+        drag.restore()
+        drag.meter.record(0.8)
+        drag.meter.recordCollapse(0.4)
+        drag.update(9)
+        XCTAssertEqual(drag.collapseFraction, 0.5, accuracy: 1e-6,
+                       "Interrupting a restore must continue from its displayed opacity")
+        drag.beginDismissal(reduceMotion: true)
+    }
+
 }
