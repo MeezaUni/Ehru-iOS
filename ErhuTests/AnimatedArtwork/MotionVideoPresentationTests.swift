@@ -106,7 +106,7 @@ final class MotionVideoPresentationTests: XCTestCase {
     }
 
     @MainActor @Observable
-    private final class CoverVisibility {
+    final class CoverVisibility {
         var visible = true
         var moving = false
         var lowPower = false
