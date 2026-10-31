@@ -17,8 +17,6 @@ enum OnlineLyricsResult: Equatable, Sendable {
     case found(LyricsCandidate, fromCache: Bool, userChosen: Bool, fetchedAtMs: Int64)
     case notFound
     case instrumental
-    /// Results that might match but none confidently: the user chooses (nothing is shown silently).
-    case needsChoice([LyricsCandidate])
     case offline
     case rateLimited(retryAtMs: Int64)
     case failed(String)
@@ -41,6 +39,8 @@ struct CachedLyrics: Codable, Equatable, Sendable {
     var candidate: LyricsCandidate?
     let fetchedAtMs: Int64
     var userChosen = false
+    /// Older missing-result entries did not prove that the synced source was available.
+    var syncedLookupCompleted: Bool?
 }
 
 /// Storage of fetched lyrics.
@@ -77,11 +77,10 @@ actor FileOnlineLyricsCache: OnlineLyricsCache {
     func remove(_ songId: Int64) { try? FileManager.default.removeItem(at: file(songId)) }
 }
 
-/// Finds lyrics online for a track, with a local cache. Order: the cache (a match, an
-/// instrumental, or a recent "not found"), then each provider: its exact-match lookup, and a search
-/// when that is not already a confident word-timed match. Only a confident match is used
-/// automatically, word timing first; otherwise plausible results are offered. Concurrent lookups of
-/// the same track share one request; failures are not cached, so a retry can succeed.
+/// Automatically chooses a confident synchronized match, word timing before line timing.
+/// Plain text is permitted only after synchronized sources answered successfully without a
+/// usable match. Manual Search online exposes available alternatives separately. Shared lookups
+/// and saved synchronized results continue to work offline; outages are never cached as misses.
 actor OnlineLyricsRepository {
     /// How long "no lyrics online" is believed before asking again.
     static let notFoundTtlMs: Int64 = 7 * 24 * 60 * 60 * 1000
@@ -118,21 +117,42 @@ actor OnlineLyricsRepository {
 
     /// Manual search uses the same failover as automatic lookup. An empty or failing primary
     /// must not strand the search sheet while another source can return real results.
-    func search(_ track: LyricsTrack, freeText: String?) async -> ProviderResponse<[LyricsCandidate]> {
-        var failure: ProviderResponse<[LyricsCandidate]>?
-        for provider in providers {
+    func search(_ track: LyricsTrack, freeText: String?) async -> ProviderResponse<LyricsSearchResults> {
+        var found: [LyricsCandidate] = []
+        var failure: ProviderResponse<LyricsSearchResults>?
+        var syncNotice: String?
+        let ordered = providers.filter(\.supportsSyncedLyrics) + providers.filter { !$0.supportsSyncedLyrics }
+        for provider in ordered {
             guard !Task.isCancelled else { return .failed("cancelled") }
+            if !provider.supportsSyncedLyrics, found.contains(where: { $0.timing >= .line }) { continue }
             switch await provider.search(track.query, freeText: freeText?.nonBlank) {
             case .success(let candidates):
-                let usable = candidates.filter { $0.instrumental || $0.bestText != nil }
-                if !usable.isEmpty { return .success(usable) }
+                var seen = Set(found.map(\.id))
+                found += candidates.filter { candidate in
+                    (candidate.instrumental || candidate.bestText != nil) && seen.insert(candidate.id).inserted
+                }
             case .notFound: break
-            case .offline: if failure == nil { failure = .offline }
-            case .rateLimited(let at): if failure == nil { failure = .rateLimited(retryAtMs: at) }
-            case .failed(let reason): if failure == nil { failure = .failed("\(provider.name): \(reason)") }
+            case .offline:
+                if failure == nil { failure = .offline }
+                if provider.supportsSyncedLyrics { syncNotice = "Couldn’t reach \(provider.name). Synced lyrics couldn’t be checked." }
+            case .rateLimited(let at):
+                if failure == nil { failure = .rateLimited(retryAtMs: at) }
+                if provider.supportsSyncedLyrics { syncNotice = "\(provider.name) is temporarily limiting requests. Synced lyrics couldn’t be checked." }
+            case .failed(let reason):
+                if failure == nil { failure = .failed("\(provider.name): \(reason)") }
+                if provider.supportsSyncedLyrics { syncNotice = "\(provider.name) is temporarily unavailable. Synced lyrics couldn’t be checked." }
             }
         }
-        return failure ?? .success([])
+        if !found.isEmpty {
+            let ranked = found.enumerated().sorted { a, b in
+                if a.element.timing != b.element.timing { return a.element.timing > b.element.timing }
+                let left = LyricsMatcher.score(track.query, a.element).score
+                let right = LyricsMatcher.score(track.query, b.element).score
+                return left == right ? a.offset < b.offset : left > right
+            }.map(\.element)
+            return .success(LyricsSearchResults(candidates: ranked, syncedServiceNotice: syncNotice))
+        }
+        return failure ?? .success(LyricsSearchResults(candidates: [], syncedServiceNotice: nil))
     }
 
     /// The user picked [candidate] for [track]: it is kept and preferred (also over the file's own lyrics).
@@ -148,25 +168,44 @@ actor OnlineLyricsRepository {
 
     private func resolve(_ track: LyricsTrack, refresh: Bool) async -> OnlineLyricsResult {
         if !refresh, let cached = await fromCache(track) { return cached }
+        let saved = await cached(track)
         let query = track.query
         if query.title.isBlank { return .notFound }
+        let syncedProviders = providers.filter(\.supportsSyncedLyrics)
+        guard !syncedProviders.isEmpty else { return .failed("Synced lyrics could not be checked: no sync service is configured.") }
         var found: [LyricsCandidate] = []
         var failure: OnlineLyricsResult?
-        for provider in providers {
+        for provider in syncedProviders {
             if let outcome = await ask(provider, query, &found), failure == nil {
                 if case .failed(let reason) = outcome { failure = .failed("\(provider.name): \(reason)") }
                 else { failure = outcome }
             }
-            // A healthy primary keeps its existing word/line preference. Only an unavailable
-            // or inconclusive source invokes the next service, including on manual search.
+            if let best = LyricsMatcher.best(query, found, minimumTiming: .line) { return await store(track, best) }
+        }
+        // An unavailable source is not evidence that synchronized lyrics do not exist. Never
+        // replace them with newly fetched or cached plain text on this path.
+        if let failure { return failure }
+        // A deliberate refresh must not discard genuine saved synchronization either.
+        if let saved, let candidate = saved.candidate, candidate.timing >= .line {
+            return .found(candidate, fromCache: true, userChosen: saved.userChosen, fetchedAtMs: saved.fetchedAtMs)
+        }
+        if let best = LyricsMatcher.best(query, found) { return await store(track, best) }
+        var plainFailure = false
+        for provider in providers where !provider.supportsSyncedLyrics {
+            if await ask(provider, query, &found) != nil { plainFailure = true }
             if let best = LyricsMatcher.best(query, found) { return await store(track, best) }
         }
-        let options = LyricsMatcher.plausible(query, found)
-        if !options.isEmpty { return .needsChoice(options) }
-        // A gateway outage (even when another provider has no result) is not proof that lyrics
-        // do not exist. Never turn it into a seven-day NOT_FOUND cache entry.
-        if let failure { return failure }
-        await cache.put(CachedLyrics(songId: track.songId, fingerprint: lyricsFingerprint(query), status: .notFound, fetchedAtMs: now()))
+        // Old plain caches are usable only after a fresh, successful check for synchronization.
+        if let saved, let candidate = saved.candidate, candidate.bestText != nil {
+            return .found(candidate, fromCache: true, userChosen: saved.userChosen, fetchedAtMs: saved.fetchedAtMs)
+        }
+        // Ambiguous candidates stay in manual Search online. Automatic lookup never stops at
+        // a choose-a-result screen, and an incomplete plain lookup is not a cached miss.
+        if !plainFailure, LyricsMatcher.plausible(query, found).isEmpty {
+            var missing = CachedLyrics(songId: track.songId, fingerprint: lyricsFingerprint(query), status: .notFound, fetchedAtMs: now())
+            missing.syncedLookupCompleted = true
+            await cache.put(missing)
+        }
         return .notFound
     }
 
@@ -189,9 +228,9 @@ actor OnlineLyricsRepository {
         case .notFound:
             break
         case let other:
-            if LyricsMatcher.best(query, found) == nil { return stop(other) }
+            if LyricsMatcher.best(query, found, minimumTiming: .line) == nil { return stop(other) }
         }
-        return LyricsMatcher.best(query, found) == nil ? exactFailure : nil
+        return LyricsMatcher.best(query, found, minimumTiming: .line) == nil ? exactFailure : nil
     }
 
     private func stop<T>(_ response: ProviderResponse<T>) -> OnlineLyricsResult {
@@ -208,11 +247,11 @@ actor OnlineLyricsRepository {
         switch entry.status {
         case .instrumental: return .instrumental
         case .found:
-            guard let candidate = entry.candidate, candidate.instrumental || candidate.bestText != nil else { return nil }
+            guard let candidate = entry.candidate, candidate.instrumental || (candidate.bestText != nil && candidate.timing >= .line) else { return nil }
             return .found(candidate, fromCache: true, userChosen: entry.userChosen, fetchedAtMs: entry.fetchedAtMs)
         case .notFound:
             // "Not found" is remembered for a while, then asked again (lyrics get added over time).
-            return now() - entry.fetchedAtMs < Self.notFoundTtlMs ? .notFound : nil
+            return entry.syncedLookupCompleted == true && now() - entry.fetchedAtMs < Self.notFoundTtlMs ? .notFound : nil
         }
     }
 

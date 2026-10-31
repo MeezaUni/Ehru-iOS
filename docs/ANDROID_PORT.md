@@ -49,7 +49,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Android | iOS | Notes |
 |---|---|---|
 | Embedded lyrics, LRC / enhanced LRC (word timing) | ✅ | |
-| LRCLIB lookups, lyrics.ovh fallback, matcher, cache, manual search and choice | ✅ | Genuine word/line timing when supplied; fallback text is unsynced. Browser search remains available during outages. |
+| Synced-first LRCLIB lookup, cache, and manual alternatives | ✅ | Auto-selects real synced matches; plain fallback only after a healthy sync miss. Outages are shown explicitly; Search online lists alternatives. |
 | Lyrics colour palette from artwork | ✅ | Same algorithm and contrast checks; follows the Glass setting |
 
 ## Tools

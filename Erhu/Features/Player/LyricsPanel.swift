@@ -90,6 +90,10 @@ private struct LyricsPanelContent: View {
         VStack(spacing: 0) {
             if let onExpand { cardHeader(lyrics, onExpand) } else { header(lyrics) }
             if let lyrics, let parsed = lyrics.parsed {
+                if let notice = lyrics.syncedServiceNotice {
+                    Text(notice).font(.caption).foregroundStyle(palette.onSurfaceVariant)
+                        .padding(.horizontal, Spacing.lg).padding(.vertical, Spacing.xs)
+                }
                 switch parsed {
                 case .synced(let lines): SyncedLyricsView(lyrics: parsed, lines: lines)
                 case .plain(let lines): plain(lines)
@@ -128,12 +132,11 @@ private struct LyricsPanelContent: View {
         let text = switch lookup {
         case .idle: "Lyrics unavailable"
         case .searching: "Looking for lyrics…"
-        case .notFound: "No lyrics found · tap to search"
+        case .notFound: "No synced lyrics found · search online"
         case .instrumental: "Instrumental"
-        case .offline: "Offline · lyrics will be looked up when you're back online"
+        case .offline: "Offline · synced lyrics couldn’t be checked"
         case .rateLimited: "Lyrics lookup paused for a moment"
-        case .failed: "Lyrics couldn't be loaded · tap to retry"
-        case .needsChoice: "Several lyrics found · tap to choose"
+        case .failed(let reason): reason.contains("LRCLIB") ? "LRCLIB synced lyrics are temporarily unavailable" : "Synced lyrics couldn’t be checked · tap to retry"
         }
         return Button(action: onExpand) {
             Text(text).font(.headline).foregroundStyle(palette.onSurfaceVariant)
@@ -191,75 +194,59 @@ private struct LyricsPanelContent: View {
         }
     }
 
-    @ViewBuilder
     private func status(_ lookup: LyricsLookup) -> some View {
-        if case .needsChoice(let candidates) = lookup {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.sm) {
-                    Text("Is it one of these?").font(.headline)
-                    ForEach(candidates) { candidate in candidateRow(candidate) }
+        let info = statusText(lookup)
+        return VStack(spacing: Spacing.md) {
+            Spacer()
+            if lookup == .searching { ProgressView() }
+            Text(info.0).font(.body).foregroundStyle(palette.onSurfaceVariant).multilineTextAlignment(.center)
+            if lookup != .searching {
+                HStack(spacing: Spacing.sm) {
+                    if info.1 { Button("Retry") { store.refresh() }.buttonStyle(.bordered) }
                     Button("Search online…") {
                         searchText = "\(song.title) \(song.artist)"
                         searching = true
                     }
-                    .frame(maxWidth: .infinity, alignment: .trailing)
                 }
-                .padding(.horizontal, Spacing.heroGutter)
-            }
-        } else {
-            let info = statusText(lookup)
-            let message = info.0
-            let retry = info.1
-            VStack(spacing: Spacing.md) {
-                Spacer()
-                if lookup == .searching { ProgressView() }
-                Text(message).font(.body).foregroundStyle(palette.onSurfaceVariant).multilineTextAlignment(.center)
-                if lookup != .searching {
-                    HStack(spacing: Spacing.sm) {
-                        if retry { Button("Retry") { store.refresh() }.buttonStyle(.bordered) }
-                        Button("Search online…") {
-                            searchText = "\(song.title) \(song.artist)"
-                            searching = true
-                        }
-                    }
-                    if let url = LyricsWebSearch.url(for: "\(song.title) \(song.artist)") {
-                        Link("Search the web", destination: url)
-                    }
+                if let url = LyricsWebSearch.url(for: "\(song.title) \(song.artist)") {
+                    Link("Search the web", destination: url)
                 }
-                Spacer()
             }
-            .padding(.horizontal, Spacing.xl)
-            .frame(maxWidth: .infinity)
+            Spacer()
         }
+        .padding(.horizontal, Spacing.xl)
+        .frame(maxWidth: .infinity)
     }
 
     private func statusText(_ lookup: LyricsLookup) -> (String, Bool) {
         switch lookup {
         case .searching: return ("Looking for lyrics online…", false)
-        case .notFound: return ("No lyrics found for this song.", false)
+        case .notFound: return ("No matching synced lyrics found. Search online for available versions.", false)
         case .instrumental: return ("This track is instrumental.", false)
-        case .offline: return ("You are offline. Lyrics will be looked up when you are back online.", true)
+        case .offline: return ("Synced lyrics couldn’t be checked while offline.", true)
         case .rateLimited(let at):
             let seconds = max(Int((Double(at) / 1000 - Date().timeIntervalSince1970).rounded()), 1)
             return ("A lyrics service asked to wait (\(seconds) s). Try again shortly.", true)
         case .failed(let reason): return (LyricsFailureMessage.text(reason), true)
-        case .idle, .needsChoice: return ("This file has no embedded lyrics.", false)
+        case .idle: return ("No synced lyrics available. Search online for other versions.", false)
         }
     }
 
-    private func candidateRow(_ candidate: LyricsCandidate) -> some View {
-        Button { store.choose(candidate) } label: {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(candidate.trackName).font(.body.weight(.semibold)).foregroundStyle(palette.onSurface).lineLimit(1)
-                let details = [candidate.artistName, candidate.provider, candidate.albumName, candidate.durationSec.map { formatDuration(Int64($0 * 1000)) },
-                               candidate.timing.label].compactMap { $0 }.filter { !$0.isBlank }
-                Text(details.joined(separator: " · ")).font(.caption).foregroundStyle(palette.onSurfaceVariant).lineLimit(2)
+    @ViewBuilder
+    private func searchResults(_ candidates: [LyricsCandidate]) -> some View {
+        if candidates.isEmpty { Text("No results.").foregroundStyle(.secondary) }
+        ForEach(candidates) { candidate in
+            Button {
+                store.choose(candidate)
+                searching = false
+            } label: {
+                VStack(alignment: .leading) {
+                    Text(candidate.trackName).foregroundStyle(.primary)
+                    Text([candidate.artistName, candidate.provider, candidate.timing.label].joined(separator: " · "))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(Spacing.md)
-            .background(RoundedRectangle(cornerRadius: Radius.medium, style: .continuous).fill(palette.surfaceVariant.opacity(0.5)))
         }
-        .buttonStyle(.plain)
     }
 
     private var searchSheet: some View {
@@ -282,19 +269,10 @@ private struct LyricsPanelContent: View {
                 case .idle: EmptyView()
                 case .searching: ProgressView()
                 case .error(let message): Text(message).foregroundStyle(.secondary)
-                case .results(let candidates):
-                    if candidates.isEmpty { Text("No results.").foregroundStyle(.secondary) }
-                    ForEach(candidates) { candidate in
-                        Button {
-                            store.choose(candidate)
-                            searching = false
-                        } label: {
-                            VStack(alignment: .leading) {
-                                Text(candidate.trackName).foregroundStyle(.primary)
-                                Text([candidate.artistName, candidate.provider, candidate.timing.label].joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                    }
+                case .results(let candidates): searchResults(candidates)
+                case .resultsWithNotice(let candidates, let notice):
+                    Text(notice).font(.caption).foregroundStyle(.secondary)
+                    searchResults(candidates)
                 }
             }
             .navigationTitle("Search lyrics online")

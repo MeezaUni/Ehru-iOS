@@ -122,7 +122,19 @@ actor LrclibProvider: OnlineLyricsProvider {
     func search(_ query: LyricsQuery, freeText: String?) async -> ProviderResponse<[LyricsCandidate]> {
         let items = freeText.map { [URLQueryItem(name: "q", value: $0)] }
             ?? [URLQueryItem(name: "track_name", value: query.title), URLQueryItem(name: "artist_name", value: query.artist)]
-        let response: ProviderResponse<[LrclibRecord]> = await call(path: "api/search", items: items)
+        var response: ProviderResponse<[LrclibRecord]> = await call(path: "api/search", items: items)
+        let empty: Bool
+        switch response {
+        case .success(let records): empty = records.isEmpty
+        case .notFound: empty = true
+        default: empty = false
+        }
+        // Try a known artist identity only after a healthy empty response, never to disguise
+        // a gateway outage. A manually edited query is sent exactly as the listener entered it.
+        if empty, freeText == nil, let alternate = LyricsMatcher.alternativeArtistName(query.artist) {
+            response = await call(path: "api/search", items: [URLQueryItem(name: "track_name", value: query.title),
+                                                              URLQueryItem(name: "artist_name", value: alternate)])
+        }
         switch response {
         case .success(let records): return .success(records.compactMap { $0.toCandidate() })
         case .notFound: return .notFound
