@@ -57,11 +57,12 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Android | iOS | Notes |
 |---|---|---|
 | Wi-Fi Transfer | ✅ | Same page, routes, pairing and checks. Runs only while Erhu is open (iOS suspends apps in the background). Ogg and Opus are refused because iOS cannot play them. |
-| Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz, Deezer and Last.fm searched (Last.fm with the listener's own key from Settings › Online sources); native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Genius (needs its own token), renaming files (song identity is the path on iOS) |
-| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer, Wikimedia, and Fanart.tv and Discogs when their keys are set in Settings › Online sources; automatic artist photos with the Deezer matcher; covers embedded with the verified writer; playlist covers from Photos. Not ported: Genius / DuckDuckGo scraping |
+| Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz, Deezer and Last.fm searched (Last.fm with the listener's own key from Settings › Metadata & Artwork › Online sources); native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Genius (needs its own token), renaming files (song identity is the path on iOS) |
+| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer, Wikimedia, and Fanart.tv and Discogs when their keys are set in Settings › Metadata & Artwork › Online sources; automatic artist photos with the Deezer matcher; covers embedded with the verified writer; playlist covers from Photos. Not ported: Genius / DuckDuckGo scraping |
 | Animated album artwork (Apple Music motion covers) | ✅ (personal branch) | Apple web-catalog lookup, offline video downloads and muted loops in Now Playing and album headers. Still-image, Reduce Motion and Low Power Mode fallbacks; see `ANIMATED_COVERS.md` for validation limits |
 | BPM finder | ✅ | AcousticBrainz, then the on-device tempo estimate; only fills a missing BPM |
-| Themes, skins, theme import and rollback | 🟡 | Light / dark / system, the glass effect and imported theme packages (colours) are ported; fonts and widget skins aren't used on iOS |
+| Themes, skins, theme import and rollback | 🟡 | Light / dark / system, artwork colours and imported theme packages (colours) are ported; fonts and widget skins aren't used on iOS |
+| Settings navigation | ✅ | Grouped cards, circular icon badges and detail pages for appearance, sound, library, metadata/artwork and about. Native iOS controls; Android home, widget, glass-tuning and update/crash-log controls are omitted |
 | Update checker (GitHub releases) | ➖ | Sideloaded builds are updated by reinstalling |
 
 ## Building and installing
@@ -71,4 +72,4 @@ every push. The IPA is signed on install with a free Apple ID through SideStore 
 
 ## API keys
 
-Last.fm, Fanart.tv and Discogs keys are the listener's own: they are entered in Settings › Online sources and kept in the iOS Keychain on that device only. None is in this repository or the built IPA; without a key, that source is skipped.
+Last.fm, Fanart.tv and Discogs keys are the listener's own: they are entered in Settings › Metadata & Artwork › Online sources and kept in the iOS Keychain on that device only. None is in this repository or the built IPA; without a key, that source is skipped.
