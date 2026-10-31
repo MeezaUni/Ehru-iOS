@@ -138,7 +138,42 @@ final class PlayerRenderingTests: XCTestCase {
             let rendered = try pixels(content, size: CGSize(width: 390, height: 450))
             assertColor(rendered, at: CGPoint(x: focus > 0 ? 350 : 40, y: 225), dominant: 2)
             assertColor(rendered, at: CGPoint(x: focus > 0 ? 40 : 350, y: 225), dominant: 1)
-            assertColor(rendered, at: CGPoint(x: 195, y: 225), dominant: 1)
+            XCTAssertLessThan(rendered.color(x: 195, y: 225).max() ?? 1, 0.05,
+                              "The cards' rotated edges must clear each other before exchanging depth")
+            let outgoingX = 195 + CarouselPose(distance: -focus, width: 280, stack: 1, reduceMotion: false).x
+            let incomingX = 195 + CarouselPose(distance: (focus > 0 ? 1 : -1) - focus, width: 280, stack: 1, reduceMotion: false).x
+            XCTAssertGreaterThan(rendered.color(x: Int(outgoingX), y: 225)[1], 0.8, "The outgoing card must stay opaque")
+            XCTAssertGreaterThan(rendered.color(x: Int(incomingX), y: 225)[2], 0.8, "The incoming card must stay opaque")
+        }
+    }
+
+    @MainActor
+    func testRestingDepthPreviewPaintsTheActualNeighbourArtwork() throws {
+        let items = [0, 1].map { CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 1)))) }
+        let view = CarouselStrip(items: items, focus: 0, frontOrdinal: 0, stack: 1,
+                                 viewport: CGSize(width: 390, height: 450), cardSize: CGSize(width: 280, height: 380),
+                                 reduceMotion: false, meter: CarouselPresentationMeter()) { item in
+            Rectangle().fill(item.ordinal == 0 ? Color.green : Color.blue).frame(width: 280, height: 380)
+        }.background(Color.black)
+        let rendered = try pixels(view, size: CGSize(width: 390, height: 450))
+        assertColor(rendered, at: CGPoint(x: 195, y: 28), dominant: 2)
+        assertColor(rendered, at: CGPoint(x: 195, y: 225), dominant: 1)
+    }
+
+    @MainActor
+    func testDepthCleanupDoesNotVisuallySwapCardsAtTheEndOfASlide() throws {
+        let items = (-1...1).map { CarouselScene.Item(ordinal: $0, entry: QueueEntry(song: testSong(Int64($0 + 2)))) }
+        func strip(focus: CGFloat, anchor: Int) -> some View {
+            CarouselStrip(items: items, focus: focus, frontOrdinal: anchor, stack: 1,
+                          viewport: CGSize(width: 390, height: 450), cardSize: CGSize(width: 280, height: 380),
+                          reduceMotion: false, meter: CarouselPresentationMeter()) { item in
+                Rectangle().fill(item.ordinal == 0 ? Color.green : Color.blue).frame(width: 280, height: 380)
+            }.background(Color.black)
+        }
+        for focus in [CGFloat(-1), -0.75, -0.51, 0.51, 0.75, 1] {
+            let before = try pixels(strip(focus: focus, anchor: 0), size: CGSize(width: 390, height: 450))
+            let after = try pixels(strip(focus: focus, anchor: focus < 0 ? -1 : 1), size: CGSize(width: 390, height: 450))
+            XCTAssertTrue(before.bytes == after.bytes, "Settlement must not switch a still-front outgoing cover for its neighbour")
         }
     }
 

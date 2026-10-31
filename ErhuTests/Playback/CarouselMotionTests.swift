@@ -32,15 +32,15 @@ final class CarouselMotionTests: XCTestCase {
     }
 
     @MainActor
-    func testDraggingAcrossHalfwayDoesNotReorderTheNativeCardLayers() async throws {
+    func testDraggingAcrossHalfwayRetainsTheSpreadOrderAnchorUntilSettlement() async throws {
         let motion = CarouselMotion()
         motion.snap(center: 0, stacked: true)
         for translation in [CGFloat(-90), -110, -160] {
             motion.drag(translation: translation, page: 200, center: 0, canPrevious: true, canNext: true)
-            XCTAssertEqual(motion.frontOrdinal, 0, "The outgoing layer must remain in front throughout a touch")
+            XCTAssertEqual(motion.frontOrdinal, 0, "The spread order anchor must remain stable throughout a touch")
         }
         motion.settle(center: 1, stacked: true, reduceMotion: false, velocity: 1)
-        XCTAssertEqual(motion.frontOrdinal, 0, "An incoming card must emerge from behind the outgoing card")
+        XCTAssertEqual(motion.frontOrdinal, 0, "The depth renderer owns its geometric handoff; settlement must not retarget the spread anchor")
         try await Task.sleep(for: .milliseconds(350))
         XCTAssertEqual(motion.frontOrdinal, 1)
         XCTAssertFalse(motion.moving)
@@ -70,7 +70,7 @@ final class CarouselMotionTests: XCTestCase {
         let motion = CarouselMotion()
         var completed = 0
         motion.settle(center: 1, stacked: true, reduceMotion: false) { completed += 1 }
-        try await Task.sleep(for: .milliseconds(400))
+        try await Task.sleep(for: .milliseconds(500))
         XCTAssertFalse(motion.moving)
         XCTAssertEqual(completed, 1)
         let drag = PlayerDragState()

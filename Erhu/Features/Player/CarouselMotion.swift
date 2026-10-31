@@ -36,8 +36,8 @@ final class CarouselMotion {
             focus = CarouselDragLimit.focus(origin.focus + distance, center: center, canPrevious: canPrevious, canNext: canNext)
             // A depth-deck swipe remains a depth-deck swipe; only the layout button spreads it.
             stack = origin.stack
-            // Keep the existing layer order throughout the touch. Reordering AVPlayer-backed
-            // surfaces at the half-page boundary adds a discrete repaint to a continuous drag.
+            // Retain the spread layout's order anchor. The depth renderer exchanges order
+            // only after its rotating card edges have separated, without replacing native hosts.
         }
     }
 
@@ -47,7 +47,7 @@ final class CarouselMotion {
         let token = UUID(); generation = token
         let targetStack: CGFloat = stacked ? 1 : 0
         let timing = CarouselSettlementTiming(delta: CGFloat(center) - focus, layoutDelta: targetStack - stack,
-                                             velocity: velocity, reduceMotion: reduceMotion)
+                                             velocity: velocity, reduceMotion: reduceMotion, depth: stacked)
         withAnimation(timing.animation) {
             moving = true
             focus = CGFloat(center)
@@ -91,18 +91,19 @@ struct CarouselSettlementTiming {
     let firstY: Double
     let secondX: Double
 
-    init(delta: CGFloat, layoutDelta: CGFloat = 0, velocity: CGFloat?, reduceMotion: Bool) {
+    init(delta: CGFloat, layoutDelta: CGFloat = 0, velocity: CGFloat?, reduceMotion: Bool, depth: Bool = false) {
+        let fullDuration: TimeInterval = depth ? 0.40 : Self.standardDuration
         guard let velocity, !reduceMotion else {
-            duration = reduceMotion ? 0.16 : Self.standardDuration
+            duration = reduceMotion ? 0.16 : fullDuration
             firstX = 0.22; firstY = 0.8; secondX = 0.25
             return
         }
         let distance = Double(abs(delta))
         let travel = min(max(distance, Double(abs(layoutDelta))), 1)
         let speed = velocity.isFinite ? max(Double(velocity) * (delta < 0 ? -1 : 1), 0) : 0
-        var time = (Self.standardDuration * sqrt(travel)).clamped(0.10, Self.standardDuration)
+        var time = (fullDuration * sqrt(travel)).clamped(0.10, fullDuration)
         if distance > 0.001, speed > 0, abs(layoutDelta) < 0.01 {
-            time = min(time, 2 * distance / speed).clamped(0.10, Self.standardDuration)
+            time = min(time, 2 * distance / speed).clamped(0.10, fullDuration)
         }
         duration = time
         firstX = 0.25

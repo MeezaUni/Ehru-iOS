@@ -102,29 +102,32 @@ struct CarouselPose {
     init(distance: CGFloat, width: CGFloat, stack: CGFloat, reduceMotion: Bool) {
         let away = abs(distance), near = min(abs(distance), 1)
         let sideScale: CGFloat = reduceMotion ? 0.86 : 0.78
-        scale = (1 - (1 - sideScale) * near) * (1 - stack) + (1 - 0.06 * near) * stack
+        scale = (1 - (1 - sideScale) * near) * (1 - stack) + (1 - 0.12 * near) * stack
         // A stacked card starts directly behind the centre, peeks out along the appropriate
         // side halfway through the turnover, then returns to the centre as the front card.
         // Its short arc is distinct from the spread layout's full sideways page travel.
         let deckX = Self.deckOffset(distance: distance, width: width, reduceMotion: reduceMotion)
         x = stack == 1 ? deckX : Self.position(distance: distance, width: width, stack: stack, reduceMotion: reduceMotion) * (1 - stack) + deckX * stack
-        y = -20 * near * stack
-        turn = reduceMotion ? 0 : -Double(distance.clamped(-1, 1)) * 32 * Double(1 - stack)
+        y = -34 * near * stack
+        let deckTurn = away < 1 ? -sin(Double(distance) * .pi) * 55 : 0
+        turn = reduceMotion ? 0 : -Double(distance.clamped(-1, 1)) * 32 * Double(1 - stack) + deckTurn * Double(stack)
         let vanish = (1 - max(away - 1, 0) / 0.6).clamped(0, 1)
-        let gathered = stack * near
-        opacity = Double(vanish * (1 - gathered))
+        // The two exchanging cards remain opaque. Their edges separate at the depth
+        // crossover, so handing front-to-back order over cannot expose a crossfade.
+        let accessibleFade = reduceMotion ? stack * near : 0
+        opacity = Double(vanish * (1 - accessibleFade))
     }
 
     static func gap(width: CGFloat) -> CGFloat { (width * 0.04).clamped(8, 16) }
 
     private static func deckOffset(distance: CGFloat, width: CGFloat, reduceMotion: Bool) -> CGFloat {
         guard !reduceMotion, abs(distance) < 1 else { return 0 }
-        return sin(distance * .pi) * width * 0.24
+        return sin(distance * .pi) * width * 0.32
     }
 
     private static func edge(_ distance: CGFloat, width: CGFloat, stack: CGFloat, reduceMotion: Bool, inward: Bool) -> CGFloat {
         let near = min(abs(distance), 1)
-        let scale = (1 - (reduceMotion ? 0.14 : 0.22) * near) * (1 - stack) + (1 - 0.06 * near) * stack
+        let scale = (1 - (reduceMotion ? 0.14 : 0.22) * near) * (1 - stack) + (1 - 0.12 * near) * stack
         let angle = reduceMotion ? 0 : near * 32 * (1 - stack) * .pi / 180
         // Measure the same projection used to paint a right-hand card. Perspective makes
         // its inward and outward edges different; assuming a symmetric box hides the peeks.
@@ -167,28 +170,8 @@ enum CarouselProjection {
     }
 }
 
-/// One stable animation probe; inserted/retiring cards cannot overwrite the visible focus
-/// with their own target while their opacity transition is being installed.
-struct CarouselFocusProbe: GeometryEffect {
-    var focus: CGFloat
-    var stack: CGFloat = 0
-    let meter: CarouselPresentationMeter
-    var animatableData: AnimatablePair<CGFloat, CGFloat> {
-        get { AnimatablePair(focus, stack) }
-        set {
-            focus = newValue.first; stack = newValue.second
-            // The setter receives presentation values during interpolation. effectValue also
-            // runs for target/layout evaluations, which must not overwrite this sample.
-            meter.record(focus, stack: stack)
-        }
-    }
-    func effectValue(size: CGSize) -> ProjectionTransform {
-        ProjectionTransform(CGAffineTransform.identity)
-    }
-}
-
-/// The transforms animate natively; the z-index remains a direct trait of each ZStack child.
-/// Depth changes only with direct input or a new destination; sampling never mutates view state.
+/// Build the expensive card contents only when selection or direct input changes. A small
+/// animatable layer stack then interpolates pose, shading and ordering around those same views.
 struct CarouselStrip<Card: View>: View {
     let items: [CarouselScene.Item]
     let focus: CGFloat
@@ -201,31 +184,59 @@ struct CarouselStrip<Card: View>: View {
     @ViewBuilder var card: (CarouselScene.Item) -> Card
 
     var body: some View {
+        CarouselLayers(cards: items.map { CarouselLayer(id: $0.id, ordinal: $0.ordinal, content: card($0)) },
+                       focus: focus, stack: stack, frontOrdinal: frontOrdinal, cardSize: cardSize,
+                       reduceMotion: reduceMotion, meter: meter)
+            .frame(width: viewport.width, height: viewport.height)
+    }
+}
+
+private struct CarouselLayer<Card: View>: Identifiable {
+    let id: String
+    let ordinal: Int
+    let content: Card
+}
+
+private struct CarouselLayers<Card: View>: View, Animatable {
+    let cards: [CarouselLayer<Card>]
+    var focus: CGFloat
+    var stack: CGFloat
+    let frontOrdinal: Int
+    let cardSize: CGSize
+    let reduceMotion: Bool
+    let meter: CarouselPresentationMeter
+
+    var animatableData: AnimatablePair<CGFloat, CGFloat> {
+        get { AnimatablePair(focus, stack) }
+        set {
+            focus = newValue.first; stack = newValue.second
+            // Sample the visible renderer, rather than an invisible probe SwiftUI can elide.
+            // This never publishes state, changes playback, or schedules another frame.
+            meter.record(focus, stack: stack)
+        }
+    }
+
+    var body: some View {
         ZStack {
-            // A quiet rear plate anchors the depth deck while the foreground changes.
-            RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
-                .fill(Color.white.opacity(0.055))
-                .overlay(RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-                .frame(width: cardSize.width * 0.94, height: cardSize.height * 0.94)
-                .offset(x: 10, y: -20)
-                .opacity(Double(stack * (1 - min(abs(focus - focus.rounded()) * 2, 1))))
-                .allowsHitTesting(false).accessibilityHidden(true)
-            ForEach(items) { item in
-                let distance = CGFloat(item.ordinal) - focus
+            ForEach(cards) { card in
+                let distance = CGFloat(card.ordinal) - focus
                 let pose = CarouselPose(distance: distance, width: cardSize.width, stack: stack,
                                         reduceMotion: reduceMotion)
-                card(item)
+                // A depth handoff happens at half travel while the rotated edges are apart.
+                // Spread cards retain their old order; their full-width gap avoids occlusion.
+                let depthFocus = reduceMotion ? CGFloat(frontOrdinal) : CGFloat(frontOrdinal) * (1 - stack) + focus * stack
+                card.content
+                    .overlay {
+                        RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
+                            .fill(.black.opacity(Double(min(abs(distance), 1)) * 0.32))
+                            .allowsHitTesting(false)
+                    }
                     .modifier(DepthCard(distance: distance, width: cardSize.width, stack: stack,
                                         reduceMotion: reduceMotion))
                     .opacity(pose.opacity)
-                    .zIndex(CarouselPose.depth(distance: CGFloat(item.ordinal - frontOrdinal)))
+                    .zIndex(CarouselPose.depth(distance: CGFloat(card.ordinal) - depthFocus))
             }
-            Color.clear.frame(width: 1, height: 1)
-                .modifier(CarouselFocusProbe(focus: focus, stack: stack, meter: meter))
-                .allowsHitTesting(false).accessibilityHidden(true)
         }
-        .frame(width: viewport.width, height: viewport.height)
     }
 }
 
