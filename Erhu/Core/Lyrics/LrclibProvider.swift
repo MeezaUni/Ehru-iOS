@@ -109,7 +109,13 @@ actor LrclibProvider: OnlineLyricsProvider {
         var items = [URLQueryItem(name: "track_name", value: query.title), URLQueryItem(name: "artist_name", value: query.artist)]
         if let album = query.album, !album.isBlank { items.append(URLQueryItem(name: "album_name", value: album)) }
         if query.durationMs > 0 { items.append(URLQueryItem(name: "duration", value: String(Int((Double(query.durationMs) / 1000).rounded())))) }
-        let response: ProviderResponse<LrclibRecord> = await call(path: "api/get", items: items)
+        var response: ProviderResponse<LrclibRecord> = await call(path: "api/get", items: items)
+        if case .notFound = response, let alternate = LyricsMatcher.alternativeArtistName(query.artist) {
+            let alternateItems = items.map { item in
+                item.name == "artist_name" ? URLQueryItem(name: "artist_name", value: alternate) : item
+            }
+            response = await call(path: "api/get", items: alternateItems)
+        }
         switch response {
         case .success(let record): return record.toCandidate().map { .success($0) } ?? .notFound
         case .notFound: return .notFound
