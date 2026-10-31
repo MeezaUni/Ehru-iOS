@@ -8,7 +8,7 @@ struct AlbumsView: View {
     @Environment(AppRouter.self) private var router
 
     var body: some View {
-        ScrollView {
+        LibraryRootScrollView {
             if library.albums.isEmpty {
                 EmptyState(message: library.isScanning ? "Scanning your music…" : "No albums yet.", systemImage: "square.stack")
             } else {
@@ -36,7 +36,7 @@ struct LibraryOverviewView: View {
     private static let previewLimit = 15
 
     var body: some View {
-        ScrollView {
+        LibraryRootScrollView {
             VStack(alignment: .leading, spacing: Spacing.lg) {
                 Shelf(title: LibraryShelf.playlists.label, onMore: { router.open(.shelf(.playlists)) }) {
                     NewPlaylistTile { router.showsNewPlaylist = true }.frame(width: 136)
@@ -52,7 +52,7 @@ struct LibraryOverviewView: View {
                 }
                 section(LibraryShelf.artists.label, empty: library.artists.isEmpty,
                         message: "No artists found. Pull down to rescan.", more: { router.open(.shelf(.artists)) }) {
-                    ForEach(library.artists.prefix(Self.previewLimit)) { artist in
+                    ForEach(library.artists) { artist in
                         ArtistTile(artist: artist) { router.open(.artist(artist.id)) }.frame(width: 136)
                     }
                 }

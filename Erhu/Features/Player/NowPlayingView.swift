@@ -339,17 +339,16 @@ struct NowPlayingView: View {
         content().frame(maxWidth: .infinity)
     }
 
-    /// The artwork, strongly blurred and dimmed, behind everything.
+    /// Keep the sampled hues dominant; heavily blending the entire cover invents muddy colours.
     private func backdrop(_ song: Song?) -> some View {
         ZStack {
-            palette.background
+            LinearGradient(colors: [palette.surface, palette.background], startPoint: .topLeading, endPoint: .bottomTrailing)
             if let song {
                 SongArtworkView(song: song, maxPixels: 200)
-                    .blur(radius: 70)
+                    .blur(radius: 40)
                     .scaleEffect(1.5)
-                    .opacity(0.7)
+                    .opacity(0.14)
             }
-            Color.black.opacity(0.42)
         }
     }
 }

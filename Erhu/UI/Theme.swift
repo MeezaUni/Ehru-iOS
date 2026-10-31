@@ -57,7 +57,7 @@ extension AppPalette {
     static func artwork(_ sampled: LyricsPalette) -> AppPalette {
         let colors = LyricsColors(sampled)
         return AppPalette(primary: colors.accent, onPrimary: colors.surface,
-                          background: colors.cardGradient.last ?? colors.surface,
+                          background: colors.gradient.last ?? colors.surface,
                           surface: colors.surface, surfaceVariant: colors.surface,
                           onSurface: colors.content, onSurfaceVariant: colors.secondary, outline: colors.rim)
     }
@@ -107,14 +107,14 @@ struct ThemedRoot<Content: View>: View {
     @Environment(PlayerController.self) private var player
     @Environment(AppRouter.self) private var router
     @ViewBuilder let content: Content
-    @State private var artworkPalette: AppPalette?
+    @State private var artworkPalette = ArtworkPaletteState()
     @State private var artworkRevision = 0
 
     var body: some View {
         let followsArtwork = settings.customTheme == nil && settings.theme == .artwork
-        let palette = settings.customTheme?.palette
-            ?? (followsArtwork ? artworkPalette ?? .dark : (scheme == .dark ? .dark : .light))
         let artworkURL = followsArtwork ? (router.showsNowPlaying ? player.state.currentSong?.url : router.focusedArtwork ?? player.state.currentSong?.url) : nil
+        let palette = settings.customTheme?.palette
+            ?? (followsArtwork ? .artwork(artworkPalette.palette(for: artworkURL)) : (scheme == .dark ? .dark : .light))
         content
             .environment(\.palette, palette)
             .tint(palette.primary)
@@ -122,13 +122,11 @@ struct ThemedRoot<Content: View>: View {
                 if note.object as? String == artworkURL?.path { artworkRevision += 1 }
             }
             .task(id: "\(artworkURL?.path ?? "")|\(artworkRevision)") {
-                guard let artworkURL else {
-                    artworkPalette = nil
-                    return
-                }
+                guard let artworkURL else { return }
+                let revision = ArtworkLoader.shared.revision(for: artworkURL.path)
                 let sampled = await LyricsPaletteCache.shared.palette(for: artworkURL)
                 guard !Task.isCancelled else { return }
-                artworkPalette = AppPalette.artwork(sampled)
+                artworkPalette.set(sampled, for: artworkURL, revision: revision)
             }
     }
 }

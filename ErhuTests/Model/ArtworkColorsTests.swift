@@ -43,7 +43,7 @@ final class ArtworkColorsTests: XCTestCase {
             XCTAssertEqual(page.primary, card.accent)
             XCTAssertEqual(page.onSurface, card.content)
             XCTAssertEqual(page.onSurfaceVariant, card.secondary)
-            XCTAssertEqual(page.background, card.cardGradient.last ?? card.surface)
+            XCTAssertEqual(page.background, card.gradient.last ?? card.surface)
         }
     }
 

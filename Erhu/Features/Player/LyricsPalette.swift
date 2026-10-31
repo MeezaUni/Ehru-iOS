@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 /// Now Playing's lyrics colours, taken from the album artwork: a calm [surface] in the artwork's
-/// own hue (muted, so text reads well), a [gradient] around it (a lighter tone turned one way, the
-/// surface, a deeper tone turned the other way: tonal depth, not the dominant colour everywhere),
+/// own hue (muted, so text reads well), a [gradient] around it (a lighter tone, the
+/// surface and a deeper tone in the same hue),
 /// and text colours chosen for contrast against every stop of it — light text on dark surfaces,
 /// dark text on genuinely light ones. ARGB values; a port of Android's LyricsPalette.
 struct LyricsPalette: Equatable, Sendable {
@@ -17,7 +17,7 @@ struct LyricsPalette: Equatable, Sendable {
     /// A restrained accent in the artwork's hue (the timed word), at least 4.5:1.
     let accent: UInt32
     /// The card's diagonal gradient: a lighter tone of the hue, [surface], and a deeper tone in the
-    /// artwork's second colour when it has one (otherwise the hue turned). [content] reads on every stop.
+    /// artwork's second colour when it has one (otherwise the same hue). [content] reads on every stop.
     let cardGradient: [UInt32]
     /// A light (or, under dark text, deep) tint of the hue for a card's rim.
     let rim: UInt32
@@ -39,7 +39,6 @@ struct LyricsPalette: Equatable, Sendable {
     private static let secondHueShare = 0.3
     private static let opaque: UInt32 = 128
 
-    private static let cardHueTurn: Float = 8
     private static let cardUpperSaturation: Float = 0.95
     private static let cardLowerSaturation: Float = 0.8
     private static let cardLighter: Float = 0.08
@@ -47,8 +46,6 @@ struct LyricsPalette: Equatable, Sendable {
     private static let rimSaturationBoost: Float = 0.1
     private static let rimLight: Float = 0.74
     private static let rimDeep: Float = 0.38
-    private static let hueTurnUp: Float = 12
-    private static let hueTurnDown: Float = 26
     private static let upperSaturation: Float = 0.85
     private static let lowerSaturation: Float = 0.75
     private static let lighter: Float = 0.06
@@ -157,16 +154,16 @@ struct LyricsPalette: Equatable, Sendable {
         }
         let content = readableOn(hslToArgb(hue, surfaceSaturation, surfaceLightness))
         let isLightText = content == lightText
-        // Text must read on every part of the gradient: a stop too close to the text steps away from it.
+        // Text must read on every part of the gradient: a stop too close to the text steps away from it. No hue is invented to create depth.
         let surface = readableStop(hue, surfaceSaturation, surfaceLightness, content, isLightText)
-        let top = readableStop(hue - hueTurnUp, surfaceSaturation * upperSaturation,
+        let top = readableStop(hue, surfaceSaturation * upperSaturation,
                                min(surfaceLightness + lighter, maxStop), content, isLightText)
-        let bottom = readableStop(hue + hueTurnDown, surfaceSaturation * lowerSaturation,
+        let bottom = readableStop(hue, surfaceSaturation * lowerSaturation,
                                   max(surfaceLightness - deeper, minStop), content, isLightText)
         let gradient = [top, surface, bottom]
-        let cardTop = readableStop(hue - cardHueTurn, surfaceSaturation * cardUpperSaturation,
+        let cardTop = readableStop(hue, surfaceSaturation * cardUpperSaturation,
                                    min(surfaceLightness + cardLighter, maxStop), content, isLightText)
-        let cardBottom = readableStop(secondHue ?? (hue + hueTurnDown), surfaceSaturation * cardLowerSaturation,
+        let cardBottom = readableStop(secondHue ?? hue, surfaceSaturation * cardLowerSaturation,
                                       max(surfaceLightness - cardDeeper, minStop), content, isLightText)
         let cardGradient = [cardTop, surface, cardBottom]
         // Secondary text and the accent read on the lyrics gradient and on the card gradient alike.
@@ -316,7 +313,7 @@ actor LyricsPaletteCache {
         let drawn: Bool = rgba.withUnsafeMutableBytes { buffer in
             guard let context = CGContext(data: buffer.baseAddress, width: size, height: size, bitsPerComponent: 8,
                                           bytesPerRow: size * 4, space: CGColorSpaceCreateDeviceRGB(),
-                                          bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+                                          bitmapInfo: CGBitmapInfo.byteOrder32Big.rawValue | CGImageAlphaInfo.premultipliedLast.rawValue)
             else { return false }
             context.interpolationQuality = .medium
             context.draw(image, in: CGRect(x: 0, y: 0, width: size, height: size))

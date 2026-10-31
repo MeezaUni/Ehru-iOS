@@ -50,7 +50,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 |---|---|---|
 | Embedded lyrics, LRC / enhanced LRC (word timing) | ✅ | |
 | Synced-first LRCLIB lookup, cache, and manual alternatives | ✅ | Auto-selects real synced matches; provider failures switch immediately with a reason and accurate fallback timing. Search online lists alternatives. |
-| Lyrics colour palette from artwork | ✅ | Same algorithm and contrast checks; follows the Glass setting |
+| Lyrics colour palette from artwork | ✅ | Artwork-derived hues with tonal gradients and contrast checks; no synthetic hue rotations. The player backdrop and app theme share these colours |
 
 ## Tools
 
@@ -58,11 +58,11 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 |---|---|---|
 | Wi-Fi Transfer | ✅ | Same page, routes, pairing and checks. Runs only while Erhu is open (iOS suspends apps in the background). Ogg and Opus are refused because iOS cannot play them. |
 | Auto Fix Tags / metadata editor (MusicBrainz, iTunes, Deezer, Last.fm, Discogs, Genius, Wikipedia, AcoustID-free matching, tag writing, revert) | ✅ | Matcher, scorer, filename cleaner and field planner ported with their tests; iTunes, MusicBrainz, Deezer and Last.fm searched (Last.fm with the listener's own key from Settings › Metadata & Artwork › Online sources); native tag writer for MP3 (ID3v2.4), M4A and FLAC with read-back verification; revert restores the kept original. Not yet: Genius (needs its own token), renaming files (song identity is the path on iOS) |
-| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer, Wikimedia, and Fanart.tv and Discogs when their keys are set in Settings › Metadata & Artwork › Online sources; automatic artist photos with the Deezer matcher; covers embedded with the verified writer; playlist covers from Photos. Not ported: Genius / DuckDuckGo scraping |
+| Artwork Fetcher (album covers, artist photos, Fanart.tv) | ✅ | iTunes, Cover Art Archive, Deezer, Wikimedia, and Fanart.tv and Discogs when their keys are set in Settings › Metadata & Artwork › Online sources; missing artist photos are matched with the safe Deezer matcher automatically on launch and after library additions; the manual picker includes existing photos for replacements; covers embedded with the verified writer; playlist covers from Photos. Not ported: Genius / DuckDuckGo scraping |
 | Animated album artwork (Apple Music motion covers) | ✅ (personal branch) | Apple web-catalog lookup, offline video downloads and muted loops in Now Playing and album headers. Still-image, Reduce Motion and Low Power Mode fallbacks; see `ANIMATED_COVERS.md` for validation limits |
 | BPM finder | ✅ | AcousticBrainz, then the on-device tempo estimate; only fills a missing BPM |
 | Themes, skins, theme import and rollback | 🟡 | Light / dark / system, artwork colours and imported theme packages (colours) are ported; fonts and widget skins aren't used on iOS |
-| Settings navigation | ✅ | Grouped cards, circular icon badges and detail pages for appearance, sound, library, metadata/artwork and about. Native iOS controls; Android home, widget, glass-tuning and update/crash-log controls are omitted |
+| Settings navigation | ✅ | Grouped cards, circular icon badges, illustrated theme choices and detail pages for appearance, sound, library, metadata/artwork and about. Tab taps return to the root; reselects scroll to the top. The Library artist shelf includes every artist. Native iOS controls; Android home, widget, glass-tuning and update/crash-log controls are omitted |
 | Update checker (GitHub releases) | ➖ | Sideloaded builds are updated by reinstalling |
 
 ## Building and installing

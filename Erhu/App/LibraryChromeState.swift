@@ -30,6 +30,32 @@ extension View {
     func tracksLibraryScrolling() -> some View { modifier(LibraryScrollTracking()) }
 }
 
+/// Only tab roots consume reselects. Nested shelves keep their independent scroll positions.
+struct LibraryRootScrollView<Content: View>: View {
+    @ViewBuilder let content: Content
+    @Environment(AppRouter.self) private var router
+    @Environment(\.artworkSection) private var section
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let top = "library-root-top"
+
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: 1).id(top)
+                    content
+                }
+            }
+            .onChange(of: section.flatMap { router.scrollToTopRequests[$0] } ?? 0) { _, _ in
+                guard section == router.section, router.paths[router.section]?.isEmpty ?? true else { return }
+                withAnimation(reduceMotion ? nil : .easeOut(duration: 0.25)) { proxy.scrollTo(top, anchor: .top) }
+            }
+        }
+    }
+}
+
 private struct LibraryScrollTracking: ViewModifier {
     @Environment(LibraryChromeState.self) private var chrome
     @Environment(AppRouter.self) private var router

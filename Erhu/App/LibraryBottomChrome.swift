@@ -129,7 +129,7 @@ private struct SectionCapsule: View {
                                         .font(.system(size: 19))
                                     Text(section.label).font(.caption2.weight(.medium)).lineLimit(1)
                                 }
-                                .foregroundStyle(abs(position - CGFloat(index)) < 0.5 ? palette.primary : Color.white)
+                                .foregroundStyle(abs(position - CGFloat(index)) < 0.5 ? palette.primary : palette.onSurface)
                                 .frame(maxWidth: .infinity, minHeight: 56)
                                 .contentShape(Rectangle())
                             }
@@ -158,7 +158,7 @@ private struct SectionCapsule: View {
             .opacity(Double(max(CGFloat(1) - compactness * 2, 0)))
             .allowsHitTesting(compactness < 0.5)
             .accessibilityHidden(compactness >= 0.5)
-            Button { chrome.expand(reduceMotion: reduceMotion) } label: {
+            Button { select(router.section) } label: {
                 Image(systemName: router.section.selectedIcon)
                     .font(.system(size: 21, weight: .semibold))
                     .foregroundStyle(palette.primary)
@@ -169,7 +169,7 @@ private struct SectionCapsule: View {
             .opacity(Double(max(compactness * 2 - CGFloat(1), 0)))
             .allowsHitTesting(compactness >= 0.5)
             .accessibilityHidden(compactness < 0.5)
-            .accessibilityLabel("Expand sections, \(router.section.label)")
+            .accessibilityLabel("\(router.section.label), return to top")
         }
         .frame(height: 56)
         .chromeSurface(enabled: settings.glassEnabled)

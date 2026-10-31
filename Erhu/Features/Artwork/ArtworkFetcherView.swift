@@ -26,7 +26,7 @@ struct ArtworkFetcherView: View {
             } footer: {
                 Text(tab == 0
                     ? "Albums whose songs carry no cover. A cover you pick is saved into every song of the album."
-                    : "Artists without a photo. Automatic matching only uses a Deezer profile that is clearly the artist; a wrong photo is worse than none.")
+                    : "Artist photos are matched automatically when music is added. Retry missing photos here, or choose an artist to replace their image.")
             }
             if tab == 0 {
                 Section {
@@ -52,7 +52,7 @@ struct ArtworkFetcherView: View {
                             if store.isAutoMatching { Spacer(); ProgressView() }
                         }
                     }
-                    .disabled(store.isAutoMatching || store.artists.isEmpty)
+                    .disabled(store.isAutoMatching || !store.artists.contains(where: { library.artist($0.id)?.artworkPath == nil }))
                     ForEach(store.artists) { artist in
                         Button { target = .artist(artist) } label: {
                             TargetRow(title: artist.name, subtitle: countLabel(artist.songCount, "song"), status: store.artistStatus[artist.id]) {

@@ -18,7 +18,7 @@ struct HomeView: View {
         let hasShelves = hasSongs || !library.recentAlbums.isEmpty || !library.recentPlaylists.isEmpty
         let songActions = router.songActions(actions)
         let currentId = player.state.currentSong?.id
-        ScrollView {
+        LibraryRootScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 if showsHero, let smart {
                     SmartMixHero(mixes: smart.mixes, needsMoreListening: smart.needsMoreListening,
