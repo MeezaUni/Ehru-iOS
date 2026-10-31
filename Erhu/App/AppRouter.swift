@@ -106,10 +106,15 @@ final class AppRouter {
     /// The song whose tags are being edited by hand.
     var songForTagEdit: Song?
     var showsNewPlaylist = false
-    /// The cover of the album page in front, which the artwork theme follows (with the section it
+    /// The artwork of the album or artist page in front, which the artwork theme follows (with the section it
     /// is in: every section's stack stays alive behind the one shown).
-    var artworkFocus: (section: LibrarySection, url: URL)?
-    var focusedArtwork: URL? { artworkFocus.flatMap { $0.section == section ? $0.url : nil } }
+    var artworkFocus: (section: LibrarySection, source: ArtworkPaletteSource)?
+    var focusedArtworkSource: ArtworkPaletteSource? { artworkFocus.flatMap { $0.section == section ? $0.source : nil } }
+    var focusedArtwork: URL? { focusedArtworkSource?.url }
+
+    func paletteSource(playingSongURL: URL?) -> ArtworkPaletteSource {
+        showsNowPlaying ? .track(playingSongURL) : focusedArtworkSource ?? .track(playingSongURL)
+    }
 
     func open(_ route: Route) {
         paths[section, default: NavigationPath()].append(route)

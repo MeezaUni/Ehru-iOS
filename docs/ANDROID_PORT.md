@@ -13,7 +13,7 @@ Legend: ✅ ported · 🟡 partly ported · ⏳ not yet · ➖ not applicable on
 | Room database (songs, albums, artists, credits, playlists, play stats, bookmarks, waveforms) | ✅ | SQLite (system library), same tables and ids |
 | MediaStore scan, tag reading (JAudioTagger) | ✅ | Scans the app's Documents folder; native ID3v2/v1, MP4, FLAC, WAV, AIFF reader |
 | Artist identity, credits, album grouping (library model layers A–D) | ✅ | Same ids and ordering; 94 shared test cases |
-| Favorites, playlists, recently played, listening months, Sound Capsule stats | ✅ | |
+| Favorites, playlists, recently played, listening months, Sound Capsule stats | ✅ | Album and artist detail pages use full-width faded image headers; the artwork theme follows the displayed album cover or artist photo |
 | Search (accent- and case-insensitive) with recent items | ✅ | |
 | Import music | ✅ | Files app (UIFileSharing), document picker, Wi-Fi Transfer |
 | Library Builder (move files into Artist/Album folders through SAF) | ⏳ | Held back on purpose: on iOS a song's identity is its file path, so moving files would detach favourites, playlists, play history, bookmarks and transitions. Needs a path-to-id migration first. The Files app can organise the folder meanwhile |

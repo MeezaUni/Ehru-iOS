@@ -68,17 +68,31 @@ struct FileImageView<Fallback: View>: View {
     var maxPixels = 400
     @ViewBuilder let fallback: () -> Fallback
     @State private var image: UIImage?
+    @State private var imageRequest = ""
+    @State private var artworkRevision = 0
+    private var request: String { "\(path ?? "")|\(maxPixels)|\(artworkRevision)" }
 
     var body: some View {
-        ZStack {
-            if let image { FillImage(image: image) } else { fallback() }
+        let displayed = imageRequest == request ? image : path.flatMap {
+            ArtworkLoader.shared.cachedImage(atPath: LibraryPaths.resolveImage($0), maxPixels: maxPixels)
         }
-        .task(id: path) {
+        ZStack {
+            if let displayed { FillImage(image: displayed) } else { fallback() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
+            if let path, note.object as? String == LibraryPaths.resolveImage(path) { artworkRevision += 1 }
+        }
+        .task(id: request) {
+            let token = request
+            image = path.flatMap { ArtworkLoader.shared.cachedImage(atPath: LibraryPaths.resolveImage($0), maxPixels: maxPixels) }
+            imageRequest = token
             guard let path else {
                 image = nil
                 return
             }
-            image = await ArtworkLoader.shared.image(atPath: LibraryPaths.resolveImage(path), maxPixels: maxPixels)
+            let loaded = await ArtworkLoader.shared.image(atPath: LibraryPaths.resolveImage(path), maxPixels: maxPixels)
+            guard !Task.isCancelled else { return }
+            image = loaded
         }
     }
 }
@@ -102,9 +116,10 @@ struct PlaylistCoverView: View {
 struct ArtistArtworkView: View {
     let artist: Artist
     var fontSize: CGFloat = 36
+    var maxPixels = 400
 
     var body: some View {
-        FileImageView(path: artist.artworkPath) { ArtistMonogram(name: artist.name, fontSize: fontSize) }
+        FileImageView(path: artist.artworkPath, maxPixels: maxPixels) { ArtistMonogram(name: artist.name, fontSize: fontSize) }
     }
 }
 

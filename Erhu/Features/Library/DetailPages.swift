@@ -73,12 +73,12 @@ struct AlbumDetailView: View {
             if let album = library.album(albumId) {
                 let facts = collectionFacts(year: album.year, songs: songs)
                 VStack(spacing: 0) {
-                    CollectionHeader(title: album.title, subtitle: album.artist, facts: songs.contains(where: \.isLossless) ? "\(facts) · Lossless" : facts,
-                                     coverInset: Spacing.md, canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
+                    CollectionHeroHeader(title: album.title, subtitle: album.artist, facts: songs.contains(where: \.isLossless) ? "\(facts) · Lossless" : facts,
+                                     canPlay: !songs.isEmpty, onPlay: { actions.playInOrder(songs, origin: origin) },
                                      onShuffle: { actions.playShuffled(songs, origin: origin) }) {
                         // The album hero animates even when audio is paused. Keep its ready
                         // surface across a visit to Now Playing instead of recreating the movie.
-                        MotionCoverView(song: library.albumCoverSong[albumId], playing: true, maxPixels: 900, videoSession: motionCover)
+                        MotionCoverView(song: library.albumCoverSong[albumId], playing: true, maxPixels: 1200, videoSession: motionCover)
                     }
                     TransitionStudioRow(collection: origin).padding(.bottom, Spacing.sm)
                     SongList(songs: songs, origin: origin, showTrackNumbers: true)
@@ -88,6 +88,8 @@ struct AlbumDetailView: View {
             }
         }
         .tracksLibraryScrolling()
+        .ignoresSafeArea(.container, edges: .top)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu {
@@ -108,7 +110,7 @@ struct AlbumDetailView: View {
         .task(id: library.songs) { songs = (try? library.database.songsOfAlbum(albumId)) ?? [] }
         .onDisappear { motionCover.pause() }
         .artworkFocus(library.albumCoverSong[albumId]?.url)
-        .background(alignment: .top) { CoverGlow(url: library.albumCoverSong[albumId]?.url) }
+        .background { CollectionPageBackground() }
     }
 }
 
@@ -130,12 +132,12 @@ struct ArtistDetailView: View {
             if let artist = library.artist(artistId) {
                 let all = primary.isEmpty ? featured : primary
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    CollectionHeader(title: artist.name, subtitle: nil,
+                    CollectionHeroHeader(title: artist.name, subtitle: nil,
                                      facts: "\(countLabel(artist.songCount, "song")) · \(countLabel(artist.albumCount, "album"))",
-                                     coverShape: AnyShape(Circle()), canPlay: !all.isEmpty,
+                                     canPlay: !all.isEmpty,
                                      onPlay: { actions.playInOrder(all, source: .artist(artistId)) },
                                      onShuffle: { actions.playShuffled(all, source: .artist(artistId)) }) {
-                        ArtistArtworkView(artist: artist, fontSize: 96)
+                        ArtistArtworkView(artist: artist, fontSize: 96, maxPixels: 1200)
                     }
                     albumRow("Albums", albums.filter { $0.songCount >= 7 })
                     albumRow("EPs", albums.filter { (3...6).contains($0.songCount) })
@@ -152,6 +154,8 @@ struct ArtistDetailView: View {
             }
         }
         .tracksLibraryScrolling()
+        .ignoresSafeArea(.container, edges: .top)
+        .toolbarBackground(.hidden, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             Menu {
@@ -171,6 +175,8 @@ struct ArtistDetailView: View {
         }
         .sheet(item: $artworkTarget) { ArtworkPickerSheet(target: $0) }
         .task(id: library.songs) { load() }
+        .artworkPhotoFocus(library.artist(artistId)?.artworkPath.map { URL(fileURLWithPath: LibraryPaths.resolveImage($0)) })
+        .background { CollectionPageBackground() }
     }
 
     private func load() {

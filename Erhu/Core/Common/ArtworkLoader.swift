@@ -57,7 +57,7 @@ final class ArtworkLoader: @unchecked Sendable {
 
     /// An image file (custom artist or playlist cover) at [path], downsampled.
     func image(atPath path: String, maxPixels: Int) async -> UIImage? {
-        let key = "file:\(path)|\(maxPixels)" as NSString
+        let key = fileKey(path, maxPixels: maxPixels)
         if let cached = cache.object(forKey: key) { return cached }
         return await withCheckedContinuation { continuation in
             queue.async {
@@ -70,6 +70,14 @@ final class ArtworkLoader: @unchecked Sendable {
                 continuation.resume(returning: image)
             }
         }
+    }
+
+    func cachedImage(atPath path: String, maxPixels: Int) -> UIImage? {
+        cache.object(forKey: fileKey(path, maxPixels: maxPixels))
+    }
+
+    private func fileKey(_ path: String, maxPixels: Int) -> NSString {
+        "file:\(path)|\(maxPixels)|\(revision(for: path))" as NSString
     }
 
     func forget(path: String) {

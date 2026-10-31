@@ -112,28 +112,31 @@ struct ThemedRoot<Content: View>: View {
 
     var body: some View {
         let followsArtwork = settings.customTheme == nil && settings.theme == .artwork
-        let artworkURL = followsArtwork ? (router.showsNowPlaying ? player.state.currentSong?.url : router.focusedArtwork ?? player.state.currentSong?.url) : nil
+        let source = followsArtwork ? router.paletteSource(playingSongURL: player.state.currentSong?.url) : .track(nil)
+        let artworkURL = source.url
         let palette = settings.customTheme?.palette
-            ?? (followsArtwork ? .artwork(artworkPalette.palette(for: artworkURL)) : (scheme == .dark ? .dark : .light))
+            ?? (followsArtwork ? .artwork(artworkPalette.palette(for: source)) : (scheme == .dark ? .dark : .light))
         content
             .environment(\.palette, palette)
             .tint(palette.primary)
             .onReceive(NotificationCenter.default.publisher(for: ArtworkLoader.didChange)) { note in
                 if note.object as? String == artworkURL?.path { artworkRevision += 1 }
             }
-            .task(id: "\(artworkURL?.path ?? "")|\(artworkRevision)") {
+            .task(id: "\(source.isImage)|\(artworkURL?.path ?? "")|\(artworkRevision)") {
                 guard let artworkURL else { return }
                 let revision = ArtworkLoader.shared.revision(for: artworkURL.path)
-                let sampled = await LyricsPaletteCache.shared.palette(for: artworkURL)
+                let sampled = await LyricsPaletteCache.shared.palette(for: source)
                 guard !Task.isCancelled else { return }
-                artworkPalette.set(sampled, for: artworkURL, revision: revision)
+                artworkPalette.set(sampled, for: source, revision: revision)
             }
     }
 }
 
 extension View {
     /// While this page is in front, the artwork theme follows [url] instead of the playing song.
-    func artworkFocus(_ url: URL?) -> some View { modifier(ArtworkFocus(url: url)) }
+    func artworkFocus(_ url: URL?) -> some View { modifier(ArtworkFocus(source: .track(url))) }
+
+    func artworkPhotoFocus(_ url: URL?) -> some View { modifier(ArtworkFocus(source: .image(url))) }
 
     /// A floating glass surface: Liquid Glass on iOS 26, a material elsewhere.
     @ViewBuilder
@@ -183,24 +186,24 @@ extension EnvironmentValues {
 }
 
 private struct ArtworkFocus: ViewModifier {
-    let url: URL?
+    let source: ArtworkPaletteSource
     @Environment(AppRouter.self) private var router
     @Environment(\.artworkSection) private var section
     @State private var visible = false
 
     func body(content: Content) -> some View {
         content
-            .onAppear { visible = true; focus(url) }
-            .onChange(of: url) { _, new in focus(new) }
-            .onChange(of: router.section) { _, _ in focus(url) }
+            .onAppear { visible = true; focus(source) }
+            .onChange(of: source) { _, new in focus(new) }
+            .onChange(of: router.section) { _, _ in focus(source) }
             .onDisappear {
                 visible = false
-                if router.artworkFocus?.section == section, router.artworkFocus?.url == url { router.artworkFocus = nil }
+                if router.artworkFocus?.section == section, router.artworkFocus?.source == source { router.artworkFocus = nil }
             }
     }
 
-    private func focus(_ url: URL?) {
+    private func focus(_ source: ArtworkPaletteSource) {
         guard visible, let section, section == router.section else { return }
-        router.artworkFocus = url.map { (section, $0) }
+        router.artworkFocus = (section, source)
     }
 }
