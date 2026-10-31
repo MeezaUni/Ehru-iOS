@@ -170,6 +170,10 @@ enum PlayerCoverGeometry {
             .concatenating(CGAffineTransform(translationX: -source.minX, y: -source.minY))
     }
 
+    static func collapseOpacity(_ fraction: CGFloat) -> Double {
+        1 - chromeOpacity(fraction)
+    }
+
     static func chromeOpacity(_ progress: CGFloat) -> Double {
         let p = progress.clamped(0, 1)
         return Double(p * p * (3 - 2 * p))
@@ -185,14 +189,23 @@ struct PlayerChromeFade: ViewModifier {
     }
 }
 
-/// Collapse has a single painted owner: the floating artwork. Hide the remaining paint
-/// immediately while retaining its layout, measurement and active drag recognizer.
+/// Fade the stationary player over the first part of a pull. Past that short fade only the
+/// artwork travels; layout, measurement and the active recognizer stay mounted throughout.
 struct PlayerCollapseVisibility: ViewModifier {
     @Environment(PlayerDragState.self) private var drag
     func body(content: Content) -> some View {
-        content.opacity(drag.isCollapsing ? 0 : 1)
-            .transaction { if drag.isCollapsing { $0.animation = nil } }
+        content.modifier(PlayerCollapseOpacity(fraction: drag.collapseFraction, meter: drag.meter))
     }
+}
+
+struct PlayerCollapseOpacity: AnimatableModifier {
+    var fraction: CGFloat
+    var meter: PlayerProgressMeter? = nil
+    var animatableData: CGFloat {
+        get { fraction }
+        set { fraction = newValue; meter?.recordCollapse(fraction) }
+    }
+    func body(content: Content) -> some View { content.opacity(PlayerCoverGeometry.collapseOpacity(fraction)) }
 }
 
 struct PlayerChromeOpacity: AnimatableModifier {
@@ -260,9 +273,12 @@ struct PlayerArtworkFlight<Artwork: View>: View {
 final class PlayerProgressMeter: @unchecked Sendable {
     private let lock = NSLock()
     private var value: CGFloat?
+    private var collapse: CGFloat?
     func record(_ progress: CGFloat) { lock.withLock { value = progress } }
+    func recordCollapse(_ fraction: CGFloat) { lock.withLock { collapse = fraction } }
     func read(fallback: CGFloat) -> CGFloat { lock.withLock { value ?? fallback } }
-    func reset() { lock.withLock { value = nil } }
+    func readCollapse(fallback: CGFloat) -> CGFloat { lock.withLock { collapse ?? fallback } }
+    func reset() { lock.withLock { value = nil; collapse = nil } }
 }
 
 enum PlayerMotionTiming {
@@ -283,6 +299,8 @@ enum PlayerMotionTiming {
 final class PlayerDragState {
     private(set) var translation: CGFloat = 0
     private(set) var progress: CGFloat = 1
+    private(set) var collapseFraction: CGFloat = 0
+    static let chromeFadeDistance: CGFloat = 90
     private(set) var isPresented = false
     private(set) var isReady = false
     private(set) var isMoving = true
@@ -293,6 +311,7 @@ final class PlayerDragState {
     @ObservationIgnored private var settlement: Task<Void, Never>?
     @ObservationIgnored private var wantsPresented = false
     @ObservationIgnored private var dragOrigin: CGFloat?
+    @ObservationIgnored private var collapseOrigin: CGFloat?
     @ObservationIgnored var travel: CGFloat = 500
 
     func setPresented(_ presented: Bool, reduceMotion: Bool, velocity: CGFloat? = nil) {
@@ -302,6 +321,7 @@ final class PlayerDragState {
         acceptsInput = presented
         isCollapsing = !presented
         dragOrigin = nil
+        collapseOrigin = nil
         if presented && !isPresented {
             settlement?.cancel(); settlement = nil
             animationID = UUID()
@@ -309,6 +329,7 @@ final class PlayerDragState {
             var instant = Transaction(); instant.disablesAnimations = true
             withTransaction(instant) {
                 progress = 0
+                collapseFraction = 0
                 translation = 0
                 isMoving = true
                 isReady = false
@@ -325,6 +346,7 @@ final class PlayerDragState {
             settlement?.cancel(); settlement = nil
             animationID = UUID()
             dragOrigin = meter.read(fallback: progress)
+            collapseOrigin = meter.readCollapse(fallback: collapseFraction)
         }
         var instant = Transaction(); instant.disablesAnimations = true
         withTransaction(instant) {
@@ -332,6 +354,7 @@ final class PlayerDragState {
             isCollapsing = distance > 0
             translation = max(distance, 0)
             progress = ((dragOrigin ?? 1) - translation / max(travel, 1)).clamped(0, 1)
+            collapseFraction = ((collapseOrigin ?? 0) + translation / Self.chromeFadeDistance).clamped(0, 1)
         }
     }
 
@@ -351,6 +374,7 @@ final class PlayerDragState {
         guard wantsPresented else { return }
         isCollapsing = false
         dragOrigin = nil
+        collapseOrigin = nil
         animate(to: 1, reduceMotion: reduceMotion)
     }
 
@@ -361,17 +385,18 @@ final class PlayerDragState {
         let duration = reduceMotion ? 0.16 : target == 0
             ? (PlayerMotionTiming.duration * sqrt(Double(abs(delta)))).clamped(0.18, PlayerMotionTiming.duration)
             : PlayerMotionTiming.duration
-        meter.reset()
         withAnimation(PlayerMotionTiming.presentation(reduceMotion: reduceMotion, duration: duration, delta: delta, velocity: velocity)) {
             isMoving = true
             translation = 0
             progress = target
+            collapseFraction = target == 0 ? 1 : 0
         }
         settlement = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(duration)) } catch { return }
             guard let self, self.animationID == id, !Task.isCancelled else { return }
             self.settlement = nil
             self.meter.record(target)
+            self.meter.recordCollapse(self.collapseFraction)
             self.isMoving = false
             if target == 0 && !self.wantsPresented { self.isPresented = false; self.isReady = false }
         }

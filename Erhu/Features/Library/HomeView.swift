@@ -164,7 +164,7 @@ struct SmartMixHero: View {
         .onChange(of: count, initial: true) { _, count in page = min(page, max(count - 1, 0)) }
         .task(id: rotation) {
             guard rotation.active, rotation.count > 1 else { return }
-            do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
             guard !Task.isCancelled else { return }
             withAnimation(.smooth(duration: 0.45)) { page = (rotation.page + 1) % rotation.count }
         }
