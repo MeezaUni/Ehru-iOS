@@ -42,17 +42,26 @@ struct LyricsCandidate: Codable, Equatable, Sendable, Identifiable {
 
     var id: String { "\(provider):\(providerId)" }
 
-    var timing: LyricsTiming {
-        if !(wordSyncedLrc ?? "").isBlank { return .word }
-        if !(syncedLyrics ?? "").isBlank { return .line }
-        if !(plainLyrics ?? "").isBlank { return .plain }
-        return .none
+    private var usableTexts: [(text: String, timing: LyricsTiming)] {
+        [wordSyncedLrc, syncedLyrics, plainLyrics].compactMap { text in
+            guard let text = text?.nonBlank, let parsed = LyricsParser.parse(text) else { return nil }
+            switch parsed {
+            case .plain: return (text, .plain)
+            case .synced: return (text, parsed.hasWordTiming ? .word : .line)
+            }
+        }
     }
 
-    /// The best text this result offers: word-timed, else line-timed, else plain.
+    var timing: LyricsTiming { usableTexts.map { $0.timing }.max() ?? .none }
+
+    /// Rank the text's real timestamps, not just the API field it arrived in. Never label a
+    /// malformed or plain string synchronized simply because it was called syncedLyrics.
     var bestText: String? {
-        [wordSyncedLrc, syncedLyrics, plainLyrics].compactMap { $0 }.first { !$0.isBlank }
+        var best: (text: String, timing: LyricsTiming)?
+        for item in usableTexts where best == nil || item.timing > best!.timing { best = item }
+        return best?.text
     }
+
 }
 
 /// What a provider answered for one request.
@@ -70,10 +79,22 @@ enum ProviderResponse<T: Sendable>: Sendable {
 /// A legitimate online lyrics source; the repository asks them in order.
 protocol OnlineLyricsProvider: Sendable {
     var name: String { get }
+    var supportsSyncedLyrics: Bool { get }
     /// The provider's best record for exactly this track (title, artist, album, duration).
     func exact(_ query: LyricsQuery) async -> ProviderResponse<LyricsCandidate>
     /// Records that may match [query]; [freeText] searches by text instead (manual search).
     func search(_ query: LyricsQuery, freeText: String?) async -> ProviderResponse<[LyricsCandidate]>
+}
+
+extension OnlineLyricsProvider {
+    var supportsSyncedLyrics: Bool { true }
+}
+
+/// A manual search can offer real plain-text options while clearly reporting that synchronized
+/// availability could not be checked. It does not turn an outage into a missing-lyrics claim.
+struct LyricsSearchResults: Equatable, Sendable {
+    var candidates: [LyricsCandidate]
+    var syncedServiceNotice: String?
 }
 
 /// How a result compares to the track. [rejected] results are a different recording.
@@ -186,6 +207,7 @@ enum LyricsMatcher {
         for part in artistSplit.split(fold(text)) {
             var name = normalize(part)
             if name.hasPrefix("the ") { name.removeFirst(4) }
+            if name == "ye" { name = "kanye west" }
             if !name.isEmpty && !seen.contains(name) { seen.append(name) }
         }
         return seen
@@ -208,12 +230,21 @@ enum LyricsMatcher {
 
     private static func normalize(_ text: String) -> String { nonWord.replacing(in: text, with: " ").trimmed }
 
+    /// Verified artist alias for lookup/matching only; never rewrites local metadata.
+    static func alternativeArtistName(_ artist: String) -> String? {
+        switch normalize(fold(artist)) {
+        case "ye": return "Kanye West"
+        case "kanye west": return "Ye"
+        default: return nil
+        }
+    }
+
     /// The result to use automatically: among confident matches, word timing first, then line,
     /// then plain; ties by score (the first of equals). Nil when no result is confident.
-    static func best(_ query: LyricsQuery, _ candidates: [LyricsCandidate]) -> LyricsCandidate? {
+    static func best(_ query: LyricsQuery, _ candidates: [LyricsCandidate], minimumTiming: LyricsTiming = .none) -> LyricsCandidate? {
         var best: (LyricsCandidate, MatchScore)?
         for candidate in candidates {
-            guard candidate.instrumental || candidate.bestText != nil else { continue }
+            guard candidate.instrumental || (candidate.bestText != nil && candidate.timing >= minimumTiming) else { continue }
             let match = score(query, candidate)
             guard match.confident else { continue }
             if let current = best {
@@ -529,6 +560,9 @@ enum LyricsWebSearch {
 
 enum LyricsFailureMessage {
     static func text(_ reason: String) -> String {
+        if reason.contains("LRCLIB") {
+            return "LRCLIB is temporarily unavailable. Synced lyrics couldn’t be checked."
+        }
         if reason.contains("HTTP 5") || reason.contains("timed out") {
             return "Online lyrics are temporarily unavailable. You can search the web instead."
         }

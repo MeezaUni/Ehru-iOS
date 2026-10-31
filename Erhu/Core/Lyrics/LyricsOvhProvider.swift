@@ -5,6 +5,7 @@ import Foundation
 /// does not supply timestamps, so it never creates line/word timing from a track's duration.
 actor LyricsOvhProvider: OnlineLyricsProvider {
     nonisolated let name = "lyrics.ovh"
+    nonisolated let supportsSyncedLyrics = false
     private static let base = URL(string: "https://api.lyrics.ovh/")!
     private let http: HTTPClient
     private let now: @Sendable () -> Int64
