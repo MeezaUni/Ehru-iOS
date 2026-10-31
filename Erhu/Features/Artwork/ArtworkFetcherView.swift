@@ -52,7 +52,7 @@ struct ArtworkFetcherView: View {
                             if store.isAutoMatching { Spacer(); ProgressView() }
                         }
                     }
-                    .disabled(store.isAutoMatching || !store.artists.contains(where: { library.artist($0.id)?.artworkPath == nil }))
+                    .disabled(store.isAutoMatching || !store.artists.contains(where: { $0.artworkPath == nil }))
                     ForEach(store.artists) { artist in
                         Button { target = .artist(artist) } label: {
                             TargetRow(title: artist.name, subtitle: countLabel(artist.songCount, "song"), status: store.artistStatus[artist.id]) {
