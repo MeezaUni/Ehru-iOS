@@ -23,20 +23,22 @@ and prunes back to a bounded scene afterward. At most seven occurrences survive 
 swipes. Playback-order helpers supply repeat-aware neighbours and preserve requested direction.
 
 The card artwork and metadata are equatable, while transforms and distance shading update
-separately during finger movement. Layer order stays fixed through the drag and settlement;
-the destination becomes the front card after the outgoing card has faded. Side-by-side mode
+separately during finger movement. Spread-mode layer order stays fixed through the drag and settlement. Side-by-side mode
 uses projected card extents to maintain a visible gap and previews at both edges.
 
-Stacked mode keeps smaller, raised neighbours behind the current card. During turnover the
-incoming card follows a short mirrored arc from the appropriate left or right side and returns
-to the centre; it never unfolds into side-by-side mode. Reduce Motion omits this arc.
+Stacked mode uses actual smaller, raised neighbouring covers behind the current card. Both
+covers stay opaque during a mirrored perspective turn: the incoming cover rises from behind
+on the chosen side while the outgoing cover turns away. Their projected edges separate before
+layer order changes, preventing a final-frame swap. Titles stay attached to their covers.
+The layer stack interpolates pose, shading and depth around prebuilt card contents. Reduce
+Motion uses the simpler fade, without rotation.
 
 A compositor meter records interpolated focus and stack values in the probe's animatable-data
-setter. Target/layout evaluations never overwrite that sample. Interrupted touches therefore
+setter on the visible layer stack. Target/layout evaluations never overwrite that sample. Interrupted touches therefore
 pick up the displayed position. The probe does not publish view state or drive audio time.
 Drag travel is bounded to one page plus limited edge resistance.
 
-Buttons use a 280 ms cubic settlement. Finger release uses actual gesture velocity and remaining
+Buttons use a 280 ms cubic settlement in spread mode and 400 ms in depth mode. Finger release uses actual gesture velocity and remaining
 travel to choose a bounded duration and initial curve slope. Generation-guarded monotonic tasks
 perform cleanup without depending on render-completion callbacks; they do not drive frame
 positions. Mode toggles retarget the same motion owner.
