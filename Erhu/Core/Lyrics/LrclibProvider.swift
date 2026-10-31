@@ -7,9 +7,11 @@ protocol HTTPClient: Sendable {
 
 struct URLSessionHTTPClient: HTTPClient {
     var session: URLSession = .shared
+    var cachePolicy: URLRequest.CachePolicy = .useProtocolCachePolicy
+    var timeout: TimeInterval = 20
 
     func get(_ url: URL, headers: [String: String]) async throws -> (Data, HTTPURLResponse) {
-        var request = URLRequest(url: url, timeoutInterval: 20)
+        var request = URLRequest(url: url, cachePolicy: cachePolicy, timeoutInterval: timeout)
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw URLError(.badServerResponse) }
@@ -85,22 +87,22 @@ actor LrclibProvider: OnlineLyricsProvider {
     static let providerName = "LRCLIB"
     nonisolated let name = LrclibProvider.providerName
     private static let base = URL(string: "https://lrclib.net/")!
-    private static let userAgent = "Erhu/1.0.0 (https://github.com/MeezaUni/Erhu-iOS)"
     static let defaultRetryMs: Int64 = 60_000
-    private static let maxRetryMs: Int64 = 3_600_000
 
     private let http: HTTPClient
     private let now: @Sendable () -> Int64
     private let minGapMs: Int64
+    private let retryDelayMs: Int64
     private var lastRequestMs: Int64 = 0
     private var blockedUntilMs: Int64 = 0
     private var tail: Task<Void, Never>?
 
-    init(http: HTTPClient = URLSessionHTTPClient(), now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
-         minGapMs: Int64 = 400) {
+    init(http: HTTPClient = URLSessionHTTPClient(cachePolicy: .reloadIgnoringLocalCacheData), now: @escaping @Sendable () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) },
+         minGapMs: Int64 = 400, retryDelayMs: Int64 = 750) {
         self.http = http
         self.now = now
         self.minGapMs = minGapMs
+        self.retryDelayMs = max(retryDelayMs, 0)
     }
 
     func exact(_ query: LyricsQuery) async -> ProviderResponse<LyricsCandidate> {
@@ -135,62 +137,100 @@ actor LrclibProvider: OnlineLyricsProvider {
         let previous = tail
         let work = Task { () -> ProviderResponse<T> in
             await previous?.value
+            guard !Task.isCancelled else { return .failed("cancelled") }
             return await self.perform(path: path, items: items)
         }
         tail = Task { _ = await work.value }
-        return await work.value
+        return await withTaskCancellationHandler {
+            await work.value
+        } onCancel: {
+            work.cancel()
+        }
     }
 
     private func perform<T: Decodable & Sendable>(path: String, items: [URLQueryItem]) async -> ProviderResponse<T> {
-        let start = now()
-        if start < blockedUntilMs { return .rateLimited(retryAtMs: blockedUntilMs) }
-        let wait = lastRequestMs + minGapMs - start
-        if wait > 0 { try? await Task.sleep(for: .milliseconds(wait)) }
-        lastRequestMs = now()
         var components = URLComponents(url: Self.base.appending(path: path), resolvingAgainstBaseURL: false)!
         components.queryItems = items
-        do {
-            let (data, response) = try await http.get(components.url!, headers: ["User-Agent": Self.userAgent])
-            switch response.statusCode {
-            case 429:
-                blockedUntilMs = now() + retryAfterMs(response.value(forHTTPHeaderField: "Retry-After"))
-                return .rateLimited(retryAtMs: blockedUntilMs)
-            case 404:
-                return .notFound
-            case 200..<300:
-                do {
-                    return .success(try JSONDecoder().decode(T.self, from: data))
-                } catch {
-                    return .failed("malformed response")
+        for attempt in 0..<2 {
+            guard !Task.isCancelled else { return .failed("cancelled") }
+            let start = now()
+            if start < blockedUntilMs { return .rateLimited(retryAtMs: blockedUntilMs) }
+            let wait = lastRequestMs + minGapMs - start
+            do {
+                if wait > 0 { try await Task.sleep(for: .milliseconds(wait)) }
+                try Task.checkCancellation()
+                lastRequestMs = now()
+                let (data, response) = try await http.get(components.url!, headers: LyricsHTTP.headers)
+                switch response.statusCode {
+                case 429:
+                    blockedUntilMs = now() + retryAfterMs(response.value(forHTTPHeaderField: "Retry-After"))
+                    return .rateLimited(retryAtMs: blockedUntilMs)
+                case 404:
+                    return .notFound
+                case 200..<300:
+                    do { return .success(try JSONDecoder().decode(T.self, from: data)) }
+                    catch { return .failed("malformed response") }
+                case 502, 503, 504:
+                    // One bounded retry for transient gateways. Do not hammer an outage or
+                    // ignore an explicit server wait, and never reuse a cached gateway page.
+                    if let retry = response.value(forHTTPHeaderField: "Retry-After") {
+                        blockedUntilMs = now() + retryAfterMs(retry)
+                        return .rateLimited(retryAtMs: blockedUntilMs)
+                    }
+                    if attempt == 0 {
+                        try await Task.sleep(for: .milliseconds(retryDelayMs))
+                        continue
+                    }
+                    return .failed("HTTP \(response.statusCode)")
+                default:
+                    return .failed("HTTP \(response.statusCode)")
                 }
-            default:
-                return .failed("HTTP \(response.statusCode)")
+            } catch {
+                return LyricsHTTP.failure(error)
             }
-        } catch let error as URLError {
-            switch error.code {
-            case .notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost, .dataNotAllowed,
-                 .internationalRoamingOff, .dnsLookupFailed:
-                return .offline
-            case .timedOut:
-                return .failed("timed out")
-            default:
-                return .failed(error.code.rawValue.description)
-            }
-        } catch {
-            return .failed(String(describing: type(of: error)))
         }
+        return .failed("service unavailable")
     }
 
     /// Retry-After in seconds or as an HTTP date; a minute when missing or unreadable.
     nonisolated func retryAfterMs(_ header: String?, nowMs: Int64? = nil) -> Int64 {
+        LyricsHTTP.retryAfterMs(header, nowMs: nowMs ?? now())
+    }
+}
+
+/// Shared transport policy for lyrics services; files and other HTTP consumers keep their own
+/// cache policy. Only track metadata is sent, and no unavailable service becomes a cached miss.
+enum LyricsHTTP {
+    static let headers = [
+        "User-Agent": "Erhu/1.0.0 (https://github.com/MeezaUni/Erhu-iOS)",
+        "Accept": "application/json", "Cache-Control": "no-cache",
+    ]
+
+    static func failure<T: Sendable>(_ error: Error) -> ProviderResponse<T> {
+        if error is CancellationError { return .failed("cancelled") }
+        if let error = error as? URLError {
+            switch error.code {
+            case .notConnectedToInternet, .cannotFindHost, .cannotConnectToHost, .networkConnectionLost,
+                 .dataNotAllowed, .internationalRoamingOff, .dnsLookupFailed: return .offline
+            case .timedOut: return .failed("timed out")
+            case .cancelled: return .failed("cancelled")
+            default: return .failed(error.code.rawValue.description)
+            }
+        }
+        return .failed(String(describing: type(of: error)))
+    }
+
+    static func retryAfterMs(_ header: String?, nowMs: Int64) -> Int64 {
+        let maximum: Int64 = 3_600_000
         let value = header?.trimmed ?? ""
-        if let seconds = Int64(value) { return min(max(seconds * 1000, 0), Self.maxRetryMs) }
+        if let seconds = Int64(value) {
+            return Int64(min(max(Double(seconds) * 1000, 0), Double(maximum)))
+        }
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "GMT")
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
-        guard let date = formatter.date(from: value) else { return Self.defaultRetryMs }
-        let current = nowMs ?? now()
-        return min(max(Int64(date.timeIntervalSince1970 * 1000) - current, 0), Self.maxRetryMs)
+        guard let date = formatter.date(from: value) else { return LrclibProvider.defaultRetryMs }
+        return Int64(min(max(date.timeIntervalSince1970 * 1000 - Double(nowMs), 0), Double(maximum)))
     }
 }

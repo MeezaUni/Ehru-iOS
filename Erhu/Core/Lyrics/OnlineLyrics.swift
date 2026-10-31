@@ -213,6 +213,7 @@ enum LyricsMatcher {
     static func best(_ query: LyricsQuery, _ candidates: [LyricsCandidate]) -> LyricsCandidate? {
         var best: (LyricsCandidate, MatchScore)?
         for candidate in candidates {
+            guard candidate.instrumental || candidate.bestText != nil else { continue }
             let match = score(query, candidate)
             guard match.confident else { continue }
             if let current = best {
@@ -227,7 +228,9 @@ enum LyricsMatcher {
 
     /// Results worth offering when nothing is confident: not rejected, plausible, best first.
     static func plausible(_ query: LyricsQuery, _ candidates: [LyricsCandidate], limit: Int = 8) -> [LyricsCandidate] {
-        let scored = candidates.map { ($0, score(query, $0)) }.filter { !$0.1.rejected && $0.1.score >= plausibleScore }
+        let scored = candidates.map { ($0, score(query, $0)) }.filter {
+            ($0.0.instrumental || $0.0.bestText != nil) && !$0.1.rejected && $0.1.score >= plausibleScore
+        }
         let ordered = scored.enumerated().sorted { a, b in
             a.element.1.score != b.element.1.score ? a.element.1.score > b.element.1.score : a.offset < b.offset
         }
@@ -510,5 +513,25 @@ enum MiniYAML {
             }
             return out
         }
+    }
+}
+
+/// Lyrics can still be found in a browser when all in-app providers are unavailable. Opening
+/// this URL is an explicit user action; it neither scrapes a site nor claims a cached result.
+enum LyricsWebSearch {
+    static func url(for text: String) -> URL? {
+        guard let query = text.nonBlank else { return nil }
+        var parts = URLComponents(string: "https://www.google.com/search")!
+        parts.queryItems = [URLQueryItem(name: "q", value: query + " lyrics")]
+        return parts.url
+    }
+}
+
+enum LyricsFailureMessage {
+    static func text(_ reason: String) -> String {
+        if reason.contains("HTTP 5") || reason.contains("timed out") {
+            return "Online lyrics are temporarily unavailable. You can search the web instead."
+        }
+        return "Could not load online lyrics (\(reason))."
     }
 }
