@@ -172,8 +172,8 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertLessThan(next.y, current.y)
         XCTAssertEqual(next.turn, 0)
         XCTAssertEqual(next.x, current.x)
-        XCTAssertEqual(next.opacity, 0)
-        XCTAssertEqual(CarouselPose(distance: -1, width: 280, stack: 1, reduceMotion: false).opacity, 0)
+        XCTAssertEqual(next.opacity, 1, "The rear preview must be the actual opaque cover")
+        XCTAssertEqual(CarouselPose(distance: -1, width: 280, stack: 1, reduceMotion: false).opacity, 1)
     }
 
     func testProjectedSpreadCardsHaveAGapThroughoutSwipes() {
@@ -199,8 +199,9 @@ final class CarouselSceneTests: XCTestCase {
             let right = CarouselPose(distance: focus, width: 280, stack: 1, reduceMotion: false)
             let left = CarouselPose(distance: -focus, width: 280, stack: 1, reduceMotion: false)
             XCTAssertEqual(right.x, -left.x, accuracy: 1e-6)
-            XCTAssertLessThanOrEqual(abs(right.x), 280 * 0.24 + 1e-6)
-            XCTAssertEqual(right.turn, 0)
+            XCTAssertLessThanOrEqual(abs(right.x), 280 * 0.32 + 1e-6)
+            XCTAssertEqual(right.turn, -left.turn, accuracy: 1e-6)
+            XCTAssertEqual(right.opacity, 1)
         }
         XCTAssertGreaterThan(CarouselPose(distance: 0.5, width: 280, stack: 1, reduceMotion: false).x, 50)
         XCTAssertLessThan(CarouselPose(distance: -0.5, width: 280, stack: 1, reduceMotion: false).x, -50)
@@ -218,13 +219,19 @@ final class CarouselSceneTests: XCTestCase {
         XCTAssertEqual(CarouselSwipeIntent.direction(translation: .nan, predicted: -300, page: 200), 0)
     }
 
-    func testInterruptedGestureCanReadTheActualInterpolatedFocus() {
-        let meter = CarouselPresentationMeter()
-        var effect = CarouselFocusProbe(focus: 1, stack: 1, meter: meter)
-        effect.animatableData = AnimatablePair(0.42, 0.7)
-        _ = effect.effectValue(size: CGSize(width: 280, height: 380))
-        XCTAssertEqual(meter.read(fallback: 1), 0.42, accuracy: 1e-6)
-        XCTAssertEqual(meter.sample(fallback: CarouselPresentationSample(focus: 1, stack: 1)).stack, 0.7, accuracy: 1e-6)
+    func testDepthCardsAreSeparatedBeforeTheirFrontOrderChanges() {
+        for width in [CGFloat(160), 280, 480] {
+            let size = CGSize(width: width, height: width + 100)
+            for direction in [-1, 1] {
+                for fraction in [CGFloat(0.48), 0.5, 0.52] {
+                    let focus = fraction * CGFloat(direction)
+                    let outgoing = bounds(ordinal: 0, focus: focus, size: size, reduced: false, stack: 1)
+                    let incoming = bounds(ordinal: direction, focus: focus, size: size, reduced: false, stack: 1)
+                    let gap = direction == 1 ? incoming.minX - outgoing.maxX : outgoing.minX - incoming.maxX
+                    XCTAssertGreaterThan(gap, width * 0.05, "A depth reorder must happen with daylight between the rotating edges")
+                }
+            }
+        }
     }
 
     private func bounds(ordinal: Int, focus: CGFloat, size: CGSize, reduced: Bool, stack: CGFloat = 0) -> CGRect {

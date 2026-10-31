@@ -68,15 +68,10 @@ struct TrackCarousel: View {
         let isCurrent = item.id == scene.currentKey
         let song = isCurrent && currentSong.id == item.entry.song.id ? currentSong : item.entry.song
         return CarouselCard(song: song, isCurrent: isCurrent,
-                            showsMetadata: isCurrent || !stacked,
+                            showsMetadata: true,
                             reportsArtworkFrame: isCurrent && !motion.moving,
                             metrics: metrics)
             .equatable()
-            .overlay {
-                RoundedRectangle(cornerRadius: Radius.large + CardMetrics.padding, style: .continuous)
-                    .fill(.black.opacity(Double(min(abs(distance), 1)) * 0.45))
-                    .allowsHitTesting(false)
-            }
             .modifier(PlayerNeighbourFade(isCurrent: isCurrent))
             .onTapGesture {
                 guard !isCurrent, !stacked else { return }
